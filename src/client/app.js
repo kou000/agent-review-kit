@@ -12,8 +12,11 @@
   let selection = null; // {file, side, anchor:{line,diffLine}, head:{line,diffLine}}
   let openForm = null; // form row element currently shown
   let dragging = false;
-  let pinnedFileIndex = null; // index in DIFF.files of the file shown in the pin panel
-  let pinPanel = null; // right-side fixed panel element (created lazily)
+  // Multiple files can be pinned at once; each becomes a panel in a right-side
+  // horizontal stack. `pins` holds them in visual left→right order (oldest
+  // first, newest appended at the right edge). `width` is a viewport percentage.
+  let pins = []; // [{ index, width, el }]
+  let pinStack = null; // right-side flex-row container (created lazily)
 
   // Syntax highlighting (highlight.js, loaded via <script> before app.js).
   // For large diffs we defer highlighting to idle time so the UI never freezes.
@@ -232,81 +235,139 @@
     return table;
   }
 
-  /* ---------- pinned split view (right panel) ---------- */
+  /* ---------- pinned split view (right panels) ---------- */
 
-  function ensurePinPanel() {
-    if (pinPanel) return pinPanel;
-    pinPanel = document.createElement('aside');
-    pinPanel.id = 'pin-panel';
-    pinPanel.innerHTML =
+  // Total width (viewport %) the stack may occupy. A newcomer first shrinks to
+  // whatever room is left; only when even a minimum-width panel (PIN_MIN) won't
+  // fit do we drop the oldest pin. Defaults (first 45, subsequent 25) are chosen
+  // so three usable panels still fit under this cap (45 + 25 + 15 = 85).
+  const PIN_TOTAL_MAX = 85;
+  const PIN_NEXT_DEFAULT = 25; // subsequent panels; first uses savedPinDefault()
+
+  function ensurePinStack() {
+    if (pinStack) return pinStack;
+    pinStack = document.createElement('div');
+    pinStack.id = 'pin-stack';
+    document.body.appendChild(pinStack);
+    return pinStack;
+  }
+
+  function pinTotalWidth() {
+    return pins.reduce(function (sum, p) { return sum + p.width; }, 0);
+  }
+
+  // Push panel widths and the combined right-side gutter into the DOM. The
+  // main content's margin-right tracks --pin-total-width so it never overlaps.
+  function updatePinLayout() {
+    pins.forEach(function (p) { p.el.style.width = p.width + 'vw'; });
+    document.documentElement.style.setProperty('--pin-total-width', pinTotalWidth() + 'vw');
+    document.body.classList.toggle('has-pin', pins.length > 0);
+  }
+
+  function updatePinButtons() {
+    const pinned = {};
+    pins.forEach(function (p) { pinned[String(p.index)] = true; });
+    document.querySelectorAll('.pin-btn').forEach(function (b) {
+      const active = !!pinned[b.dataset.fileIndex];
+      b.classList.toggle('active', active);
+      b.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+  }
+
+  // Build a single display-only panel element for DIFF.files[fi].
+  function buildPinPanel(fi) {
+    const file = DIFF.files[fi];
+    const panel = document.createElement('aside');
+    panel.className = 'pin-panel';
+    panel.dataset.fileIndex = fi;
+    panel.innerHTML =
       '<div class="pin-panel-header">' +
       '<span class="pin-panel-file"></span>' +
       '<span class="pin-panel-note">表示専用</span>' +
       '<button class="pin-panel-close" type="button" title="固定を解除">✕</button>' +
       '</div>' +
       '<div class="pin-panel-body"></div>';
-    pinPanel.querySelector('.pin-panel-close').addEventListener('click', unpinFile);
-    // Left-edge drag handle for resizing the panel width.
-    const resizer = document.createElement('div');
-    resizer.className = 'pin-resizer';
-    resizer.setAttribute('role', 'separator');
-    resizer.setAttribute('aria-orientation', 'vertical');
-    resizer.title = 'ドラッグでパネル幅を調整';
-    attachPinResize(resizer);
-    pinPanel.appendChild(resizer);
-    // Belt-and-suspenders: even though the panel's number cells carry no
-    // data-file, stop mousedown from ever reaching the document-level selection
-    // handler so the panel can never start a main-diff selection.
-    pinPanel.addEventListener('mousedown', function (e) { e.stopPropagation(); });
-    document.body.appendChild(pinPanel);
-    return pinPanel;
-  }
-
-  function updatePinButtons() {
-    document.querySelectorAll('.pin-btn').forEach(function (b) {
-      const active = pinnedFileIndex !== null && String(pinnedFileIndex) === b.dataset.fileIndex;
-      b.classList.toggle('active', active);
-      b.setAttribute('aria-pressed', active ? 'true' : 'false');
-    });
-  }
-
-  function unpinFile() {
-    pinnedFileIndex = null;
-    if (pinPanel) {
-      pinPanel.remove();
-      pinPanel = null;
-    }
-    document.body.classList.remove('has-pin');
-    updatePinButtons();
-  }
-
-  function pinFile(fi) {
-    const file = DIFF.files[fi];
-    if (!file) return;
-    pinnedFileIndex = fi;
-    const panel = ensurePinPanel();
     panel.querySelector('.pin-panel-file').textContent = file.path;
     panel.querySelector('.pin-panel-file').title = file.path;
+    panel.querySelector('.pin-panel-close').addEventListener('click', function () {
+      removePin(fi);
+    });
+
     const bodyEl = panel.querySelector('.pin-panel-body');
-    bodyEl.innerHTML = '';
     if (file.status === 'binary' || !file.hunks.length) {
       const p = document.createElement('div');
       p.className = 'empty-diff';
       p.textContent = file.status === 'binary' ? 'バイナリファイル（表示できません）' : '内容の変更はありません';
       bodyEl.appendChild(p);
     } else {
+      // Display-only table (interactive=false): number cells get no data-file,
+      // so document-level selection handlers skip them.
       bodyEl.appendChild(buildDiffTable(file, false));
-      // In deferred mode the panel's cells were queued; drain them now.
-      scheduleHighlight();
     }
-    bodyEl.scrollTop = 0;
-    document.body.classList.add('has-pin');
+
+    // Left-edge drag handle for resizing this panel individually.
+    const resizer = document.createElement('div');
+    resizer.className = 'pin-resizer';
+    resizer.setAttribute('role', 'separator');
+    resizer.setAttribute('aria-orientation', 'vertical');
+    resizer.title = 'ドラッグでパネル幅を調整';
+    attachPinResize(resizer, panel);
+    panel.appendChild(resizer);
+
+    // Belt-and-suspenders: even though the panel's number cells carry no
+    // data-file, stop mousedown from ever reaching the document-level selection
+    // handler so the panel can never start a main-diff selection.
+    panel.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+    return panel;
+  }
+
+  function removePin(fi) {
+    const i = pins.findIndex(function (p) { return p.index === fi; });
+    if (i < 0) return;
+    pins[i].el.remove();
+    pins.splice(i, 1);
+    if (!pins.length && pinStack) {
+      pinStack.remove();
+      pinStack = null;
+    }
+    updatePinLayout();
     updatePinButtons();
   }
 
-  // One file pinned at a time: re-📌 the same file unpins; 📌 another swaps.
+  function pinFile(fi) {
+    const file = DIFF.files[fi];
+    if (!file) return;
+    if (pins.some(function (p) { return p.index === fi; })) return;
+
+    // Target width: first panel uses the last-used width (default 45%), the rest
+    // use PIN_NEXT_DEFAULT. Shrink the newcomer to whatever room is left; if even
+    // PIN_MIN won't fit, drop the oldest pin(s) until it does (with a warning).
+    const target = pins.length === 0 ? clampPinWidth(savedPinDefault()) : PIN_NEXT_DEFAULT;
+    let width = Math.min(target, PIN_TOTAL_MAX - pinTotalWidth());
+    if (width < PIN_MIN) {
+      while (pins.length && PIN_TOTAL_MAX - pinTotalWidth() < PIN_MIN) {
+        const oldest = pins[0];
+        console.warn('agent-review-kit: pinned panels exceed available width; unpinning ' +
+          DIFF.files[oldest.index].path);
+        removePin(oldest.index);
+      }
+      width = Math.min(target, PIN_TOTAL_MAX - pinTotalWidth());
+    }
+    width = clampPinWidth(width);
+
+    const stack = ensurePinStack();
+    const panel = buildPinPanel(fi);
+    pins.push({ index: fi, width: width, el: panel });
+    stack.appendChild(panel); // newest at the right edge
+    updatePinLayout();
+    updatePinButtons();
+    // In deferred mode the new panel's cells were queued; drain them now.
+    scheduleHighlight();
+  }
+
+  // Re-📌 an already-pinned file unpins just that panel; 📌 a new file adds one.
   function togglePin(fi) {
-    if (pinnedFileIndex === fi) unpinFile();
+    if (pins.some(function (p) { return p.index === fi; })) removePin(fi);
     else pinFile(fi);
   }
 
@@ -1065,9 +1126,9 @@
   const SIDEBAR_MIN = 180;
   const SIDEBAR_MAX = 480;
   const SIDEBAR_KEY = 'ark-sidebar-width';
-  const PIN_MIN = 25; // % of viewport
+  const PIN_MIN = 15; // % of viewport (per panel)
   const PIN_MAX = 75;
-  const PIN_KEY = 'ark-pin-width';
+  const PIN_KEY = 'ark-pin-width'; // last-used panel width, reused as a default
 
   function setSidebarWidth(px) {
     const w = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, Math.round(px)));
@@ -1075,10 +1136,17 @@
     return w;
   }
 
-  function setPinWidth(pct) {
-    const p = Math.max(PIN_MIN, Math.min(PIN_MAX, pct));
-    document.documentElement.style.setProperty('--pin-width', p + '%');
-    return p;
+  function clampPinWidth(pct) {
+    return Math.max(PIN_MIN, Math.min(PIN_MAX, pct));
+  }
+
+  // Last-used panel width, reused as the default for the first pinned panel.
+  function savedPinDefault() {
+    try {
+      const p = parseFloat(localStorage.getItem(PIN_KEY));
+      if (!isNaN(p)) return p;
+    } catch (e) { /* ignore */ }
+    return 45;
   }
 
   // Shared drag loop. onMove(clientX) runs on each pointermove; document-level
@@ -1118,16 +1186,23 @@
     });
   }
 
-  function attachPinResize(handle) {
+  // Resize a single pin panel. The panel's right edge is fixed during its own
+  // drag (the stack is right-anchored; only this panel's left edge moves), so
+  // the width is (rightEdge - pointerX). Persist it as the reusable default.
+  function attachPinResize(handle, panel) {
     handle.addEventListener('mousedown', function (e) { e.stopPropagation(); });
     handle.addEventListener('pointerdown', function (e) {
       e.preventDefault();
       e.stopPropagation();
+      const entry = pins.find(function (p) { return p.el === panel; });
+      if (!entry) return;
+      const rightPx = panel.getBoundingClientRect().right;
       startDrag(handle, function (clientX) {
         const vw = window.innerWidth || document.documentElement.clientWidth || 1;
-        const pct = (vw - clientX) / vw * 100;
-        const p = setPinWidth(pct);
-        try { localStorage.setItem(PIN_KEY, String(p)); } catch (e2) { /* ignore */ }
+        const pct = clampPinWidth((rightPx - clientX) / vw * 100);
+        entry.width = pct;
+        updatePinLayout();
+        try { localStorage.setItem(PIN_KEY, String(pct)); } catch (e2) { /* ignore */ }
       });
     });
   }
@@ -1137,10 +1212,8 @@
       const s = parseFloat(localStorage.getItem(SIDEBAR_KEY));
       if (!isNaN(s)) setSidebarWidth(s);
     } catch (e) { /* ignore */ }
-    try {
-      const p = parseFloat(localStorage.getItem(PIN_KEY));
-      if (!isNaN(p)) setPinWidth(p);
-    } catch (e) { /* ignore */ }
+    // Pin widths are per-panel and applied when a panel is created; nothing to
+    // restore globally (the last-used width is read via savedPinDefault).
   }
 
   restorePersistedWidths();
