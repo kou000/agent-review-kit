@@ -1,0 +1,29 @@
+{
+  "name": "agent-review-kit",
+  "version": "0.1.0",
+  "description": "Local diff review server for Claude Code sessions: generate a GitHub-like review HTML, collect inline comments, and feed them back to the agent",
+  "license": "MIT",
+  "bin": {
+    "agent-review-kit": "dist/cli.js"
+  },
+  "main": "dist/cli.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && mkdir -p dist/client && cp src/client/* dist/client/",
+    "dev": "tsx src/cli.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.0",
+    "eslint": "9.39.2",
+    "tsx": "4.21.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.51.0"
+  }
+}
