@@ -22,12 +22,14 @@ export interface AgentResponse {
 
 export interface ReviewComment {
   id: string;
-  file: string;
-  side: 'old' | 'new';
-  startLine: number;
-  endLine: number;
-  startDiffLine: number;
-  endDiffLine: number;
+  // An "overall" comment is not tied to any file or line: file/side and all
+  // line numbers are null. A line/range comment has all of them set.
+  file: string | null;
+  side: 'old' | 'new' | null;
+  startLine: number | null;
+  endLine: number | null;
+  startDiffLine: number | null;
+  endDiffLine: number | null;
   body: string;
   status: CommentStatus;
   createdAt: string;
