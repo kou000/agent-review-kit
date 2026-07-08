@@ -74,6 +74,10 @@ export interface FileDiff {
   oldPath: string;
   status: FileStatus;
   hunks: DiffHunk[];
+  // Full new-side (working tree) content at generate time, one entry per line.
+  // Enables GitHub-style context expansion in the review UI. Omitted for
+  // deleted/binary files and files over the embed size cap.
+  newLines?: string[];
 }
 
 export interface DiffData {

@@ -161,6 +161,17 @@ body {
 }
 .pin-btn.active:hover { background: var(--accent); }
 
+/* Collapse toggle (independent of 確認済み): chevron at the far left of the
+   file header. Shares the collapse mechanics of .viewed below. */
+.collapse-btn {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  line-height: 1.2;
+  color: var(--muted);
+  font-size: 12px;
+}
+.file.collapsed > *:not(.file-header) { display: none; }
+
 /* Viewed file: keep the sticky header, collapse everything else (diff table,
    empty-diff note, and any inline comment thread-rows inside the table). */
 .file.viewed > *:not(.file-header) { display: none; }
@@ -250,6 +261,22 @@ body.has-pin .layout {
   margin-left: 0;
   margin-right: var(--pin-total-width);
 }
+
+/* ---------- context expansion (GitHub-style) ---------- */
+/* Expander row sits in a gap between hunks; buttons reveal hidden context. */
+tr.expander-row td {
+  background: rgba(56, 139, 253, 0.08);
+  color: var(--muted);
+  font-size: 12px;
+  padding: 3px 10px;
+}
+.expander-btn {
+  font-size: 11px;
+  padding: 1px 8px;
+  margin-right: 6px;
+  color: var(--accent);
+}
+.expander-label { margin-left: 4px; }
 
 table.diff {
   width: 100%;
@@ -668,4 +695,54 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 .copy-path-btn.copied {
   color: var(--success);
   border-color: var(--success);
+}
+
+/* ---------- agent response toasts ---------- */
+/* Top-right notification stack, above the pin panels (#pin-stack is z-28).
+   Each toast announces one agent response; click focuses the comment card. */
+#toast-stack {
+  position: fixed;
+  top: 49px;
+  right: 12px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 320px;
+  max-width: calc(100vw - 24px);
+}
+.toast {
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 10px 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  animation: toast-in 0.25s ease-out;
+}
+.toast.clickable { cursor: pointer; }
+.toast.toast-out { opacity: 0; transition: opacity 0.3s; }
+.toast-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+.toast-close {
+  margin-left: auto;
+  flex: 0 0 auto;
+  padding: 0 5px;
+  line-height: 1.4;
+  font-size: 11px;
+  color: var(--muted);
+}
+.toast-body {
+  font-size: 12px;
+  color: var(--muted);
+  word-break: break-all;
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: translateX(0); }
 }
