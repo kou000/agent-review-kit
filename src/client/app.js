@@ -246,6 +246,14 @@
       '</div>' +
       '<div class="pin-panel-body"></div>';
     pinPanel.querySelector('.pin-panel-close').addEventListener('click', unpinFile);
+    // Left-edge drag handle for resizing the panel width.
+    const resizer = document.createElement('div');
+    resizer.className = 'pin-resizer';
+    resizer.setAttribute('role', 'separator');
+    resizer.setAttribute('aria-orientation', 'vertical');
+    resizer.title = 'ドラッグでパネル幅を調整';
+    attachPinResize(resizer);
+    pinPanel.appendChild(resizer);
     // Belt-and-suspenders: even though the panel's number cells carry no
     // data-file, stop mousedown from ever reaching the document-level selection
     // handler so the panel can never start a main-diff selection.
@@ -463,7 +471,16 @@
     cList.className = 'comment-list';
     sidebar.appendChild(cList);
 
+    // Vertical drag handle between the sidebar and #app.
+    const resizer = document.createElement('div');
+    resizer.className = 'sidebar-resizer';
+    resizer.setAttribute('role', 'separator');
+    resizer.setAttribute('aria-orientation', 'vertical');
+    resizer.title = 'ドラッグでサイドバー幅を調整';
+    attachSidebarResize(resizer, sidebar);
+
     layout.appendChild(sidebar);
+    layout.appendChild(resizer);
     layout.appendChild(app); // move #app into the flex layout
     sidebarBuilt = true;
   }
@@ -1040,6 +1057,93 @@
     });
   }
 
+  /* ---------- draggable panel widths ---------- */
+
+  // Sidebar width (px) and pin-panel width (viewport %) are driven by CSS
+  // variables so the pin margin-right stays in sync with the panel width by
+  // construction. Both are clamped and persisted in localStorage.
+  const SIDEBAR_MIN = 180;
+  const SIDEBAR_MAX = 480;
+  const SIDEBAR_KEY = 'ark-sidebar-width';
+  const PIN_MIN = 25; // % of viewport
+  const PIN_MAX = 75;
+  const PIN_KEY = 'ark-pin-width';
+
+  function setSidebarWidth(px) {
+    const w = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, Math.round(px)));
+    document.documentElement.style.setProperty('--sidebar-width', w + 'px');
+    return w;
+  }
+
+  function setPinWidth(pct) {
+    const p = Math.max(PIN_MIN, Math.min(PIN_MAX, pct));
+    document.documentElement.style.setProperty('--pin-width', p + '%');
+    return p;
+  }
+
+  // Shared drag loop. onMove(clientX) runs on each pointermove; document-level
+  // listeners (capture phase) guarantee the drag ends even if the pointer
+  // leaves the handle. body.resizing disables text selection for the duration.
+  function startDrag(handle, onMove) {
+    document.body.classList.add('resizing');
+    if (handle) handle.classList.add('dragging');
+    function move(ev) {
+      if (typeof ev.clientX !== 'number') return;
+      onMove(ev.clientX);
+    }
+    function up() {
+      document.body.classList.remove('resizing');
+      if (handle) handle.classList.remove('dragging');
+      document.removeEventListener('pointermove', move, true);
+      document.removeEventListener('pointerup', up, true);
+      document.removeEventListener('pointercancel', up, true);
+    }
+    document.addEventListener('pointermove', move, true);
+    document.addEventListener('pointerup', up, true);
+    document.addEventListener('pointercancel', up, true);
+  }
+
+  // Wire the sidebar drag handle. stopPropagation keeps the handle's pointerdown
+  // from ever reaching the document-level diff-selection handlers.
+  function attachSidebarResize(handle, sidebar) {
+    handle.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+    handle.addEventListener('pointerdown', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      const left = sidebar.getBoundingClientRect().left;
+      startDrag(handle, function (clientX) {
+        const w = setSidebarWidth(clientX - left);
+        try { localStorage.setItem(SIDEBAR_KEY, String(w)); } catch (e2) { /* ignore */ }
+      });
+    });
+  }
+
+  function attachPinResize(handle) {
+    handle.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+    handle.addEventListener('pointerdown', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      startDrag(handle, function (clientX) {
+        const vw = window.innerWidth || document.documentElement.clientWidth || 1;
+        const pct = (vw - clientX) / vw * 100;
+        const p = setPinWidth(pct);
+        try { localStorage.setItem(PIN_KEY, String(p)); } catch (e2) { /* ignore */ }
+      });
+    });
+  }
+
+  function restorePersistedWidths() {
+    try {
+      const s = parseFloat(localStorage.getItem(SIDEBAR_KEY));
+      if (!isNaN(s)) setSidebarWidth(s);
+    } catch (e) { /* ignore */ }
+    try {
+      const p = parseFloat(localStorage.getItem(PIN_KEY));
+      if (!isNaN(p)) setPinWidth(p);
+    } catch (e) { /* ignore */ }
+  }
+
+  restorePersistedWidths();
   renderDiff();
   refresh();
   setInterval(refresh, 3000);
