@@ -11,7 +11,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json && mkdir -p dist/client && cp src/client/* dist/client/",
+    "build": "tsc -p tsconfig.json && mkdir -p dist/client && cp src/client/* dist/client/ && cp node_modules/@highlightjs/cdn-assets/highlight.min.js dist/client/highlight.min.js && cp node_modules/@highlightjs/cdn-assets/styles/github-dark.min.css dist/client/hljs-theme.css",
     "dev": "tsx src/cli.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src"
@@ -20,6 +20,7 @@
     "node": ">=18"
   },
   "devDependencies": {
+    "@highlightjs/cdn-assets": "11.9.0",
     "@types/node": "22.20.0",
     "eslint": "9.39.2",
     "tsx": "4.21.0",

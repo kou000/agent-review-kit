@@ -143,6 +143,14 @@ async function handle(
     serveFile(res, paths.styleCss, 'text/css; charset=utf-8');
     return;
   }
+  if (method === 'GET' && p === '/highlight.min.js') {
+    serveFile(res, paths.hljsJs, 'text/javascript; charset=utf-8');
+    return;
+  }
+  if (method === 'GET' && p === '/hljs-theme.css') {
+    serveFile(res, paths.hljsCss, 'text/css; charset=utf-8');
+    return;
+  }
 
   if (method === 'GET' && p === '/api/comments') {
     json(res, 200, { comments: loadComments(paths.comments) });
