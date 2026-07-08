@@ -2,3 +2,4 @@ node_modules/
 dist/
 .agent-review/
 *.log
+.claude/worktrees/
