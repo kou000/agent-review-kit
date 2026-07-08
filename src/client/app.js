@@ -24,6 +24,15 @@
   let hlDeferMode = false;
   let hlPending = []; // [{td, text, lang, prefixHtml}] queued for deferred pass
 
+  // Viewed ("確認済み") state, GitHub "Viewed" semantics. Persisted in
+  // localStorage as { [filePath]: contentHash }. On load a file counts as viewed
+  // only when its stored hash still matches the current diff's hash, so a file
+  // whose diff changed automatically reverts to unviewed. `fileHashes` caches the
+  // current hash of every file (path -> hash).
+  const VIEWED_KEY = 'ark-viewed';
+  let viewed = {}; // { [filePath]: contentHash } for currently-viewed files
+  let fileHashes = {}; // { [filePath]: contentHash } for the current diff
+
   function esc(s) {
     return String(s)
       .replace(/&/g, '&amp;')
@@ -157,6 +166,67 @@
     return btn;
   }
 
+  /* ---------- viewed (確認済み) state ---------- */
+
+  // Lightweight, non-cryptographic string hash (djb2). Used only to detect when
+  // a file's diff content changed since it was marked viewed.
+  function djb2(str) {
+    let h = 5381;
+    for (let i = 0; i < str.length; i++) {
+      h = (((h << 5) + h) + str.charCodeAt(i)) >>> 0;
+    }
+    return h.toString(16);
+  }
+
+  function fileHash(file) {
+    return djb2(JSON.stringify(file.hunks || []));
+  }
+
+  // Cache the current hash of every file so lookups during toggle/render are O(1).
+  function computeFileHashes() {
+    fileHashes = {};
+    (DIFF.files || []).forEach(function (f) { fileHashes[f.path] = fileHash(f); });
+  }
+
+  // Load persisted viewed state, keeping only entries whose stored hash still
+  // matches the current file (auto-reset on diff change) and whose file still
+  // exists. Stale/mismatched entries are pruned and the cleaned map is saved.
+  function loadViewed() {
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem(VIEWED_KEY)) || {}; } catch (e) { saved = {}; }
+    const next = {};
+    (DIFF.files || []).forEach(function (f) {
+      if (saved[f.path] && saved[f.path] === fileHashes[f.path]) {
+        next[f.path] = fileHashes[f.path];
+      }
+    });
+    viewed = next;
+    saveViewed();
+  }
+
+  function saveViewed() {
+    try { localStorage.setItem(VIEWED_KEY, JSON.stringify(viewed)); } catch (e) { /* ignore */ }
+  }
+
+  function isViewed(path) {
+    return Object.prototype.hasOwnProperty.call(viewed, path);
+  }
+
+  function setFileViewed(path, on) {
+    if (on) viewed[path] = fileHashes[path];
+    else delete viewed[path];
+    saveViewed();
+  }
+
+  // Sync a viewed-toggle button's visuals/ARIA to its on/off state.
+  function updateViewedButton(btn, on) {
+    btn.classList.toggle('is-viewed', on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btn.title = on ? '確認済みを解除して展開' : '確認済みにして本体を折りたたむ';
+    const chk = btn.querySelector('.viewed-check');
+    if (chk) chk.textContent = on ? '✓' : '';
+  }
+
   /* ---------- diff rendering ---------- */
 
   function statusLabel(st) {
@@ -166,6 +236,11 @@
   function renderDiff() {
     diffMeta.textContent = (DIFF.base ? 'base: ' + DIFF.base : 'working tree vs HEAD') +
       ' / generated: ' + fmtDate(DIFF.generatedAt);
+
+    // Compute per-file content hashes and load persisted viewed state (which
+    // auto-resets files whose diff changed) before building any boxes.
+    computeFileHashes();
+    loadViewed();
 
     // Decide up front whether to highlight synchronously or defer to idle time.
     hlDeferMode = totalDiffRows() > HIGHLIGHT_SYNC_LIMIT;
@@ -215,6 +290,25 @@
 
       header.appendChild(copyPathButton(file.path));
 
+      // 確認済み (Viewed) toggle: collapses this file's body and moves it to the
+      // "確認済み" section of the tree. Placed to the left of 📌. Checkbox-like.
+      const viewBtn = document.createElement('button');
+      viewBtn.type = 'button';
+      viewBtn.className = 'viewed-btn';
+      viewBtn.dataset.file = file.path;
+      viewBtn.setAttribute('aria-label', 'このファイルを確認済みにする');
+      viewBtn.innerHTML =
+        '<span class="viewed-check" aria-hidden="true"></span>' +
+        '<span class="viewed-label">確認済み</span>';
+      viewBtn.addEventListener('click', function () {
+        const on = !isViewed(file.path);
+        setFileViewed(file.path, on);
+        box.classList.toggle('viewed', on);
+        updateViewedButton(viewBtn, on);
+        renderSidebarTree();
+      });
+      header.appendChild(viewBtn);
+
       // 📌 pin button: opens/refreshes the right-side display-only panel for
       // this file. `fi` is the file's original index in DIFF.files.
       const pinBtn = document.createElement('button');
@@ -226,6 +320,10 @@
       pinBtn.dataset.fileIndex = fi;
       pinBtn.addEventListener('click', function () { togglePin(fi); });
       header.appendChild(pinBtn);
+
+      // Apply persisted viewed state (collapse + button visuals) up front.
+      if (isViewed(file.path)) box.classList.add('viewed');
+      updateViewedButton(viewBtn, isViewed(file.path));
 
       box.appendChild(header);
 
@@ -472,19 +570,29 @@
     return { added: 'A', deleted: 'D', modified: 'M', renamed: 'R', binary: 'B' }[st] || 'M';
   }
 
-  function buildTree(files) {
+  // Build a nested tree from a list of { file, index } entries, preserving each
+  // file's ORIGINAL DIFF.files index (so data-target file-<index> stays correct
+  // even when the entry list is a filtered subset). Directory branches are only
+  // created along included files' paths, so filtering also prunes empty dirs.
+  function buildTreeFrom(entries) {
     const root = { dirs: {}, files: [] };
-    files.forEach(function (file, fi) {
-      const parts = String(file.path).split('/');
+    entries.forEach(function (e) {
+      const parts = String(e.file.path).split('/');
       let node = root;
       for (let i = 0; i < parts.length - 1; i++) {
         const seg = parts[i];
         node.dirs[seg] = node.dirs[seg] || { dirs: {}, files: [] };
         node = node.dirs[seg];
       }
-      node.files.push({ name: parts[parts.length - 1], index: fi, file: file });
+      node.files.push({ name: parts[parts.length - 1], index: e.index, file: e.file });
     });
     return root;
+  }
+
+  function buildTree(files) {
+    return buildTreeFrom(files.map(function (file, fi) {
+      return { file: file, index: fi };
+    }));
   }
 
   // Shared comparator for files within a tree node (by name). Kept identical to
@@ -566,13 +674,19 @@
     sidebar.className = 'sidebar';
     const heading = document.createElement('div');
     heading.className = 'sidebar-title';
-    heading.textContent = 'ファイル (' + DIFF.files.length + ')';
+    heading.id = 'file-tree-title';
     sidebar.appendChild(heading);
 
+    // Unviewed files render as the normal nested tree; viewed files move to a
+    // flat "確認済み" section below it. Both are (re)filled by renderSidebarTree.
     const treeWrap = document.createElement('div');
     treeWrap.className = 'tree';
-    renderTreeNode(buildTree(DIFF.files), treeWrap, 0);
     sidebar.appendChild(treeWrap);
+
+    const viewedWrap = document.createElement('div');
+    viewedWrap.className = 'viewed-tree';
+    viewedWrap.id = 'viewed-tree';
+    sidebar.appendChild(viewedWrap);
 
     // Comment management list (filled/updated by renderCommentList on refresh).
     const cHeading = document.createElement('div');
@@ -597,6 +711,84 @@
     layout.appendChild(resizer);
     layout.appendChild(app); // move #app into the flex layout
     sidebarBuilt = true;
+
+    // Populate the tree/確認済み sections now that the sidebar is in the DOM
+    // (renderSidebarTree looks its containers up by id/selector).
+    renderSidebarTree();
+  }
+
+  // A single flat entry in the "確認済み" section. Shows the full path (this list
+  // is flat, not nested) and, like tree files, scrolls to the file box on click.
+  function viewedListItem(entry) {
+    const fEl = document.createElement('div');
+    fEl.className = 'tree-file viewed-file';
+    fEl.dataset.target = 'file-' + entry.index;
+
+    const mark = document.createElement('span');
+    mark.className = 'tree-status tree-status-' + esc(entry.file.status);
+    mark.textContent = statusMark(entry.file.status);
+
+    const label = document.createElement('span');
+    label.className = 'tree-name';
+    label.textContent = entry.file.path;
+    label.title = entry.file.path;
+
+    const badge = document.createElement('span');
+    badge.className = 'tree-count';
+    badge.dataset.file = entry.file.path;
+
+    fEl.appendChild(mark);
+    fEl.appendChild(label);
+    fEl.appendChild(badge);
+    fEl.addEventListener('click', function () {
+      const el = document.getElementById('file-' + entry.index);
+      if (el && typeof el.scrollIntoView === 'function') {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+    return fEl;
+  }
+
+  // (Re)render the sidebar tree: unviewed files as the nested tree, viewed files
+  // as the flat "確認済み" section, plus the progress title. Called after every
+  // viewed toggle and once on initial sidebar build. Refreshes comment counts on
+  // both lists since it recreates their badge elements.
+  function renderSidebarTree() {
+    const title = document.getElementById('file-tree-title');
+    const treeWrap = document.querySelector('.sidebar .tree');
+    const viewedWrap = document.getElementById('viewed-tree');
+    if (!treeWrap || !viewedWrap) return;
+
+    const unviewedEntries = [];
+    const viewedEntries = [];
+    DIFF.files.forEach(function (f, i) {
+      (isViewed(f.path) ? viewedEntries : unviewedEntries).push({ file: f, index: i });
+    });
+
+    if (title) {
+      title.textContent = 'ファイル (未確認 ' + unviewedEntries.length +
+        ' / 全 ' + DIFF.files.length + ')';
+    }
+
+    treeWrap.innerHTML = '';
+    renderTreeNode(buildTreeFrom(unviewedEntries), treeWrap, 0);
+
+    viewedWrap.innerHTML = '';
+    if (viewedEntries.length) {
+      const h = document.createElement('div');
+      h.className = 'sidebar-title viewed-title';
+      h.textContent = '確認済み (' + viewedEntries.length + ')';
+      viewedWrap.appendChild(h);
+
+      const list = document.createElement('div');
+      list.className = 'viewed-list';
+      viewedEntries.slice().sort(function (a, b) {
+        return a.file.path < b.file.path ? -1 : a.file.path > b.file.path ? 1 : 0;
+      }).forEach(function (e) { list.appendChild(viewedListItem(e)); });
+      viewedWrap.appendChild(list);
+    }
+
+    updateTreeCounts();
   }
 
   function updateTreeCounts() {

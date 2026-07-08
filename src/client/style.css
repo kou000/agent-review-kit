@@ -114,9 +114,43 @@ body {
 .file-status.deleted { color: var(--danger); border-color: var(--danger); }
 .file-status.renamed { color: var(--attention); border-color: var(--attention); }
 
-/* 📌 pin button: pushed to the right end of the file header. */
-.pin-btn {
+/* 確認済み (Viewed) toggle: checkbox-like button, pushed to the right end of the
+   file header (📌 sits just to its right). ON state is clearly tinted green. */
+.viewed-btn {
   margin-left: auto;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  line-height: 1.2;
+  color: var(--muted);
+}
+.viewed-btn .viewed-check {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  text-align: center;
+  line-height: 12px;
+  font-size: 11px;
+  color: transparent;
+}
+.viewed-btn.is-viewed {
+  background: rgba(63, 185, 80, 0.15);
+  border-color: var(--success);
+  color: var(--success);
+}
+.viewed-btn.is-viewed:hover { background: rgba(63, 185, 80, 0.22); }
+.viewed-btn.is-viewed .viewed-check {
+  background: var(--success);
+  border-color: var(--success);
+  color: #fff;
+}
+
+/* 📌 pin button: sits at the right end of the file header, after 確認済み. */
+.pin-btn {
   flex: 0 0 auto;
   padding: 2px 8px;
   line-height: 1.2;
@@ -126,6 +160,12 @@ body {
   border-color: var(--accent);
 }
 .pin-btn.active:hover { background: var(--accent); }
+
+/* Viewed file: keep the sticky header, collapse everything else (diff table,
+   empty-diff note, and any inline comment thread-rows inside the table). */
+.file.viewed > *:not(.file-header) { display: none; }
+.file.viewed .file-header { opacity: 0.75; }
+.file.viewed .file-header:hover { opacity: 1; }
 
 /* ---------- pinned split view (right panels) ---------- */
 /* Pinned files stack horizontally in a fixed, right-anchored flex row. The
@@ -503,6 +543,17 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   padding: 0 6px;
   font-size: 11px;
   font-weight: 600;
+}
+
+/* ---------- viewed (確認済み) tree section ---------- */
+.viewed-title { margin-top: 12px; }
+.viewed-list { margin-top: 6px; }
+/* Flat list of viewed files: dimmed slightly and showing the full path. */
+.viewed-file { opacity: 0.75; }
+.viewed-file:hover { opacity: 1; }
+.viewed-file .tree-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ---------- overall (unbound) comments ---------- */
