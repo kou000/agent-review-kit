@@ -8,6 +8,8 @@ export interface ReviewPaths {
   state: string;
   appJs: string;
   styleCss: string;
+  hljsJs: string;
+  hljsCss: string;
 }
 
 export function reviewPaths(cwd: string = process.cwd()): ReviewPaths {
@@ -19,6 +21,8 @@ export function reviewPaths(cwd: string = process.cwd()): ReviewPaths {
     state: path.join(dir, 'state.json'),
     appJs: path.join(dir, 'app.js'),
     styleCss: path.join(dir, 'style.css'),
+    hljsJs: path.join(dir, 'highlight.min.js'),
+    hljsCss: path.join(dir, 'hljs-theme.css'),
   };
 }
 

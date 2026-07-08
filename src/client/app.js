@@ -13,6 +13,12 @@
   let openForm = null; // form row element currently shown
   let dragging = false;
 
+  // Syntax highlighting (highlight.js, loaded via <script> before app.js).
+  // For large diffs we defer highlighting to idle time so the UI never freezes.
+  const HIGHLIGHT_SYNC_LIMIT = 3000; // total diff rows; above this, defer
+  let hlDeferMode = false;
+  let hlPending = []; // [{td, text, lang, prefixHtml}] queued for deferred pass
+
   function esc(s) {
     return String(s)
       .replace(/&/g, '&amp;')
@@ -30,6 +36,76 @@
       ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
   }
 
+  /* ---------- syntax highlighting ---------- */
+
+  // File extension -> highlight.js language. Extensions not listed get no
+  // highlighting (plain escaped text).
+  const LANG_MAP = {
+    ts: 'typescript', tsx: 'typescript', mts: 'typescript', cts: 'typescript',
+    js: 'javascript', jsx: 'javascript', mjs: 'javascript', cjs: 'javascript',
+    json: 'json',
+    css: 'css',
+    md: 'markdown', markdown: 'markdown',
+    html: 'xml', htm: 'xml',
+    rs: 'rust',
+    py: 'python',
+    sh: 'bash', bash: 'bash',
+    yml: 'yaml', yaml: 'yaml',
+  };
+
+  function langForPath(p) {
+    if (!p) return null;
+    const m = /\.([A-Za-z0-9]+)$/.exec(String(p));
+    if (!m) return null;
+    return LANG_MAP[m[1].toLowerCase()] || null;
+  }
+
+  // Returns hljs-escaped highlighted HTML, or null to signal "fall back to
+  // esc(text)". Safe when hljs is absent, language is unknown, or it throws.
+  function highlightHtml(text, lang) {
+    if (!lang) return null;
+    if (typeof hljs === 'undefined' || !hljs || typeof hljs.highlight !== 'function') {
+      return null;
+    }
+    try {
+      return hljs.highlight(text, { language: lang, ignoreIllegals: true }).value;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function totalDiffRows() {
+    let n = 0;
+    (DIFF.files || []).forEach(function (f) {
+      (f.hunks || []).forEach(function (h) { n += (h.rows || []).length; });
+    });
+    return n;
+  }
+
+  // Process the deferred-highlight queue in idle-time chunks so a large diff
+  // never blocks the main thread. Falls back to setTimeout where
+  // requestIdleCallback is unavailable (e.g. jsdom).
+  function scheduleHighlight() {
+    if (!hlPending.length) return;
+    const queue = hlPending;
+    hlPending = [];
+    let i = 0;
+    const CHUNK = 400;
+    const ric = window.requestIdleCallback || function (cb) {
+      return setTimeout(function () { cb(); }, 16);
+    };
+    function step() {
+      const end = Math.min(i + CHUNK, queue.length);
+      for (; i < end; i++) {
+        const item = queue[i];
+        const html = highlightHtml(item.text, item.lang);
+        if (html !== null) item.td.innerHTML = item.prefixHtml + html;
+      }
+      if (i < queue.length) ric(step);
+    }
+    ric(step);
+  }
+
   /* ---------- diff rendering ---------- */
 
   function statusLabel(st) {
@@ -39,6 +115,10 @@
   function renderDiff() {
     diffMeta.textContent = (DIFF.base ? 'base: ' + DIFF.base : 'working tree vs HEAD') +
       ' / generated: ' + fmtDate(DIFF.generatedAt);
+
+    // Decide up front whether to highlight synchronously or defer to idle time.
+    hlDeferMode = totalDiffRows() > HIGHLIGHT_SYNC_LIMIT;
+    hlPending = [];
 
     const frag = document.createDocumentFragment();
 
@@ -101,6 +181,8 @@
       const tbody = document.createElement('tbody');
       table.appendChild(tbody);
 
+      const lang = langForPath(file.path);
+
       file.hunks.forEach(function (hunk) {
         const hr = document.createElement('tr');
         hr.className = 'hunk';
@@ -111,9 +193,9 @@
           const tr = document.createElement('tr');
           tr.className = 'diff-row';
           tr.appendChild(numCell(file, 'old', row.left));
-          tr.appendChild(codeCell(row.left, 'del'));
+          tr.appendChild(codeCell(row.left, 'del', lang));
           tr.appendChild(numCell(file, 'new', row.right));
-          tr.appendChild(codeCell(row.right, 'add'));
+          tr.appendChild(codeCell(row.right, 'add', lang));
           tbody.appendChild(tr);
         });
       });
@@ -126,6 +208,7 @@
     app.appendChild(frag);
     buildSidebar();
     renderComments();
+    scheduleHighlight();
   }
 
   /* ---------- overall comments ---------- */
@@ -386,7 +469,7 @@
     return td;
   }
 
-  function codeCell(cell, changedKind) {
+  function codeCell(cell, changedKind, lang) {
     const td = document.createElement('td');
     td.className = 'code';
     if (!cell) {
@@ -395,7 +478,17 @@
     }
     if (cell.kind === changedKind) td.className += ' ' + changedKind;
     const prefix = cell.kind === 'add' ? '+' : cell.kind === 'del' ? '-' : ' ';
-    td.innerHTML = '<span class="prefix">' + prefix + '</span>' + esc(cell.text);
+    const prefixHtml = '<span class="prefix">' + prefix + '</span>';
+    if (lang && hlDeferMode) {
+      // Render plain now; queue for idle-time highlighting.
+      td.innerHTML = prefixHtml + esc(cell.text);
+      hlPending.push({ td: td, text: cell.text, lang: lang, prefixHtml: prefixHtml });
+    } else if (lang) {
+      const html = highlightHtml(cell.text, lang);
+      td.innerHTML = prefixHtml + (html !== null ? html : esc(cell.text));
+    } else {
+      td.innerHTML = prefixHtml + esc(cell.text);
+    }
     return td;
   }
 
