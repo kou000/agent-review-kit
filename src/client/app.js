@@ -111,6 +111,52 @@
     ric(step);
   }
 
+  /* ---------- copy path ---------- */
+
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text).then(
+        function () { return true; },
+        function () { return copyTextFallback(text); }
+      );
+    }
+    return Promise.resolve(copyTextFallback(text));
+  }
+
+  function copyTextFallback(text) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    ta.remove();
+    return ok;
+  }
+
+  // Small button that copies `path` to the clipboard and flashes ✓ on success.
+  function copyPathButton(path) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'copy-path-btn';
+    btn.textContent = '⧉';
+    btn.title = 'パスをコピー: ' + path;
+    btn.setAttribute('aria-label', 'ファイルパスをコピー');
+    btn.addEventListener('click', function () {
+      copyText(path).then(function (ok) {
+        btn.textContent = ok ? '✓' : '✕';
+        btn.classList.toggle('copied', ok);
+        setTimeout(function () {
+          btn.textContent = '⧉';
+          btn.classList.remove('copied');
+        }, 1200);
+      });
+    });
+    return btn;
+  }
+
   /* ---------- diff rendering ---------- */
 
   function statusLabel(st) {
@@ -166,6 +212,8 @@
       }
       header.innerHTML = '<span class="file-status ' + esc(file.status) + '">' +
         esc(statusLabel(file.status)) + '</span><span class="file-name">' + title + '</span>';
+
+      header.appendChild(copyPathButton(file.path));
 
       // 📌 pin button: opens/refreshes the right-side display-only panel for
       // this file. `fi` is the file's original index in DIFF.files.
@@ -289,6 +337,11 @@
       '<div class="pin-panel-body"></div>';
     panel.querySelector('.pin-panel-file').textContent = file.path;
     panel.querySelector('.pin-panel-file').title = file.path;
+    const panelHeader = panel.querySelector('.pin-panel-header');
+    panelHeader.insertBefore(
+      copyPathButton(file.path),
+      panel.querySelector('.pin-panel-note')
+    );
     panel.querySelector('.pin-panel-close').addEventListener('click', function () {
       removePin(fi);
     });
