@@ -11,7 +11,7 @@ Commands:
   generate                 現在の git diff からレビューHTMLを生成する
     --base <ref>           比較元の ref を指定（省略時は working tree vs HEAD）
   serve                    レビュー画面とAPIのローカルサーバーを起動する
-    --port <n>             ポート番号（デフォルト: 5179）
+    --port <n>             ポート番号（省略時: 5179 から空きポートを自動選択し .agent-review/server.json に記録）
   wait-comments            新規（status: open）コメントが来るまで待つ
     --timeout <sec>        タイムアウト秒。0 で無期限待機（デフォルト: 0）
   resolve-comment <id>     コメントの状態を更新する
