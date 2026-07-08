@@ -12,6 +12,8 @@
   let selection = null; // {file, side, anchor:{line,diffLine}, head:{line,diffLine}}
   let openForm = null; // form row element currently shown
   let dragging = false;
+  let pinnedFileIndex = null; // index in DIFF.files of the file shown in the pin panel
+  let pinPanel = null; // right-side fixed panel element (created lazily)
 
   function esc(s) {
     return String(s)
@@ -80,7 +82,20 @@
         title = esc(file.oldPath) + ' → ' + esc(file.path);
       }
       header.innerHTML = '<span class="file-status ' + esc(file.status) + '">' +
-        esc(statusLabel(file.status)) + '</span><span>' + title + '</span>';
+        esc(statusLabel(file.status)) + '</span><span class="file-name">' + title + '</span>';
+
+      // 📌 pin button: opens/refreshes the right-side display-only panel for
+      // this file. `fi` is the file's original index in DIFF.files.
+      const pinBtn = document.createElement('button');
+      pinBtn.type = 'button';
+      pinBtn.className = 'pin-btn';
+      pinBtn.textContent = '📌';
+      pinBtn.title = 'このファイルを右側パネルに固定表示（表示専用）';
+      pinBtn.setAttribute('aria-label', 'このファイルを右側パネルに固定表示');
+      pinBtn.dataset.fileIndex = fi;
+      pinBtn.addEventListener('click', function () { togglePin(fi); });
+      header.appendChild(pinBtn);
+
       box.appendChild(header);
 
       if (file.status === 'binary' || !file.hunks.length) {
@@ -92,33 +107,7 @@
         return;
       }
 
-      const table = document.createElement('table');
-      table.className = 'diff';
-      const colgroup = document.createElement('colgroup');
-      colgroup.innerHTML =
-        '<col class="col-num"><col class="col-code"><col class="col-num"><col class="col-code">';
-      table.appendChild(colgroup);
-      const tbody = document.createElement('tbody');
-      table.appendChild(tbody);
-
-      file.hunks.forEach(function (hunk) {
-        const hr = document.createElement('tr');
-        hr.className = 'hunk';
-        hr.innerHTML = '<td colspan="4">' + esc(hunk.header) + '</td>';
-        tbody.appendChild(hr);
-
-        hunk.rows.forEach(function (row) {
-          const tr = document.createElement('tr');
-          tr.className = 'diff-row';
-          tr.appendChild(numCell(file, 'old', row.left));
-          tr.appendChild(codeCell(row.left, 'del'));
-          tr.appendChild(numCell(file, 'new', row.right));
-          tr.appendChild(codeCell(row.right, 'add'));
-          tbody.appendChild(tr);
-        });
-      });
-
-      box.appendChild(table);
+      box.appendChild(buildDiffTable(file, true));
       frag.appendChild(box);
     });
 
@@ -126,6 +115,106 @@
     app.appendChild(frag);
     buildSidebar();
     renderComments();
+  }
+
+  // Build the <table> for a single file's diff. Reused by the main diff and the
+  // pin panel. When `interactive` is false the number cells get no data-file, so
+  // the document-level selection handlers skip them (panel is display-only).
+  function buildDiffTable(file, interactive) {
+    const table = document.createElement('table');
+    table.className = 'diff';
+    const colgroup = document.createElement('colgroup');
+    colgroup.innerHTML =
+      '<col class="col-num"><col class="col-code"><col class="col-num"><col class="col-code">';
+    table.appendChild(colgroup);
+    const tbody = document.createElement('tbody');
+    table.appendChild(tbody);
+
+    file.hunks.forEach(function (hunk) {
+      const hr = document.createElement('tr');
+      hr.className = 'hunk';
+      hr.innerHTML = '<td colspan="4">' + esc(hunk.header) + '</td>';
+      tbody.appendChild(hr);
+
+      hunk.rows.forEach(function (row) {
+        const tr = document.createElement('tr');
+        tr.className = 'diff-row';
+        tr.appendChild(numCell(file, 'old', row.left, interactive));
+        tr.appendChild(codeCell(row.left, 'del'));
+        tr.appendChild(numCell(file, 'new', row.right, interactive));
+        tr.appendChild(codeCell(row.right, 'add'));
+        tbody.appendChild(tr);
+      });
+    });
+    return table;
+  }
+
+  /* ---------- pinned split view (right panel) ---------- */
+
+  function ensurePinPanel() {
+    if (pinPanel) return pinPanel;
+    pinPanel = document.createElement('aside');
+    pinPanel.id = 'pin-panel';
+    pinPanel.innerHTML =
+      '<div class="pin-panel-header">' +
+      '<span class="pin-panel-file"></span>' +
+      '<span class="pin-panel-note">表示専用</span>' +
+      '<button class="pin-panel-close" type="button" title="固定を解除">✕</button>' +
+      '</div>' +
+      '<div class="pin-panel-body"></div>';
+    pinPanel.querySelector('.pin-panel-close').addEventListener('click', unpinFile);
+    // Belt-and-suspenders: even though the panel's number cells carry no
+    // data-file, stop mousedown from ever reaching the document-level selection
+    // handler so the panel can never start a main-diff selection.
+    pinPanel.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+    document.body.appendChild(pinPanel);
+    return pinPanel;
+  }
+
+  function updatePinButtons() {
+    document.querySelectorAll('.pin-btn').forEach(function (b) {
+      const active = pinnedFileIndex !== null && String(pinnedFileIndex) === b.dataset.fileIndex;
+      b.classList.toggle('active', active);
+      b.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+  }
+
+  function unpinFile() {
+    pinnedFileIndex = null;
+    if (pinPanel) {
+      pinPanel.remove();
+      pinPanel = null;
+    }
+    document.body.classList.remove('has-pin');
+    updatePinButtons();
+  }
+
+  function pinFile(fi) {
+    const file = DIFF.files[fi];
+    if (!file) return;
+    pinnedFileIndex = fi;
+    const panel = ensurePinPanel();
+    panel.querySelector('.pin-panel-file').textContent = file.path;
+    panel.querySelector('.pin-panel-file').title = file.path;
+    const bodyEl = panel.querySelector('.pin-panel-body');
+    bodyEl.innerHTML = '';
+    if (file.status === 'binary' || !file.hunks.length) {
+      const p = document.createElement('div');
+      p.className = 'empty-diff';
+      p.textContent = file.status === 'binary' ? 'バイナリファイル（表示できません）' : '内容の変更はありません';
+      bodyEl.appendChild(p);
+    } else {
+      bodyEl.appendChild(buildDiffTable(file, false));
+    }
+    bodyEl.scrollTop = 0;
+    document.body.classList.add('has-pin');
+    updatePinButtons();
+  }
+
+  // One file pinned at a time: re-📌 the same file unpins; 📌 another swaps.
+  function togglePin(fi) {
+    if (pinnedFileIndex === fi) unpinFile();
+    else pinFile(fi);
   }
 
   /* ---------- overall comments ---------- */
@@ -368,7 +457,7 @@
     });
   }
 
-  function numCell(file, side, cell) {
+  function numCell(file, side, cell, interactive) {
     const td = document.createElement('td');
     td.className = 'num';
     if (!cell) {
@@ -378,6 +467,13 @@
     if (cell.kind === 'add') td.className += ' add';
     if (cell.kind === 'del') td.className += ' del';
     td.textContent = cell.line;
+    // Display-only cells (pin panel) carry no data-file, so the document-level
+    // mousedown/mouseover handlers (which match td.num[data-file]) never pick
+    // them up for comment selection.
+    if (interactive === false) {
+      td.classList.add('static');
+      return td;
+    }
     td.dataset.file = file.path;
     td.dataset.side = side;
     td.dataset.line = cell.line;
@@ -630,7 +726,16 @@
 
     comments.forEach(function (c) {
       if (c.file === null || c.file === undefined) {
-        if (overallList) overallList.appendChild(commentCard(c));
+        if (overallList) {
+          // Wrap each overall comment with the same reply UI used by line
+          // threads. Replying posts a body-only comment (file stays null), so it
+          // lands back in this overall section.
+          const thread = document.createElement('div');
+          thread.className = 'overall-thread';
+          thread.appendChild(commentCard(c));
+          appendReplyUI(thread, c);
+          overallList.appendChild(thread);
+        }
         return;
       }
       const key = c.file + ' ' + c.side + ' ' + c.endLine;

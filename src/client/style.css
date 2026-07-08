@@ -102,6 +102,12 @@ body.full-width #app { max-width: none; }
   font-size: 13px;
   font-weight: 600;
 }
+.file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
 .file-status {
   font-size: 11px;
   font-weight: 600;
@@ -110,10 +116,83 @@ body.full-width #app { max-width: none; }
   border: 1px solid var(--border);
   color: var(--muted);
   background: var(--bg);
+  flex: 0 0 auto;
 }
 .file-status.added { color: var(--success); border-color: var(--success); }
 .file-status.deleted { color: var(--danger); border-color: var(--danger); }
 .file-status.renamed { color: var(--attention); border-color: var(--attention); }
+
+/* 📌 pin button: pushed to the right end of the file header. */
+.pin-btn {
+  margin-left: auto;
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  line-height: 1.2;
+}
+.pin-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.pin-btn.active:hover { background: var(--accent); }
+
+/* ---------- pinned split view (right panel) ---------- */
+#pin-panel {
+  position: fixed;
+  top: 41px;
+  right: 0;
+  bottom: 0;
+  width: 45%;
+  z-index: 28;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+  box-shadow: -2px 0 8px rgba(1, 4, 9, 0.5);
+}
+.pin-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  background: var(--header-bg);
+  border-bottom: 1px solid var(--border);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 13px;
+  font-weight: 600;
+}
+.pin-panel-file {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.pin-panel-note {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+.pin-panel-close { margin-left: auto; flex: 0 0 auto; }
+.pin-panel-body {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 0;
+}
+/* Display-only number cells: no pointer affordance. */
+#pin-panel td.num.static { cursor: default; }
+#pin-panel td.num.static:hover { color: var(--muted); font-weight: 400; }
+
+/* Reserve room for the panel so main content never sits under it. Works with
+   the default 1400px layout and with body.full-width (max-width already none). */
+body.has-pin .layout {
+  max-width: none;
+  margin-left: 0;
+  margin-right: 45%;
+}
 
 table.diff {
   width: 100%;
@@ -384,6 +463,9 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 .overall-section .hint { margin: 0 0 10px; }
 .overall-section .overall-list { margin-bottom: 10px; }
 .overall-form .buttons { margin-top: 6px; display: flex; gap: 8px; }
+/* Each overall comment carries its own reply UI, matching line threads. */
+.overall-thread { margin-bottom: 12px; }
+.overall-thread:last-child { margin-bottom: 0; }
 
 /* ---------- sidebar comment list ---------- */
 .sidebar-comments-title { margin-top: 12px; }
@@ -466,4 +548,7 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
     margin: 16px auto 80px;
     padding: 0 16px;
   }
+  /* On narrow screens the panel overlays; don't reserve a 45% gutter. */
+  #pin-panel { width: 90%; }
+  body.has-pin .layout { margin-right: 0; }
 }
