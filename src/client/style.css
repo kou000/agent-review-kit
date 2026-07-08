@@ -19,7 +19,14 @@
   --btn-hover-bg: #30363d;
   --success: #3fb950;
   --attention: #d29922;
+  /* Draggable panel widths (adjusted at runtime, persisted in localStorage). */
+  --sidebar-width: 260px;
+  --pin-width: 45%;
 }
+
+/* While dragging a resizer, suppress text selection everywhere and force the
+   col-resize cursor so the pointer feedback stays consistent over any element. */
+body.resizing { user-select: none; cursor: col-resize; }
 
 * { box-sizing: border-box; }
 
@@ -141,7 +148,7 @@ body.full-width #app { max-width: none; }
   top: 41px;
   right: 0;
   bottom: 0;
-  width: 45%;
+  width: var(--pin-width);
   z-index: 28;
   display: flex;
   flex-direction: column;
@@ -177,6 +184,22 @@ body.full-width #app { max-width: none; }
   padding: 1px 8px;
 }
 .pin-panel-close { margin-left: auto; flex: 0 0 auto; }
+
+/* Left-edge drag handle for resizing the pin panel. Absolutely positioned so it
+   overlays the panel's left border without disturbing the column flex layout. */
+.pin-resizer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  z-index: 29;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.12s ease;
+  touch-action: none;
+}
+.pin-resizer:hover, .pin-resizer.dragging { background: var(--accent); }
 .pin-panel-body {
   flex: 1 1 auto;
   overflow: auto;
@@ -191,7 +214,7 @@ body.full-width #app { max-width: none; }
 body.has-pin .layout {
   max-width: none;
   margin-left: 0;
-  margin-right: 45%;
+  margin-right: var(--pin-width);
 }
 
 table.diff {
@@ -392,8 +415,8 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   padding: 0;
 }
 .sidebar {
-  flex: 0 0 260px;
-  width: 260px;
+  flex: 0 0 var(--sidebar-width);
+  width: var(--sidebar-width);
   position: sticky;
   top: 41px;
   max-height: calc(100vh - 41px);
@@ -405,6 +428,22 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   background: var(--bg);
   font-size: 12px;
 }
+/* Vertical drag handle between the sidebar and the diff. A flex item in
+   .layout, so it sits in the 16px gap; sticky so it tracks the sticky sidebar. */
+.sidebar-resizer {
+  flex: 0 0 6px;
+  align-self: stretch;
+  position: sticky;
+  top: 41px;
+  height: calc(100vh - 41px);
+  margin: 16px 0 80px;
+  cursor: col-resize;
+  border-radius: 3px;
+  background: transparent;
+  transition: background 0.12s ease;
+  touch-action: none;
+}
+.sidebar-resizer:hover, .sidebar-resizer.dragging { background: var(--accent); }
 .sidebar-title {
   font-weight: 600;
   color: var(--muted);
@@ -547,7 +586,7 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 }
 
 @media (max-width: 899px) {
-  .sidebar { display: none; }
+  .sidebar, .sidebar-resizer { display: none; }
   .layout {
     display: block;
     max-width: 1400px;
