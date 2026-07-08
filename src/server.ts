@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as http from 'http';
+import * as path from 'path';
 import { ReviewPaths } from './paths';
 import { loadComments, loadState, mutateComments, newCommentId, nowIso } from './store';
 import { COMMENT_STATUSES, CommentStatus, ReviewComment } from './types';
@@ -59,6 +60,9 @@ export function buildStatus(paths: ReviewPaths): Record<string, unknown> {
   for (const c of comments) counts[c.status] += 1;
   const state = loadState(paths.state);
   return {
+    // どのプロジェクトを serve しているかをクライアント側が検証できるようにする
+    // （複数プロジェクト同時レビュー時のポート取り違え検知用）。
+    projectDir: path.dirname(paths.dir),
     total: comments.length,
     unresolved: counts.open + counts.seen,
     counts,
