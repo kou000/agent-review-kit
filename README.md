@@ -78,6 +78,8 @@ API:
 
 `POST /api/comments` は通常 `file` / `side` / `startLine`〜`endLine` / `startDiffLine`〜`endDiffLine` / `body` を送るが、`file` を省略（または `null`）して `body` だけを送ると、特定の行に紐づかない**全体コメント**（レビュー全体への指摘・質問）として登録される。この場合 `file` / `side` / 各行番号は `null` になる。画面上部の「全体コメント」セクションから投稿・閲覧できる。
 
+既存コメントへの**返信**は `parentId`（返信元コメントの `id`）と `body` を送る。返信のアンカー（`file` / `side` / `startLine`〜`endLine` / `startDiffLine`〜`endDiffLine`）は**親コメントからコピー**され、リクエストの位置情報は無視される（返信が親からずれない）。存在しない `parentId` を指定すると 400 になる。返信への返信を送った場合、`parentId` はそのスレッドの**トップレベルの親**に正規化され、スレッドは常に1段ネストで保持される。画面上では返信が親コメントの直下にインデント表示される。
+
 ### 3. コメント待機（エージェント用）
 
 ```bash
@@ -174,6 +176,7 @@ ln -s /path/to/agent-review-kit/skills/review-loop ~/.claude/skills/review-loop
 - `startLine` / `endLine`: 対象ファイル内の行番号（範囲コメント対応）
 - `startDiffLine` / `endDiffLine`: `git diff` 出力上の行番号（差分内の位置の一意な参照）
 - **全体コメント**（レビュー全体への指摘・質問）は `file` / `side` / `startLine` / `endLine` / `startDiffLine` / `endDiffLine` がすべて `null`。`body` のみを持ち、画面上部の「全体コメント」セクションに表示される。
+- `parentId`: 返信元コメントの `id`（省略または `null` はトップレベルコメント）。返信のアンカーは親からコピーされ、`parentId` は常にトップレベルの親を指す（スレッドは1段ネスト）。返信は画面上で親コメントの直下にネスト表示される。
 
 ## 例: 一連の流れ
 

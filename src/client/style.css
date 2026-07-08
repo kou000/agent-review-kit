@@ -363,6 +363,21 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   margin: 8px 0 16px;
 }
 
+/* ---------- comment threads (nested replies) ---------- */
+/* Each top-level comment plus its replies and reply form form one block. */
+.comment-thread-block { margin-bottom: 12px; }
+.comment-thread-block:last-child { margin-bottom: 0; }
+
+/* Replies are indented and share a connecting left border so it reads as a
+   GitHub-style conversation thread hanging off its parent. */
+.reply-thread {
+  margin: 2px 0 2px 20px;
+  padding-left: 10px;
+  border-left: 2px solid var(--border);
+}
+.comment-card.reply-card { max-width: 780px; }
+.comment-card.reply-card .meta { color: var(--accent); }
+
 /* ---------- reply form ---------- */
 .reply-wrap { margin: 4px 0 2px; max-width: 800px; }
 .reply-toggle { font-size: 12px; }
@@ -493,9 +508,6 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 .overall-section .hint { margin: 0 0 10px; }
 .overall-section .overall-list { margin-bottom: 10px; }
 .overall-form .buttons { margin-top: 6px; display: flex; gap: 8px; }
-/* Each overall comment carries its own reply UI, matching line threads. */
-.overall-thread { margin-bottom: 12px; }
-.overall-thread:last-child { margin-bottom: 0; }
 
 /* ---------- sidebar comment list ---------- */
 .sidebar-comments-title { margin-top: 12px; }
@@ -510,6 +522,8 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   overflow: hidden;
 }
 .comment-item:hover { background: var(--header-bg); }
+/* Replies indented under their parent in the sidebar list. */
+.comment-item-reply { padding-left: 16px; }
 .comment-item .status-pill { flex: 0 0 auto; }
 .comment-item-loc {
   flex: 0 0 auto;

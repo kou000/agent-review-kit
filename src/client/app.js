@@ -523,39 +523,46 @@
     setTimeout(function () { card.classList.remove('comment-flash'); }, 1500);
   }
 
+  function commentListItem(c, isReply) {
+    const item = document.createElement('div');
+    item.className = 'comment-item' + (isReply ? ' comment-item-reply' : '');
+    item.title = commentLocShort(c) + ' — ' + c.body;
+
+    const pill = document.createElement('span');
+    pill.className = 'status-pill status-' + c.status;
+    pill.textContent = c.status;
+
+    const loc = document.createElement('span');
+    loc.className = 'comment-item-loc';
+    loc.textContent = isReply ? '↳ 返信' : commentLocShort(c);
+
+    const body = document.createElement('span');
+    body.className = 'comment-item-body';
+    body.textContent = bodySnippet(c.body);
+
+    item.appendChild(pill);
+    item.appendChild(loc);
+    item.appendChild(body);
+    item.addEventListener('click', function () { focusComment(c.id); });
+    return item;
+  }
+
   // Re-render the sidebar comment list. Called on the same cadence as
-  // updateTreeCounts (from renderComments) so it tracks every refresh.
+  // updateTreeCounts (from renderComments) so it tracks every refresh. Replies
+  // are nested (indented) directly under their top-level parent.
   function renderCommentList() {
     const list = document.querySelector('.sidebar .comment-list');
     if (!list) return;
     const title = document.getElementById('sidebar-comments-title');
-    const sorted = comments.slice().sort(function (a, b) {
-      return String(a.createdAt).localeCompare(String(b.createdAt));
-    });
-    if (title) title.textContent = 'コメント (' + sorted.length + ')';
+    if (title) title.textContent = 'コメント (' + comments.length + ')';
     list.innerHTML = '';
-    sorted.forEach(function (c) {
-      const item = document.createElement('div');
-      item.className = 'comment-item';
-      item.title = commentLocShort(c) + ' — ' + c.body;
 
-      const pill = document.createElement('span');
-      pill.className = 'status-pill status-' + c.status;
-      pill.textContent = c.status;
-
-      const loc = document.createElement('span');
-      loc.className = 'comment-item-loc';
-      loc.textContent = commentLocShort(c);
-
-      const body = document.createElement('span');
-      body.className = 'comment-item-body';
-      body.textContent = bodySnippet(c.body);
-
-      item.appendChild(pill);
-      item.appendChild(loc);
-      item.appendChild(body);
-      item.addEventListener('click', function () { focusComment(c.id); });
-      list.appendChild(item);
+    const s = threadStructure(comments);
+    s.tops.forEach(function (top) {
+      list.appendChild(commentListItem(top, false));
+      (s.repliesByParent[top.id] || []).forEach(function (r) {
+        list.appendChild(commentListItem(r, true));
+      });
     });
   }
 
@@ -784,13 +791,17 @@
 
   /* ---------- comment threads ---------- */
 
-  function commentCard(c) {
+  function commentCard(c, isReply) {
     const div = document.createElement('div');
-    div.className = 'comment-card';
+    div.className = 'comment-card' + (isReply ? ' reply-card' : '');
     div.dataset.commentId = c.id;
 
+    // Replies are visually nested under their parent, so the anchor location is
+    // already implied; show a "↳ 返信" marker instead of repeating it.
     let posText;
-    if (c.file === null || c.file === undefined) {
+    if (isReply) {
+      posText = '↳ 返信';
+    } else if (c.file === null || c.file === undefined) {
       posText = 'レビュー全体';
     } else {
       const range = c.startLine === c.endLine ? 'L' + c.startLine : 'L' + c.startLine + '-L' + c.endLine;
@@ -825,6 +836,60 @@
     return div;
   }
 
+  function byCreatedAsc(a, b) {
+    return String(a.createdAt).localeCompare(String(b.createdAt));
+  }
+
+  // Split a flat list of comments (sharing one anchor, or the overall bucket)
+  // into top-level comments (createdAt asc) each with its replies grouped by
+  // parentId. A reply whose parent is absent from the list is surfaced as a
+  // top-level entry so it is never silently hidden.
+  function threadStructure(list) {
+    const tops = [];
+    const topIds = {};
+    const repliesByParent = {};
+    list.forEach(function (c) {
+      if (c.parentId === null || c.parentId === undefined) {
+        tops.push(c);
+        topIds[c.id] = true;
+      }
+    });
+    list.forEach(function (c) {
+      if (c.parentId === null || c.parentId === undefined) return;
+      if (topIds[c.parentId]) {
+        (repliesByParent[c.parentId] = repliesByParent[c.parentId] || []).push(c);
+      } else {
+        tops.push(c);
+      }
+    });
+    tops.sort(byCreatedAsc);
+    Object.keys(repliesByParent).forEach(function (k) {
+      repliesByParent[k].sort(byCreatedAsc);
+    });
+    return { tops: tops, repliesByParent: repliesByParent };
+  }
+
+  // Render a thread (top-level cards, each followed by its nested replies and a
+  // reply form) into a container. Shared by line threads, the overall section
+  // and the orphan section.
+  function renderThread(container, list) {
+    const s = threadStructure(list);
+    s.tops.forEach(function (top) {
+      const block = document.createElement('div');
+      block.className = 'comment-thread-block';
+      block.appendChild(commentCard(top));
+      const replies = s.repliesByParent[top.id] || [];
+      if (replies.length) {
+        const nest = document.createElement('div');
+        nest.className = 'reply-thread';
+        replies.forEach(function (r) { nest.appendChild(commentCard(r, true)); });
+        block.appendChild(nest);
+      }
+      appendReplyUI(block, top);
+      container.appendChild(block);
+    });
+  }
+
   function renderComments() {
     document.querySelectorAll('tr.thread-row, .orphan-section').forEach(function (el) {
       el.remove();
@@ -832,27 +897,26 @@
 
     const orphans = [];
     const byAnchor = {};
+    const overall = [];
 
     const overallList = document.querySelector('.overall-list');
     if (overallList) overallList.innerHTML = '';
 
     comments.forEach(function (c) {
       if (c.file === null || c.file === undefined) {
-        if (overallList) {
-          // Wrap each overall comment with the same reply UI used by line
-          // threads. Replying posts a body-only comment (file stays null), so it
-          // lands back in this overall section.
-          const thread = document.createElement('div');
-          thread.className = 'overall-thread';
-          thread.appendChild(commentCard(c));
-          appendReplyUI(thread, c);
-          overallList.appendChild(thread);
-        }
+        overall.push(c);
         return;
       }
       const key = c.file + '\u0000' + c.side + '\u0000' + c.endLine;
       (byAnchor[key] = byAnchor[key] || []).push(c);
     });
+
+    // Overall comments render as one thread: parents with their replies nested.
+    // A reply to an overall comment also has file === null (anchor copied), so
+    // it lands in this same bucket.
+    if (overallList && overall.length) {
+      renderThread(overallList, overall);
+    }
 
     Object.keys(byAnchor).forEach(function (key) {
       const list = byAnchor[key];
@@ -866,8 +930,7 @@
       tr.className = 'widget-row thread-row';
       const td = document.createElement('td');
       td.colSpan = 4;
-      list.forEach(function (c) { td.appendChild(commentCard(c)); });
-      appendReplyUI(td, c0);
+      renderThread(td, list);
       tr.appendChild(td);
       // Keep the open form directly under its anchor row.
       const after = row.nextElementSibling && row.nextElementSibling.classList.contains('comment-form-row')
@@ -880,7 +943,7 @@
       sec.className = 'orphan-section';
       sec.innerHTML = '<h2>現在の差分に位置づけできないコメント</h2>' +
         '<p class="hint">差分の再生成により行が変わった可能性があります。</p>';
-      orphans.forEach(function (c) { sec.appendChild(commentCard(c)); });
+      renderThread(sec, orphans);
       app.appendChild(sec);
     }
 
@@ -888,7 +951,10 @@
     renderCommentList();
   }
 
-  function appendReplyUI(td, anchor) {
+  // `top` is the top-level comment of the thread. Replies POST only parentId +
+  // body; the server copies the anchor from the parent (so a reply can never
+  // drift from its thread) and normalizes parentId to the top-level id.
+  function appendReplyUI(td, top) {
     const wrap = document.createElement('div');
     wrap.className = 'reply-wrap';
     const btn = document.createElement('button');
@@ -920,12 +986,7 @@
         if (!body) return;
         form.querySelector('.reply-submit').disabled = true;
         api('POST', '/api/comments', {
-          file: anchor.file,
-          side: anchor.side,
-          startLine: anchor.startLine,
-          endLine: anchor.endLine,
-          startDiffLine: anchor.startDiffLine,
-          endDiffLine: anchor.endDiffLine,
+          parentId: top.id,
           body: body,
         }).then(function () {
           refresh();
