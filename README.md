@@ -129,20 +129,20 @@ agent-review-kit status
 
 ## Skill として使う（Claude Code）
 
-`skills/review-loop/SKILL.md` にレビューループの手順が定義されている。Claude Code から使えるようにするには、ユーザースキルとしてリンクする:
+`skills/my-interactive-review/SKILL.md` にレビューループの手順が定義されている。Claude Code から使えるようにするには、ユーザースキルとしてリンクする:
 
 ```bash
-ln -s /path/to/agent-review-kit/skills/review-loop ~/.claude/skills/review-loop
+ln -s /path/to/agent-review-kit/skills/my-interactive-review ~/.claude/skills/my-interactive-review
 ```
 
-以降、Claude Code セッションで `/review-loop` を実行すると、エージェントが
+以降、Claude Code セッションで `/my-interactive-review` を実行すると、エージェントが
 
 1. `generate` でレビューHTMLを生成し、`serve` を起動し、
 2. ユーザーにブラウザレビューを依頼して `wait-comments --timeout 0` で待ち、
 3. コメントを受けたら同一セッションで回答（`answered`）または修正+テスト（`fixed`）し、
 4. `generate` を再実行してHTMLを更新し、未解決0件までループする。
 
-既存の自作スキル（例: `/my-feature`, `/my-auto-bugfix-tb`）の最終ステップから「修正完了後は review-loop スキルの手順でレビューを受ける」と参照させると、実装 → セルフレビュー → 人間レビューのループが一本につながる。
+既存の自作スキル（例: `/my-feature`, `/my-auto-bugfix-tb`）の最終ステップから「修正完了後は my-interactive-review スキルの手順でレビューを受ける」と参照させると、実装 → セルフレビュー → 人間レビューのループが一本につながる。
 
 ## コメントのデータ形式
 
