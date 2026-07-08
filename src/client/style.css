@@ -46,8 +46,6 @@ body {
   border-bottom: 1px solid var(--border);
 }
 .topbar-inner {
-  max-width: 1400px;
-  margin: 0 auto;
   padding: 10px 16px;
   display: flex;
   align-items: center;
@@ -66,22 +64,7 @@ body {
 .badge.zero { background: #238636; }
 .conn { font-size: 12px; color: var(--muted); margin-left: auto; }
 
-/* ---------- full-width toggle ---------- */
-.full-width-toggle { line-height: 1.2; }
-.full-width-toggle.active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #ffffff;
-}
-.full-width-toggle.active:hover { background: var(--accent); }
-
-/* When enabled, drop the 1400px caps so the diff uses the full viewport. */
-body.full-width .topbar-inner,
-body.full-width .layout,
-body.full-width #app { max-width: none; }
-
 #app {
-  max-width: 1400px;
   margin: 16px auto 80px;
   padding: 0 16px;
 }
@@ -209,8 +192,7 @@ body.full-width #app { max-width: none; }
 #pin-panel td.num.static { cursor: default; }
 #pin-panel td.num.static:hover { color: var(--muted); font-weight: 400; }
 
-/* Reserve room for the panel so main content never sits under it. Works with
-   the default 1400px layout and with body.full-width (max-width already none). */
+/* Reserve room for the panel so main content never sits under it. */
 body.has-pin .layout {
   max-width: none;
   margin-left: 0;
@@ -400,8 +382,6 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 
 /* ---------- file tree sidebar ---------- */
 .layout {
-  max-width: 1400px;
-  margin: 0 auto;
   padding: 0 16px;
   display: flex;
   align-items: flex-start;
@@ -589,12 +569,9 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   .sidebar, .sidebar-resizer { display: none; }
   .layout {
     display: block;
-    max-width: 1400px;
-    margin: 0 auto;
     padding: 0;
   }
   .layout #app {
-    max-width: 1400px;
     margin: 16px auto 80px;
     padding: 0 16px;
   }
