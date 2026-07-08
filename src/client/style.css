@@ -21,7 +21,9 @@
   --attention: #d29922;
   /* Draggable panel widths (adjusted at runtime, persisted in localStorage). */
   --sidebar-width: 260px;
-  --pin-width: 45%;
+  /* Combined width of all pinned panels; kept in sync by JS so the main content
+     margin-right always matches the total right-side gutter. */
+  --pin-total-width: 0px;
 }
 
 /* While dragging a resizer, suppress text selection everywhere and force the
@@ -125,14 +127,24 @@ body {
 }
 .pin-btn.active:hover { background: var(--accent); }
 
-/* ---------- pinned split view (right panel) ---------- */
-#pin-panel {
+/* ---------- pinned split view (right panels) ---------- */
+/* Pinned files stack horizontally in a fixed, right-anchored flex row. The
+   newest panel is appended at the right edge; the oldest sits closest to the
+   main content. Each panel owns its width (set inline in vw by JS), header,
+   independent body scroll, and left-edge resizer. */
+#pin-stack {
   position: fixed;
   top: 41px;
   right: 0;
   bottom: 0;
-  width: var(--pin-width);
   z-index: 28;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+}
+.pin-panel {
+  position: relative;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   background: var(--bg);
@@ -189,14 +201,14 @@ body {
   padding: 0;
 }
 /* Display-only number cells: no pointer affordance. */
-#pin-panel td.num.static { cursor: default; }
-#pin-panel td.num.static:hover { color: var(--muted); font-weight: 400; }
+.pin-panel td.num.static { cursor: default; }
+.pin-panel td.num.static:hover { color: var(--muted); font-weight: 400; }
 
 /* Reserve room for the panel so main content never sits under it. */
 body.has-pin .layout {
   max-width: none;
   margin-left: 0;
-  margin-right: var(--pin-width);
+  margin-right: var(--pin-total-width);
 }
 
 table.diff {
@@ -589,7 +601,6 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
     margin: 16px auto 80px;
     padding: 0 16px;
   }
-  /* On narrow screens the panel overlays; don't reserve a 45% gutter. */
-  #pin-panel { width: 90%; }
+  /* On narrow screens the panels overlay; don't reserve a right-side gutter. */
   body.has-pin .layout { margin-right: 0; }
 }
