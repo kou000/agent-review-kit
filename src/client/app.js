@@ -63,7 +63,11 @@
       return;
     }
 
-    DIFF.files.forEach(function (file, fi) {
+    // Render .file boxes in tree-traversal order (see treeOrder) so the main
+    // diff order matches the sidebar tree. `fi` stays the file's original index
+    // in DIFF.files, keeping id (file-<index>) and tree data-target in sync.
+    treeOrder(DIFF.files).forEach(function (fi) {
+      const file = DIFF.files[fi];
       const box = document.createElement('div');
       box.className = 'file';
       box.id = 'file-' + fi;
@@ -187,6 +191,30 @@
     return root;
   }
 
+  // Shared comparator for files within a tree node (by name). Kept identical to
+  // the directory ordering (default string sort) so the tree and the main diff
+  // agree exactly.
+  function byName(a, b) {
+    return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+  }
+
+  // The order in which files appear when walking the tree: directories first
+  // (recursively, name-sorted), then this node's own files (name-sorted).
+  // Returns the list of original DIFF.files indices in that display order.
+  // renderDiff and renderTreeNode both follow this exact ordering.
+  function treeOrder(files) {
+    const order = [];
+    (function walk(node) {
+      Object.keys(node.dirs).sort().forEach(function (name) {
+        walk(node.dirs[name]);
+      });
+      node.files.slice().sort(byName).forEach(function (f) {
+        order.push(f.index);
+      });
+    })(buildTree(files));
+    return order;
+  }
+
   function renderTreeNode(node, container, depth) {
     Object.keys(node.dirs).sort().forEach(function (name) {
       const dEl = document.createElement('div');
@@ -196,7 +224,7 @@
       container.appendChild(dEl);
       renderTreeNode(node.dirs[name], container, depth + 1);
     });
-    node.files.forEach(function (f) {
+    node.files.slice().sort(byName).forEach(function (f) {
       const fEl = document.createElement('div');
       fEl.className = 'tree-file';
       fEl.style.paddingLeft = (4 + depth * 12) + 'px';
@@ -748,7 +776,33 @@
     });
   }
 
+  /* ---------- back to top ---------- */
+
+  // Fixed round button (bottom-right) that scrolls to the top. Shown only once
+  // the page is scrolled past a threshold so it stays out of the way otherwise.
+  function setupScrollTop() {
+    const btn = document.createElement('button');
+    btn.id = 'scroll-top';
+    btn.type = 'button';
+    btn.title = 'TOPへ戻る';
+    btn.setAttribute('aria-label', 'ページ上部へ戻る');
+    btn.textContent = '↑';
+    btn.addEventListener('click', function () {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+    document.body.appendChild(btn);
+
+    const THRESHOLD = 400;
+    function update() {
+      const y = window.pageYOffset || window.scrollY || 0;
+      btn.classList.toggle('visible', y > THRESHOLD);
+    }
+    window.addEventListener('scroll', update, { passive: true });
+    update();
+  }
+
   renderDiff();
   refresh();
   setInterval(refresh, 3000);
+  setupScrollTop();
 })();

@@ -397,6 +397,35 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   white-space: nowrap;
 }
 
+/* ---------- back to top button ---------- */
+/* Fixed bottom-right; sits below the sticky topbar (z-index 30) so it never
+   collides with it, and above regular content. Hidden until scrolled down. */
+#scroll-top {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 25;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--header-bg);
+  color: var(--fg);
+  font-size: 18px;
+  line-height: 1;
+  box-shadow: 0 1px 3px rgba(31, 35, 40, 0.12);
+  cursor: pointer;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s ease, visibility 0.15s ease;
+}
+#scroll-top:hover { background: #eaeef2; }
+#scroll-top.visible { opacity: 1; visibility: visible; }
+
 /* ---------- focus flash (from sidebar list click) ---------- */
 .comment-flash {
   outline: 3px solid #f0c000;
