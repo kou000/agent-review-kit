@@ -22,11 +22,14 @@ agent-review-kit を使って、ユーザーとブラウザ経由のレビュー
    agent-review-kit generate
    ```
 
-   ブランチ全体をレビュー対象にする場合は base を指定する:
+   ブランチ全体をレビュー対象にする場合は、比較先ブランチ名をそのまま指定せず merge-base を base にする:
 
    ```bash
-   agent-review-kit generate --base main
+   BASE_REF=$(git merge-base main HEAD)
+   agent-review-kit generate --base "$BASE_REF"
    ```
+
+   `agent-review-kit generate --base main` は `main...HEAD` ではなく `main..現在のworking tree` 相当になり、現在ブランチに未取り込みの `main` 側変更が逆向きの差分として混ざることがある。未コミット差分だけをレビュー対象にする場合は、base を指定せず `agent-review-kit generate` を使う。
 
 2. serve が起動していなければバックグラウンドで起動する。起動確認は次で行う:
 
