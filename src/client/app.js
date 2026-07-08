@@ -717,40 +717,8 @@
     renderSidebarTree();
   }
 
-  // A single flat entry in the "確認済み" section. Shows the full path (this list
-  // is flat, not nested) and, like tree files, scrolls to the file box on click.
-  function viewedListItem(entry) {
-    const fEl = document.createElement('div');
-    fEl.className = 'tree-file viewed-file';
-    fEl.dataset.target = 'file-' + entry.index;
-
-    const mark = document.createElement('span');
-    mark.className = 'tree-status tree-status-' + esc(entry.file.status);
-    mark.textContent = statusMark(entry.file.status);
-
-    const label = document.createElement('span');
-    label.className = 'tree-name';
-    label.textContent = entry.file.path;
-    label.title = entry.file.path;
-
-    const badge = document.createElement('span');
-    badge.className = 'tree-count';
-    badge.dataset.file = entry.file.path;
-
-    fEl.appendChild(mark);
-    fEl.appendChild(label);
-    fEl.appendChild(badge);
-    fEl.addEventListener('click', function () {
-      const el = document.getElementById('file-' + entry.index);
-      if (el && typeof el.scrollIntoView === 'function') {
-        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-    });
-    return fEl;
-  }
-
   // (Re)render the sidebar tree: unviewed files as the nested tree, viewed files
-  // as the flat "確認済み" section, plus the progress title. Called after every
+  // as the nested "確認済み" tree below it, plus the progress title. Called after every
   // viewed toggle and once on initial sidebar build. Refreshes comment counts on
   // both lists since it recreates their badge elements.
   function renderSidebarTree() {
@@ -782,9 +750,7 @@
 
       const list = document.createElement('div');
       list.className = 'viewed-list';
-      viewedEntries.slice().sort(function (a, b) {
-        return a.file.path < b.file.path ? -1 : a.file.path > b.file.path ? 1 : 0;
-      }).forEach(function (e) { list.appendChild(viewedListItem(e)); });
+      renderTreeNode(buildTreeFrom(viewedEntries), list, 0);
       viewedWrap.appendChild(list);
     }
 
