@@ -68,19 +68,35 @@ export function buildStatus(paths: ReviewPaths): Record<string, unknown> {
 }
 
 interface CommentInput {
-  file: string;
-  side: 'old' | 'new';
-  startLine: number;
-  endLine: number;
-  startDiffLine: number;
-  endDiffLine: number;
+  file: string | null;
+  side: 'old' | 'new' | null;
+  startLine: number | null;
+  endLine: number | null;
+  startDiffLine: number | null;
+  endDiffLine: number | null;
   body: string;
 }
 
 function validateCommentInput(b: Record<string, unknown>): CommentInput | string {
+  if (typeof b.body !== 'string' || !b.body.trim()) return 'body is required';
+  const body = b.body.trim();
+
+  // Overall comment: no file (undefined or null) means the comment is not tied
+  // to any file or line. Only a non-empty body is required.
+  if (b.file === undefined || b.file === null) {
+    return {
+      file: null,
+      side: null,
+      startLine: null,
+      endLine: null,
+      startDiffLine: null,
+      endDiffLine: null,
+      body,
+    };
+  }
+
   if (typeof b.file !== 'string' || !b.file) return 'file is required';
   if (b.side !== 'old' && b.side !== 'new') return 'side must be "old" or "new"';
-  if (typeof b.body !== 'string' || !b.body.trim()) return 'body is required';
   const nums = ['startLine', 'endLine', 'startDiffLine', 'endDiffLine'] as const;
   for (const k of nums) {
     if (typeof b[k] !== 'number' || !Number.isFinite(b[k] as number)) {
@@ -94,7 +110,7 @@ function validateCommentInput(b: Record<string, unknown>): CommentInput | string
     endLine: b.endLine as number,
     startDiffLine: b.startDiffLine as number,
     endDiffLine: b.endDiffLine as number,
-    body: (b.body as string).trim(),
+    body,
   };
 }
 

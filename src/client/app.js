@@ -40,20 +40,33 @@
     diffMeta.textContent = (DIFF.base ? 'base: ' + DIFF.base : 'working tree vs HEAD') +
       ' / generated: ' + fmtDate(DIFF.generatedAt);
 
-    if (!DIFF.files.length) {
-      app.innerHTML = '<div class="empty-diff">差分がありません。変更を加えてから <code>agent-review-kit generate</code> を再実行してください。</div>';
-      return;
+    const frag = document.createDocumentFragment();
+
+    if (DIFF.files.length) {
+      const hint = document.createElement('p');
+      hint.className = 'hint';
+      hint.textContent = '行番号をクリックでコメント、Shift+クリックまたはドラッグで範囲選択できます。';
+      frag.appendChild(hint);
     }
 
-    const frag = document.createDocumentFragment();
-    const hint = document.createElement('p');
-    hint.className = 'hint';
-    hint.textContent = '行番号をクリックでコメント、Shift+クリックまたはドラッグで範囲選択できます。';
-    frag.appendChild(hint);
+    // Overall (not tied to a file/line) comments section, always present.
+    frag.appendChild(buildOverallSection());
+
+    if (!DIFF.files.length) {
+      const empty = document.createElement('div');
+      empty.className = 'empty-diff';
+      empty.innerHTML = '差分がありません。変更を加えてから <code>agent-review-kit generate</code> を再実行してください。';
+      frag.appendChild(empty);
+      app.innerHTML = '';
+      app.appendChild(frag);
+      renderComments();
+      return;
+    }
 
     DIFF.files.forEach(function (file, fi) {
       const box = document.createElement('div');
       box.className = 'file';
+      box.id = 'file-' + fi;
       box.dataset.file = file.path;
 
       const header = document.createElement('div');
@@ -77,6 +90,10 @@
 
       const table = document.createElement('table');
       table.className = 'diff';
+      const colgroup = document.createElement('colgroup');
+      colgroup.innerHTML =
+        '<col class="col-num"><col class="col-code"><col class="col-num"><col class="col-code">';
+      table.appendChild(colgroup);
       const tbody = document.createElement('tbody');
       table.appendChild(tbody);
 
@@ -103,7 +120,224 @@
 
     app.innerHTML = '';
     app.appendChild(frag);
+    buildSidebar();
     renderComments();
+  }
+
+  /* ---------- overall comments ---------- */
+
+  // A fresh section is created on every renderDiff (which wipes #app). It holds
+  // the list of file:null comments (filled by renderComments) plus a post form.
+  function buildOverallSection() {
+    const sec = document.createElement('section');
+    sec.className = 'overall-section';
+    sec.innerHTML =
+      '<h2>全体コメント</h2>' +
+      '<p class="hint">ファイルや行に紐づかない、レビュー全体への指摘・質問。</p>' +
+      '<div class="overall-list"></div>' +
+      '<div class="overall-form comment-form">' +
+      '<textarea placeholder="レビュー全体へのコメント（Ctrl+Enterで送信）"></textarea>' +
+      '<div class="buttons"><button class="primary overall-submit">コメントを追加</button></div>' +
+      '</div>';
+
+    const textarea = sec.querySelector('textarea');
+    const btn = sec.querySelector('.overall-submit');
+
+    function submit() {
+      const body = textarea.value.trim();
+      if (!body) return;
+      btn.disabled = true;
+      api('POST', '/api/comments', { body: body }).then(function () {
+        textarea.value = '';
+        btn.disabled = false;
+        refresh();
+      }).catch(function (err) {
+        alert('コメントの保存に失敗しました: ' + err);
+        btn.disabled = false;
+      });
+    }
+
+    btn.addEventListener('click', submit);
+    textarea.addEventListener('keydown', function (e) {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') submit();
+    });
+    return sec;
+  }
+
+  /* ---------- file tree sidebar ---------- */
+
+  let sidebarBuilt = false;
+
+  function statusMark(st) {
+    return { added: 'A', deleted: 'D', modified: 'M', renamed: 'R', binary: 'B' }[st] || 'M';
+  }
+
+  function buildTree(files) {
+    const root = { dirs: {}, files: [] };
+    files.forEach(function (file, fi) {
+      const parts = String(file.path).split('/');
+      let node = root;
+      for (let i = 0; i < parts.length - 1; i++) {
+        const seg = parts[i];
+        node.dirs[seg] = node.dirs[seg] || { dirs: {}, files: [] };
+        node = node.dirs[seg];
+      }
+      node.files.push({ name: parts[parts.length - 1], index: fi, file: file });
+    });
+    return root;
+  }
+
+  function renderTreeNode(node, container, depth) {
+    Object.keys(node.dirs).sort().forEach(function (name) {
+      const dEl = document.createElement('div');
+      dEl.className = 'tree-dir';
+      dEl.style.paddingLeft = (4 + depth * 12) + 'px';
+      dEl.textContent = name + '/';
+      container.appendChild(dEl);
+      renderTreeNode(node.dirs[name], container, depth + 1);
+    });
+    node.files.forEach(function (f) {
+      const fEl = document.createElement('div');
+      fEl.className = 'tree-file';
+      fEl.style.paddingLeft = (4 + depth * 12) + 'px';
+      fEl.dataset.target = 'file-' + f.index;
+
+      const mark = document.createElement('span');
+      mark.className = 'tree-status tree-status-' + esc(f.file.status);
+      mark.textContent = statusMark(f.file.status);
+
+      const label = document.createElement('span');
+      label.className = 'tree-name';
+      label.textContent = f.name;
+      label.title = f.file.path;
+
+      const badge = document.createElement('span');
+      badge.className = 'tree-count';
+      badge.dataset.file = f.file.path;
+
+      fEl.appendChild(mark);
+      fEl.appendChild(label);
+      fEl.appendChild(badge);
+      fEl.addEventListener('click', function () {
+        const el = document.getElementById('file-' + f.index);
+        if (el && typeof el.scrollIntoView === 'function') {
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      });
+      container.appendChild(fEl);
+    });
+  }
+
+  function buildSidebar() {
+    if (sidebarBuilt || !DIFF.files.length) return;
+    const parent = app.parentNode;
+    if (!parent) return;
+
+    const layout = document.createElement('div');
+    layout.className = 'layout';
+    parent.insertBefore(layout, app);
+
+    const sidebar = document.createElement('aside');
+    sidebar.id = 'file-tree';
+    sidebar.className = 'sidebar';
+    const heading = document.createElement('div');
+    heading.className = 'sidebar-title';
+    heading.textContent = 'ファイル (' + DIFF.files.length + ')';
+    sidebar.appendChild(heading);
+
+    const treeWrap = document.createElement('div');
+    treeWrap.className = 'tree';
+    renderTreeNode(buildTree(DIFF.files), treeWrap, 0);
+    sidebar.appendChild(treeWrap);
+
+    // Comment management list (filled/updated by renderCommentList on refresh).
+    const cHeading = document.createElement('div');
+    cHeading.className = 'sidebar-title sidebar-comments-title';
+    cHeading.id = 'sidebar-comments-title';
+    cHeading.textContent = 'コメント (0)';
+    sidebar.appendChild(cHeading);
+
+    const cList = document.createElement('div');
+    cList.className = 'comment-list';
+    sidebar.appendChild(cList);
+
+    layout.appendChild(sidebar);
+    layout.appendChild(app); // move #app into the flex layout
+    sidebarBuilt = true;
+  }
+
+  function updateTreeCounts() {
+    const counts = {};
+    comments.forEach(function (c) {
+      if (c.file === null || c.file === undefined) return;
+      counts[c.file] = (counts[c.file] || 0) + 1;
+    });
+    document.querySelectorAll('.tree-count[data-file]').forEach(function (el) {
+      const n = counts[el.dataset.file] || 0;
+      el.textContent = n ? String(n) : '';
+      el.style.display = n ? '' : 'none';
+    });
+  }
+
+  function commentLocShort(c) {
+    if (c.file === null || c.file === undefined) return '全体';
+    const range = c.startLine === c.endLine
+      ? 'L' + c.startLine
+      : 'L' + c.startLine + '-' + c.endLine;
+    return c.file + ':' + range;
+  }
+
+  function bodySnippet(s) {
+    const t = String(s).replace(/\s+/g, ' ').trim();
+    return t.length > 40 ? t.slice(0, 40) + '…' : t;
+  }
+
+  function focusComment(id) {
+    const card = document.querySelector(
+      '.comment-card[data-comment-id="' + id + '"]'
+    );
+    if (!card) return;
+    if (typeof card.scrollIntoView === 'function') {
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    card.classList.add('comment-flash');
+    setTimeout(function () { card.classList.remove('comment-flash'); }, 1500);
+  }
+
+  // Re-render the sidebar comment list. Called on the same cadence as
+  // updateTreeCounts (from renderComments) so it tracks every refresh.
+  function renderCommentList() {
+    const list = document.querySelector('.sidebar .comment-list');
+    if (!list) return;
+    const title = document.getElementById('sidebar-comments-title');
+    const sorted = comments.slice().sort(function (a, b) {
+      return String(a.createdAt).localeCompare(String(b.createdAt));
+    });
+    if (title) title.textContent = 'コメント (' + sorted.length + ')';
+    list.innerHTML = '';
+    sorted.forEach(function (c) {
+      const item = document.createElement('div');
+      item.className = 'comment-item';
+      item.title = commentLocShort(c) + ' — ' + c.body;
+
+      const pill = document.createElement('span');
+      pill.className = 'status-pill status-' + c.status;
+      pill.textContent = c.status;
+
+      const loc = document.createElement('span');
+      loc.className = 'comment-item-loc';
+      loc.textContent = commentLocShort(c);
+
+      const body = document.createElement('span');
+      body.className = 'comment-item-body';
+      body.textContent = bodySnippet(c.body);
+
+      item.appendChild(pill);
+      item.appendChild(loc);
+      item.appendChild(body);
+      item.addEventListener('click', function () { focusComment(c.id); });
+      list.appendChild(item);
+    });
   }
 
   function numCell(file, side, cell) {
@@ -319,11 +553,17 @@
     div.className = 'comment-card';
     div.dataset.commentId = c.id;
 
-    const range = c.startLine === c.endLine ? 'L' + c.startLine : 'L' + c.startLine + '-L' + c.endLine;
+    let posText;
+    if (c.file === null || c.file === undefined) {
+      posText = 'レビュー全体';
+    } else {
+      const range = c.startLine === c.endLine ? 'L' + c.startLine : 'L' + c.startLine + '-L' + c.endLine;
+      posText = esc(c.file) + ' ' + (c.side === 'new' ? '' : '(旧) ') + esc(range);
+    }
     let html =
       '<div class="meta">' +
       '<span class="status-pill status-' + esc(c.status) + '">' + esc(c.status) + '</span>' +
-      '<span>' + esc(c.file) + ' ' + (c.side === 'new' ? '' : '(旧) ') + esc(range) + '</span>' +
+      '<span>' + posText + '</span>' +
       '<span>' + esc(fmtDate(c.createdAt)) + '</span>' +
       '</div>' +
       '<div class="body">' + esc(c.body) + '</div>';
@@ -356,7 +596,15 @@
 
     const orphans = [];
     const byAnchor = {};
+
+    const overallList = document.querySelector('.overall-list');
+    if (overallList) overallList.innerHTML = '';
+
     comments.forEach(function (c) {
+      if (c.file === null || c.file === undefined) {
+        if (overallList) overallList.appendChild(commentCard(c));
+        return;
+      }
       const key = c.file + ' ' + c.side + ' ' + c.endLine;
       (byAnchor[key] = byAnchor[key] || []).push(c);
     });
@@ -374,6 +622,7 @@
       const td = document.createElement('td');
       td.colSpan = 4;
       list.forEach(function (c) { td.appendChild(commentCard(c)); });
+      appendReplyUI(td, c0);
       tr.appendChild(td);
       // Keep the open form directly under its anchor row.
       const after = row.nextElementSibling && row.nextElementSibling.classList.contains('comment-form-row')
@@ -389,6 +638,63 @@
       orphans.forEach(function (c) { sec.appendChild(commentCard(c)); });
       app.appendChild(sec);
     }
+
+    updateTreeCounts();
+    renderCommentList();
+  }
+
+  function appendReplyUI(td, anchor) {
+    const wrap = document.createElement('div');
+    wrap.className = 'reply-wrap';
+    const btn = document.createElement('button');
+    btn.className = 'reply-toggle';
+    btn.textContent = '返信';
+    wrap.appendChild(btn);
+    td.appendChild(wrap);
+
+    btn.addEventListener('click', function () {
+      btn.style.display = 'none';
+      const form = document.createElement('div');
+      form.className = 'reply-form';
+      form.innerHTML =
+        '<textarea placeholder="返信を入力（Ctrl+Enterで送信）"></textarea>' +
+        '<div class="buttons">' +
+        '<button class="primary reply-submit">返信する</button>' +
+        '<button class="reply-cancel">キャンセル</button>' +
+        '</div>';
+      wrap.appendChild(form);
+      const textarea = form.querySelector('textarea');
+      textarea.focus();
+
+      function close() {
+        form.remove();
+        btn.style.display = '';
+      }
+      function submit() {
+        const body = textarea.value.trim();
+        if (!body) return;
+        form.querySelector('.reply-submit').disabled = true;
+        api('POST', '/api/comments', {
+          file: anchor.file,
+          side: anchor.side,
+          startLine: anchor.startLine,
+          endLine: anchor.endLine,
+          startDiffLine: anchor.startDiffLine,
+          endDiffLine: anchor.endDiffLine,
+          body: body,
+        }).then(function () {
+          refresh();
+        }).catch(function (err) {
+          alert('返信の保存に失敗しました: ' + err);
+          form.querySelector('.reply-submit').disabled = false;
+        });
+      }
+      form.querySelector('.reply-submit').addEventListener('click', submit);
+      form.querySelector('.reply-cancel').addEventListener('click', close);
+      textarea.addEventListener('keydown', function (e) {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') submit();
+      });
+    });
   }
 
   function renderBadge(status) {

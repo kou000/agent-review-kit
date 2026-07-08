@@ -76,6 +76,8 @@ API:
 | POST | `/api/comments/:id/resolve` | status を `resolved` にする |
 | GET | `/api/status` | 集計（未解決数・状態別件数・生成時刻） |
 
+`POST /api/comments` は通常 `file` / `side` / `startLine`〜`endLine` / `startDiffLine`〜`endDiffLine` / `body` を送るが、`file` を省略（または `null`）して `body` だけを送ると、特定の行に紐づかない**全体コメント**（レビュー全体への指摘・質問）として登録される。この場合 `file` / `side` / 各行番号は `null` になる。画面上部の「全体コメント」セクションから投稿・閲覧できる。
+
 ### 3. コメント待機（エージェント用）
 
 ```bash
@@ -171,6 +173,7 @@ ln -s /path/to/agent-review-kit/skills/review-loop ~/.claude/skills/review-loop
 - `side`: `new` = 変更後の行、`old` = 変更前（削除側）の行
 - `startLine` / `endLine`: 対象ファイル内の行番号（範囲コメント対応）
 - `startDiffLine` / `endDiffLine`: `git diff` 出力上の行番号（差分内の位置の一意な参照）
+- **全体コメント**（レビュー全体への指摘・質問）は `file` / `side` / `startLine` / `endLine` / `startDiffLine` / `endDiffLine` がすべて `null`。`body` のみを持ち、画面上部の「全体コメント」セクションに表示される。
 
 ## 例: 一連の流れ
 

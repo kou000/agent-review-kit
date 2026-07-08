@@ -63,7 +63,10 @@ body {
   border: 1px solid var(--border);
   border-radius: 6px;
   margin-bottom: 16px;
-  overflow: hidden;
+  /* clip (not hidden): hidden creates a scroll container, which would break
+     position: sticky on .file-header */
+  overflow: clip;
+  scroll-margin-top: 50px;
 }
 .file-header {
   position: sticky;
@@ -100,10 +103,11 @@ table.diff {
   font-size: 12px;
   line-height: 20px;
 }
+col.col-num { width: 34px; }
 td.num {
-  width: 44px;
-  min-width: 44px;
-  padding: 0 8px 0 4px;
+  width: 34px;
+  min-width: 34px;
+  padding: 0 4px 0 2px;
   text-align: right;
   color: var(--muted);
   cursor: pointer;
@@ -242,4 +246,175 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   color: var(--muted);
   font-size: 12px;
   margin: 8px 0 16px;
+}
+
+/* ---------- reply form ---------- */
+.reply-wrap { margin: 4px 0 2px; max-width: 800px; }
+.reply-toggle { font-size: 12px; }
+.reply-form { margin-top: 6px; }
+.reply-form textarea {
+  width: 100%;
+  max-width: 800px;
+  min-height: 56px;
+  font-family: inherit;
+  font-size: 13px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  resize: vertical;
+}
+.reply-form .buttons { margin-top: 6px; display: flex; gap: 8px; }
+
+/* ---------- file tree sidebar ---------- */
+.layout {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 16px;
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+.layout #app {
+  flex: 1;
+  min-width: 0;
+  max-width: none;
+  margin: 16px 0 80px;
+  padding: 0;
+}
+.sidebar {
+  flex: 0 0 260px;
+  width: 260px;
+  position: sticky;
+  top: 41px;
+  max-height: calc(100vh - 41px);
+  overflow-y: auto;
+  margin: 16px 0 80px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  font-size: 12px;
+}
+.sidebar-title {
+  font-weight: 600;
+  color: var(--muted);
+  padding: 2px 4px 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 6px;
+}
+.tree-dir {
+  color: var(--muted);
+  padding: 2px 4px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tree-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.tree-file:hover { background: var(--header-bg); }
+.tree-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+.tree-status {
+  flex: 0 0 auto;
+  font-weight: 700;
+  font-size: 11px;
+  width: 12px;
+  text-align: center;
+  color: var(--muted);
+}
+.tree-status-added { color: #1a7f37; }
+.tree-status-deleted { color: var(--danger); }
+.tree-status-renamed { color: #9a6700; }
+.tree-status-modified { color: var(--accent); }
+.tree-count {
+  margin-left: auto;
+  flex: 0 0 auto;
+  background: var(--danger);
+  color: #fff;
+  border-radius: 999px;
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* ---------- overall (unbound) comments ---------- */
+.overall-section {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  background: var(--bg);
+}
+.overall-section h2 {
+  font-size: 15px;
+  margin: 0 0 4px;
+}
+.overall-section .hint { margin: 0 0 10px; }
+.overall-section .overall-list { margin-bottom: 10px; }
+.overall-form .buttons { margin-top: 6px; display: flex; gap: 8px; }
+
+/* ---------- sidebar comment list ---------- */
+.sidebar-comments-title { margin-top: 12px; }
+.comment-list { margin-top: 6px; }
+.comment-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  overflow: hidden;
+}
+.comment-item:hover { background: var(--header-bg); }
+.comment-item .status-pill { flex: 0 0 auto; }
+.comment-item-loc {
+  flex: 0 0 auto;
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+.comment-item-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- focus flash (from sidebar list click) ---------- */
+.comment-flash {
+  outline: 3px solid #f0c000;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgba(240, 192, 0, 0.35);
+}
+
+@media (max-width: 899px) {
+  .sidebar { display: none; }
+  .layout {
+    display: block;
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 0;
+  }
+  .layout #app {
+    max-width: 1400px;
+    margin: 16px auto 80px;
+    padding: 0 16px;
+  }
 }
