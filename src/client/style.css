@@ -1,18 +1,24 @@
 :root {
-  --bg: #ffffff;
-  --fg: #1f2328;
-  --muted: #59636e;
-  --border: #d1d9e0;
-  --header-bg: #f6f8fa;
-  --add-bg: #dafbe1;
-  --add-num-bg: #aceebb;
-  --del-bg: #ffebe9;
-  --del-num-bg: #ffcecb;
-  --hunk-bg: #ddf4ff;
-  --hunk-fg: #57606a;
-  --select-bg: #fff8c5;
-  --accent: #0969da;
-  --danger: #cf222e;
+  color-scheme: dark;
+  --bg: #0d1117;
+  --fg: #e6edf3;
+  --muted: #8b949e;
+  --border: #30363d;
+  --header-bg: #161b22;
+  --add-bg: rgba(46, 160, 67, 0.15);
+  --add-num-bg: rgba(46, 160, 67, 0.3);
+  --del-bg: rgba(248, 81, 73, 0.15);
+  --del-num-bg: rgba(248, 81, 73, 0.3);
+  --hunk-bg: rgba(56, 139, 253, 0.15);
+  --hunk-fg: #8b949e;
+  --select-bg: rgba(187, 128, 9, 0.25);
+  --accent: #58a6ff;
+  --danger: #f85149;
+  /* elevated surface for cards over the canvas background */
+  --card-bg: #161b22;
+  --btn-hover-bg: #30363d;
+  --success: #3fb950;
+  --attention: #d29922;
 }
 
 * { box-sizing: border-box; }
@@ -50,8 +56,22 @@ body {
   font-size: 12px;
   font-weight: 600;
 }
-.badge.zero { background: #1a7f37; }
+.badge.zero { background: #238636; }
 .conn { font-size: 12px; color: var(--muted); margin-left: auto; }
+
+/* ---------- full-width toggle ---------- */
+.full-width-toggle { line-height: 1.2; }
+.full-width-toggle.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+.full-width-toggle.active:hover { background: var(--accent); }
+
+/* When enabled, drop the 1400px caps so the diff uses the full viewport. */
+body.full-width .topbar-inner,
+body.full-width .layout,
+body.full-width #app { max-width: none; }
 
 #app {
   max-width: 1400px;
@@ -89,11 +109,11 @@ body {
   padding: 1px 8px;
   border: 1px solid var(--border);
   color: var(--muted);
-  background: #fff;
+  background: var(--bg);
 }
-.file-status.added { color: #1a7f37; border-color: #1a7f37; }
+.file-status.added { color: var(--success); border-color: var(--success); }
 .file-status.deleted { color: var(--danger); border-color: var(--danger); }
-.file-status.renamed { color: #9a6700; border-color: #9a6700; }
+.file-status.renamed { color: var(--attention); border-color: var(--attention); }
 
 table.diff {
   width: 100%;
@@ -150,7 +170,7 @@ tr.widget-row td {
 }
 
 .comment-card {
-  background: #fff;
+  background: var(--card-bg);
   border: 1px solid var(--border);
   border-radius: 6px;
   margin: 4px 0;
@@ -174,7 +194,7 @@ tr.widget-row td {
 .comment-card .agent-response {
   margin: 0 10px 8px;
   padding: 8px 10px;
-  background: #f0f6ff;
+  background: rgba(56, 139, 253, 0.1);
   border-left: 3px solid var(--accent);
   border-radius: 0 4px 4px 0;
   white-space: pre-wrap;
@@ -198,12 +218,12 @@ tr.widget-row td {
   border-radius: 999px;
   padding: 1px 8px;
 }
-.status-open { background: #ddf4ff; color: #0969da; }
-.status-seen { background: #fff8c5; color: #9a6700; }
-.status-fixed { background: #dafbe1; color: #1a7f37; }
-.status-answered { background: #ede7fd; color: #6639ba; }
-.status-wontfix { background: #ffebe9; color: #cf222e; }
-.status-resolved { background: #eaeef2; color: #59636e; }
+.status-open { background: rgba(56, 139, 253, 0.2); color: #58a6ff; }
+.status-seen { background: rgba(210, 153, 34, 0.2); color: #d29922; }
+.status-fixed { background: rgba(63, 185, 80, 0.2); color: #3fb950; }
+.status-answered { background: rgba(163, 113, 247, 0.2); color: #a371f7; }
+.status-wontfix { background: rgba(248, 81, 73, 0.2); color: #f85149; }
+.status-resolved { background: rgba(139, 148, 158, 0.2); color: #8b949e; }
 
 .comment-form textarea {
   width: 100%;
@@ -227,13 +247,13 @@ button {
   background: var(--header-bg);
   cursor: pointer;
 }
-button:hover { background: #eaeef2; }
+button:hover { background: var(--btn-hover-bg); }
 button.primary {
-  background: #1f883d;
-  border-color: #1f883d;
-  color: #fff;
+  background: #238636;
+  border-color: #238636;
+  color: #ffffff;
 }
-button.primary:hover { background: #1a7f37; }
+button.primary:hover { background: #2ea043; }
 button.primary:disabled { opacity: 0.5; cursor: default; }
 
 .empty-diff {
@@ -334,9 +354,9 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   text-align: center;
   color: var(--muted);
 }
-.tree-status-added { color: #1a7f37; }
+.tree-status-added { color: var(--success); }
 .tree-status-deleted { color: var(--danger); }
-.tree-status-renamed { color: #9a6700; }
+.tree-status-renamed { color: var(--attention); }
 .tree-status-modified { color: var(--accent); }
 .tree-count {
   margin-left: auto;
@@ -417,13 +437,13 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   color: var(--fg);
   font-size: 18px;
   line-height: 1;
-  box-shadow: 0 1px 3px rgba(31, 35, 40, 0.12);
+  box-shadow: 0 1px 3px rgba(1, 4, 9, 0.6);
   cursor: pointer;
   opacity: 0;
   visibility: hidden;
   transition: opacity 0.15s ease, visibility 0.15s ease;
 }
-#scroll-top:hover { background: #eaeef2; }
+#scroll-top:hover { background: var(--btn-hover-bg); }
 #scroll-top.visible { opacity: 1; visibility: visible; }
 
 /* ---------- focus flash (from sidebar list click) ---------- */
