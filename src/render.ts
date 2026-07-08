@@ -18,6 +18,7 @@ export function renderHtml(data: DiffData): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>agent-review-kit</title>
+<link rel="stylesheet" href="./hljs-theme.css">
 <link rel="stylesheet" href="./style.css">
 </head>
 <body>
@@ -31,6 +32,7 @@ export function renderHtml(data: DiffData): string {
   </div>
 </header>
 <main id="app"></main>
+<script src="./highlight.min.js"></script>
 <script src="./app.js"></script>
 </body>
 </html>
@@ -41,4 +43,6 @@ export function writeAssets(paths: ReviewPaths): void {
   const assetDir = clientAssetDir();
   fs.copyFileSync(path.join(assetDir, 'app.js'), paths.appJs);
   fs.copyFileSync(path.join(assetDir, 'style.css'), paths.styleCss);
+  fs.copyFileSync(path.join(assetDir, 'highlight.min.js'), paths.hljsJs);
+  fs.copyFileSync(path.join(assetDir, 'hljs-theme.css'), paths.hljsCss);
 }
