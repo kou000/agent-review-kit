@@ -1,9 +1,9 @@
 ---
-name: review-loop
+name: my-interactive-review
 description: 修正完了後に agent-review-kit でレビューHTMLを生成し、ユーザーがブラウザで書いた差分コメントを同一セッションで受け取り、回答・修正・resolve を未解決0件まで繰り返すレビューループ。Use when the user wants to review changes in a browser (GitHub-like diff review) and iterate on fixes with inline comments.
 ---
 
-# review-loop
+# my-interactive-review
 
 agent-review-kit を使って、ユーザーとブラウザ経由のレビューループを回すためのスキル。
 このスキルを実行しているメインセッション自身がコメントを待ち、読み、判断し、修正する。
