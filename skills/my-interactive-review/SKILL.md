@@ -31,13 +31,23 @@ agent-review-kit を使って、ユーザーとブラウザ経由のレビュー
 
    `agent-review-kit generate --base main` は `main...HEAD` ではなく `main..現在のworking tree` 相当になり、現在ブランチに未取り込みの `main` 側変更が逆向きの差分として混ざることがある。未コミット差分だけをレビュー対象にする場合は、base を指定せず `agent-review-kit generate` を使う。
 
-2. serve が起動していなければバックグラウンドで起動する。起動確認は次で行う:
+2. serve を起動する。ポートは固定ではなく、`.agent-review/server.json` に記録された実ポートを使う。
+
+   まず、このプロジェクトの serve が既に生きているか確認する。`server.json` があり、そのポートの `/api/status` が返す `projectDir` が現在のプロジェクトディレクトリと一致すれば起動済み:
 
    ```bash
-   curl -s http://localhost:5179/api/status || agent-review-kit serve   # serve はバックグラウンド実行にする
+   PORT=$(node -p "String(require('./.agent-review/server.json').port)" 2>/dev/null)
+   [ -n "$PORT" ] && curl -s "http://localhost:$PORT/api/status" | grep -F "\"projectDir\": \"$(pwd)\""
+   # → マッチすれば起動済み。それ以外（server.json なし・curl 失敗・projectDir 不一致）は未起動扱い
    ```
 
-3. ユーザーに「http://localhost:5179 を開いてレビューしてください」と伝える。
+   （`jq` はこの環境にない前提。`node -p` の数値出力は色コードが混ざることがあるため `String()` で包む）
+
+   未起動なら、serve をバックグラウンドで起動する。ポートは 5179 から空きを自動選択して `server.json` に記録される。起動後に `server.json` を読み直して実ポートを取得する。
+
+   **注意: `projectDir` の一致確認を省略しない。** 別プロジェクトの serve が同じポートで生きていると、curl が成功してしまい、ユーザーが別プロジェクトの diff にコメントを書く事故になる。
+
+3. ユーザーに「http://localhost:<実ポート> を開いてレビューしてください」と伝える（`<実ポート>` は `server.json` の値）。
    行番号クリックで単一行コメント、Shift+クリックまたはドラッグで行範囲コメントができることも添える。
 
 4. コメントを待つ。このコマンドは新規コメントが来るまでブロックする:

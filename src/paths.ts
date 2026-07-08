@@ -6,6 +6,7 @@ export interface ReviewPaths {
   html: string;
   comments: string;
   state: string;
+  serverJson: string;
   appJs: string;
   styleCss: string;
   hljsJs: string;
@@ -19,6 +20,7 @@ export function reviewPaths(cwd: string = process.cwd()): ReviewPaths {
     html: path.join(dir, 'review.html'),
     comments: path.join(dir, 'comments.json'),
     state: path.join(dir, 'state.json'),
+    serverJson: path.join(dir, 'server.json'),
     appJs: path.join(dir, 'app.js'),
     styleCss: path.join(dir, 'style.css'),
     hljsJs: path.join(dir, 'highlight.min.js'),
