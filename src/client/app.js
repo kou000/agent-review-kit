@@ -1018,45 +1018,6 @@
     update();
   }
 
-  /* ---------- full-width toggle ---------- */
-
-  // Adds a topbar toggle (next to the unresolved badge) that removes the
-  // 1400px max-width caps so the diff uses the whole viewport. The choice is
-  // persisted in localStorage and restored on load. Default: off (1400px).
-  function setupFullWidth() {
-    const KEY = 'ark-full-width';
-    const btn = document.createElement('button');
-    btn.id = 'full-width-toggle';
-    btn.type = 'button';
-    btn.className = 'full-width-toggle';
-    btn.textContent = '⛶ 全幅';
-    btn.title = '差分表示を全画面幅に広げる';
-
-    // Place it right after the unresolved badge, before the connection state
-    // (which is pushed to the far right by margin-left:auto).
-    if (badge && badge.parentNode) {
-      badge.parentNode.insertBefore(btn, badge.nextSibling);
-    } else {
-      document.querySelector('.topbar-inner').appendChild(btn);
-    }
-
-    function apply(on) {
-      document.body.classList.toggle('full-width', on);
-      btn.classList.toggle('active', on);
-      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
-    }
-
-    let on = false;
-    try { on = localStorage.getItem(KEY) === '1'; } catch (e) { /* ignore */ }
-    apply(on);
-
-    btn.addEventListener('click', function () {
-      on = !on;
-      apply(on);
-      try { localStorage.setItem(KEY, on ? '1' : '0'); } catch (e) { /* ignore */ }
-    });
-  }
-
   /* ---------- draggable panel widths ---------- */
 
   // Sidebar width (px) and pin-panel width (viewport %) are driven by CSS
@@ -1148,5 +1109,4 @@
   refresh();
   setInterval(refresh, 3000);
   setupScrollTop();
-  setupFullWidth();
 })();
