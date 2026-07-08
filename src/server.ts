@@ -164,6 +164,57 @@ async function handle(
 
   if (method === 'POST' && p === '/api/comments') {
     const body = await readBody(req);
+
+    // A reply carries a parentId. Its anchor is copied from the parent (the
+    // request's position fields are ignored), and the stored parentId is
+    // normalized to the top-level comment so threads stay one level deep.
+    let parentId: string | undefined;
+    if (body.parentId !== undefined && body.parentId !== null) {
+      if (typeof body.parentId !== 'string') {
+        json(res, 400, { error: 'parentId must be a string' });
+        return;
+      }
+      parentId = body.parentId;
+    }
+
+    if (parentId !== undefined) {
+      if (typeof body.body !== 'string' || !body.body.trim()) {
+        json(res, 400, { error: 'body is required' });
+        return;
+      }
+      const replyBody = body.body.trim();
+      const created = mutateComments(paths.comments, (comments) => {
+        const parent = comments.find((c) => c.id === parentId);
+        if (!parent) return null;
+        // Copy the anchor from the top-level comment of the thread.
+        const topId = parent.parentId ?? parent.id;
+        const anchor = comments.find((c) => c.id === topId) ?? parent;
+        const now = nowIso();
+        const comment: ReviewComment = {
+          id: newCommentId(),
+          file: anchor.file,
+          side: anchor.side,
+          startLine: anchor.startLine,
+          endLine: anchor.endLine,
+          startDiffLine: anchor.startDiffLine,
+          endDiffLine: anchor.endDiffLine,
+          body: replyBody,
+          status: 'open',
+          createdAt: now,
+          updatedAt: now,
+          parentId: topId,
+        };
+        comments.push(comment);
+        return comment;
+      });
+      if (!created) {
+        json(res, 400, { error: `parent comment not found: ${String(parentId)}` });
+        return;
+      }
+      json(res, 201, { comment: created });
+      return;
+    }
+
     const input = validateCommentInput(body);
     if (typeof input === 'string') {
       json(res, 400, { error: input });

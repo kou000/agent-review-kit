@@ -35,6 +35,10 @@ export interface ReviewComment {
   createdAt: string;
   updatedAt: string;
   agentResponse?: AgentResponse;
+  // A reply to another comment. When set, this comment's anchor (file/side/all
+  // line numbers) is copied from its parent, and parentId always points at a
+  // top-level comment (threads are one level deep). Omitted/null = top-level.
+  parentId?: string | null;
 }
 
 export interface CommentsFile {
