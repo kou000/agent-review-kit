@@ -43,12 +43,18 @@ export function generate(opts: GenerateOptions = {}): void {
   // Self-ignoring directory: keep review artifacts out of the project's git diff.
   fs.writeFileSync(path.join(paths.dir, '.gitignore'), '*\n');
 
-  const diffText = runGitDiff(opts.base, cwd);
+  // --base 省略時は前回 generate の base を引き継ぐ（修正コミット後の再生成で
+  // ブランチ全体レビューが working-tree-only に化けてコメントが orphan 化する
+  // のを防ぐ）。working tree vs HEAD に戻すには --base HEAD を指定する。
+  const prev = loadState(paths.state);
+  const base = opts.base ?? prev?.base ?? undefined;
+
+  const diffText = runGitDiff(base, cwd);
   const files = parseUnifiedDiff(diffText);
   embedNewSideContent(files, cwd);
 
   const data: DiffData = {
-    base: opts.base ?? null,
+    base: base ?? null,
     generatedAt: nowIso(),
     files,
   };
@@ -61,9 +67,8 @@ export function generate(opts: GenerateOptions = {}): void {
     saveComments(paths.comments, []);
   }
 
-  const prev = loadState(paths.state);
   saveState(paths.state, {
-    base: opts.base ?? prev?.base ?? null,
+    base: data.base,
     generatedAt: data.generatedAt,
   });
 
