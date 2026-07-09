@@ -9,7 +9,9 @@ const USAGE = `agent-review-kit <command> [options]
 
 Commands:
   generate                 現在の git diff からレビューHTMLを生成する
-    --base <ref>           比較元の ref を指定（省略時は working tree vs HEAD）
+    --base <ref>           比較元の ref を指定。省略時は前回 generate の base を
+                           引き継ぐ（初回は working tree vs HEAD）。
+                           working tree vs HEAD に戻すには --base HEAD を指定する
   serve                    レビュー画面とAPIのローカルサーバーを起動する
     --port <n>             ポート番号（省略時: 5179 から空きポートを自動選択し .agent-review/server.json に記録）
   wait-comments            新規（status: open）コメントが来るまで待つ
@@ -49,7 +51,14 @@ function parseArgs(argv: string[]): ParsedArgs {
 
 function flagStr(flags: Record<string, string | boolean>, key: string): string | undefined {
   const v = flags[key];
-  return typeof v === 'string' ? v : undefined;
+  if (v === undefined) return undefined;
+  // 値なし（--base だけ、または次の引数が --xxx）や空文字（--base "$VAR" で
+  // VAR が空）を黙ってフォールバックさせず、その場でエラーにする。
+  if (v === true || v === '') {
+    console.error(`error: --${key} には値を指定してください`);
+    process.exit(1);
+  }
+  return v as string;
 }
 
 function flagNum(
