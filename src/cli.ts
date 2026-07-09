@@ -81,7 +81,7 @@ async function main(): Promise<void> {
 
   switch (command) {
     case 'generate':
-      generate({ base: flagStr(flags, 'base') });
+      await generate({ base: flagStr(flags, 'base') });
       break;
     case 'serve':
       serve({ port: flagNum(flags, 'port') });

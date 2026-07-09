@@ -18,12 +18,6 @@
   let pins = []; // [{ index, width, el }]
   let pinStack = null; // right-side flex-row container (created lazily)
 
-  // Syntax highlighting (highlight.js, loaded via <script> before app.js).
-  // For large diffs we defer highlighting to idle time so the UI never freezes.
-  const HIGHLIGHT_SYNC_LIMIT = 3000; // total diff rows; above this, defer
-  let hlDeferMode = false;
-  let hlPending = []; // [{td, text, lang, prefixHtml}] queued for deferred pass
-
   // Viewed ("確認済み") state, GitHub "Viewed" semantics. Persisted in
   // localStorage as { [filePath]: contentHash }. On load a file counts as viewed
   // only when its stored hash still matches the current diff's hash, so a file
@@ -50,75 +44,10 @@
       ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
   }
 
-  /* ---------- syntax highlighting ---------- */
-
-  // File extension -> highlight.js language. Extensions not listed get no
-  // highlighting (plain escaped text).
-  const LANG_MAP = {
-    ts: 'typescript', tsx: 'typescript', mts: 'typescript', cts: 'typescript',
-    js: 'javascript', jsx: 'javascript', mjs: 'javascript', cjs: 'javascript',
-    json: 'json',
-    css: 'css',
-    md: 'markdown', markdown: 'markdown',
-    html: 'xml', htm: 'xml',
-    rs: 'rust',
-    py: 'python',
-    sh: 'bash', bash: 'bash',
-    yml: 'yaml', yaml: 'yaml',
-  };
-
-  function langForPath(p) {
-    if (!p) return null;
-    const m = /\.([A-Za-z0-9]+)$/.exec(String(p));
-    if (!m) return null;
-    return LANG_MAP[m[1].toLowerCase()] || null;
-  }
-
-  // Returns hljs-escaped highlighted HTML, or null to signal "fall back to
-  // esc(text)". Safe when hljs is absent, language is unknown, or it throws.
-  function highlightHtml(text, lang) {
-    if (!lang) return null;
-    if (typeof hljs === 'undefined' || !hljs || typeof hljs.highlight !== 'function') {
-      return null;
-    }
-    try {
-      return hljs.highlight(text, { language: lang, ignoreIllegals: true }).value;
-    } catch (e) {
-      return null;
-    }
-  }
-
-  function totalDiffRows() {
-    let n = 0;
-    (DIFF.files || []).forEach(function (f) {
-      (f.hunks || []).forEach(function (h) { n += (h.rows || []).length; });
-    });
-    return n;
-  }
-
-  // Process the deferred-highlight queue in idle-time chunks so a large diff
-  // never blocks the main thread. Falls back to setTimeout where
-  // requestIdleCallback is unavailable (e.g. jsdom).
-  function scheduleHighlight() {
-    if (!hlPending.length) return;
-    const queue = hlPending;
-    hlPending = [];
-    let i = 0;
-    const CHUNK = 400;
-    const ric = window.requestIdleCallback || function (cb) {
-      return setTimeout(function () { cb(); }, 16);
-    };
-    function step() {
-      const end = Math.min(i + CHUNK, queue.length);
-      for (; i < end; i++) {
-        const item = queue[i];
-        const html = highlightHtml(item.text, item.lang);
-        if (html !== null) item.td.innerHTML = item.prefixHtml + html;
-      }
-      if (i < queue.length) ric(step);
-    }
-    ric(step);
-  }
+  /* ---------- syntax highlighting ----------
+   * Highlighting is baked at generate time by Shiki (github-dark) into each
+   * diff cell's `html` field (see codeCell). The client only renders that
+   * pre-colored markup, so there is no runtime highlighter here. */
 
   /* ---------- copy path ---------- */
 
@@ -242,9 +171,6 @@
     computeFileHashes();
     loadViewed();
 
-    // Decide up front whether to highlight synchronously or defer to idle time.
-    hlDeferMode = totalDiffRows() > HIGHLIGHT_SYNC_LIMIT;
-    hlPending = [];
     expanders = {};
 
     const frag = document.createDocumentFragment();
@@ -363,7 +289,6 @@
     app.appendChild(frag);
     buildSidebar();
     renderComments();
-    scheduleHighlight();
   }
 
   // Read-only render for the /commit/<sha> page (window.__COMMIT__ set). Same
@@ -373,8 +298,6 @@
     const c = window.__COMMIT__;
     diffMeta.textContent = c.shortSha + ' / ' + c.author + ' / ' + fmtDate(c.date);
 
-    hlDeferMode = totalDiffRows() > HIGHLIGHT_SYNC_LIMIT;
-    hlPending = [];
     expanders = {};
 
     const frag = document.createDocumentFragment();
@@ -425,7 +348,6 @@
 
     app.innerHTML = '';
     app.appendChild(frag);
-    scheduleHighlight();
   }
 
   /* ---------- context expansion (GitHub-style) ---------- */
@@ -474,8 +396,6 @@
     const tbody = document.createElement('tbody');
     table.appendChild(tbody);
 
-    const lang = langForPath(file.path);
-
     // Context expansion needs the full new-side content (embedded at generate
     // time). Each gap between hunks (and before/after the outer hunks) gets an
     // expander row whose closure tracks the still-hidden range [lo, hi] in
@@ -502,16 +422,20 @@
       function contextRow(n) {
         const raw = file.newLines[n - 1];
         const text = raw === undefined ? '' : raw;
+        // Baked Shiki HTML for this new-side line (parallel to newLines), when
+        // available. Lets expanded context match the highlighted diff rows.
+        const hl = file.newLinesHtml && file.newLinesHtml[n - 1];
+        const html = typeof hl === 'string' ? hl : undefined;
         // Expanded lines are not part of the generated diff, so they have no
         // diff position; diffLine 0 marks "expanded context" on saved comments.
-        const left = { line: n + delta, text: text, diffLine: 0, kind: 'context' };
-        const right = { line: n, text: text, diffLine: 0, kind: 'context' };
+        const left = { line: n + delta, text: text, diffLine: 0, kind: 'context', html: html };
+        const right = { line: n, text: text, diffLine: 0, kind: 'context', html: html };
         const row = document.createElement('tr');
         row.className = 'diff-row expanded-row';
         row.appendChild(numCell(file, 'old', left, interactive));
-        row.appendChild(codeCell(left, 'del', lang));
+        row.appendChild(codeCell(left, 'del'));
         row.appendChild(numCell(file, 'new', right, interactive));
-        row.appendChild(codeCell(right, 'add', lang));
+        row.appendChild(codeCell(right, 'add'));
         return row;
       }
 
@@ -537,7 +461,6 @@
 
       function finishReveal() {
         renderControls();
-        if (hlDeferMode) scheduleHighlight();
       }
 
       function expanderButton(label, title, onClick) {
@@ -630,9 +553,9 @@
         const tr = document.createElement('tr');
         tr.className = 'diff-row';
         tr.appendChild(numCell(file, 'old', row.left, interactive));
-        tr.appendChild(codeCell(row.left, 'del', lang));
+        tr.appendChild(codeCell(row.left, 'del'));
         tr.appendChild(numCell(file, 'new', row.right, interactive));
-        tr.appendChild(codeCell(row.right, 'add', lang));
+        tr.appendChild(codeCell(row.right, 'add'));
         tbody.appendChild(tr);
       });
     });
@@ -781,8 +704,6 @@
     stack.appendChild(panel); // newest at the right edge
     updatePinLayout();
     updatePinButtons();
-    // In deferred mode the new panel's cells were queued; drain them now.
-    scheduleHighlight();
   }
 
   // Re-📌 an already-pinned file unpins just that panel; 📌 a new file adds one.
@@ -1136,7 +1057,7 @@
     return td;
   }
 
-  function codeCell(cell, changedKind, lang) {
+  function codeCell(cell, changedKind) {
     const td = document.createElement('td');
     td.className = 'code';
     if (!cell) {
@@ -1146,16 +1067,11 @@
     if (cell.kind === changedKind) td.className += ' ' + changedKind;
     const prefix = cell.kind === 'add' ? '+' : cell.kind === 'del' ? '-' : ' ';
     const prefixHtml = '<span class="prefix">' + prefix + '</span>';
-    if (lang && hlDeferMode) {
-      // Render plain now; queue for idle-time highlighting.
-      td.innerHTML = prefixHtml + esc(cell.text);
-      hlPending.push({ td: td, text: cell.text, lang: lang, prefixHtml: prefixHtml });
-    } else if (lang) {
-      const html = highlightHtml(cell.text, lang);
-      td.innerHTML = prefixHtml + (html !== null ? html : esc(cell.text));
-    } else {
-      td.innerHTML = prefixHtml + esc(cell.text);
-    }
+    // Syntax highlighting is baked in at generate time (Shiki, github-dark):
+    // cell.html is pre-colored inner markup. When absent (unsupported language
+    // or highlight failure) fall back to escaped plain text.
+    const body = typeof cell.html === 'string' ? cell.html : esc(cell.text);
+    td.innerHTML = prefixHtml + body;
     return td;
   }
 

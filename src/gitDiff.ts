@@ -63,6 +63,27 @@ export function runGitCommitDiff(sha: string, cwd: string): string {
   );
 }
 
+// Old-side (pre-image) content of a file, one entry per line, or null when it
+// can't be read (added file, binary, or the ref/path doesn't resolve). Used to
+// give Shiki full-file language context when highlighting deleted/context lines.
+// The old side is `base:path` when a base ref is given, else `HEAD:path`
+// (working-tree-vs-HEAD diff), matching what runGitDiff compared against.
+export function readOldSideContent(
+  oldPath: string,
+  base: string | undefined,
+  cwd: string
+): string[] | null {
+  const ref = base ?? 'HEAD';
+  try {
+    const out = git(['show', `${ref}:${oldPath}`], cwd);
+    const lines = out.split('\n');
+    if (lines.length && lines[lines.length - 1] === '') lines.pop();
+    return lines;
+  } catch {
+    return null;
+  }
+}
+
 interface RawHunkLine {
   kind: 'context' | 'add' | 'del';
   oldLine: number | null;

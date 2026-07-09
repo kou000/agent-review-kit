@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { parseUnifiedDiff, runGitDiff } from '../gitDiff';
+import { parseUnifiedDiff, readOldSideContent, runGitDiff } from '../gitDiff';
+import { bakeHighlight, HighlightSources } from '../highlight';
 import { ensureDir, reviewPaths } from '../paths';
 import { renderHtml, writeAssets } from '../render';
 import { loadState, nowIso, saveComments, saveState } from '../store';
@@ -36,7 +37,26 @@ export interface GenerateOptions {
   cwd?: string;
 }
 
-export function generate(opts: GenerateOptions = {}): void {
+// Read the old-side (pre-image) content of every file so Shiki can highlight
+// deleted/context lines with full-file language context. Added/binary files have
+// no readable old side and map to null (single-line highlighting is used there).
+function collectOldSources(
+  files: FileDiff[],
+  base: string | undefined,
+  cwd: string
+): HighlightSources {
+  const oldByPath = new Map<string, string[] | null>();
+  for (const f of files) {
+    if (f.status === 'added' || f.status === 'binary') {
+      oldByPath.set(f.path, null);
+      continue;
+    }
+    oldByPath.set(f.path, readOldSideContent(f.oldPath, base, cwd));
+  }
+  return { oldByPath };
+}
+
+export async function generate(opts: GenerateOptions = {}): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
   const paths = reviewPaths(cwd);
   ensureDir(paths.dir);
@@ -52,6 +72,11 @@ export function generate(opts: GenerateOptions = {}): void {
   const diffText = runGitDiff(base, cwd);
   const files = parseUnifiedDiff(diffText);
   embedNewSideContent(files, cwd);
+
+  // SSR syntax highlighting: bake per-line Shiki HTML into each diff cell so the
+  // client renders pre-colored markup (no runtime highlighter, self-contained).
+  const oldSources = collectOldSources(files, base, cwd);
+  await bakeHighlight(files, oldSources);
 
   const data: DiffData = {
     base: base ?? null,

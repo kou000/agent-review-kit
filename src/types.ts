@@ -59,6 +59,11 @@ export interface DiffCell {
   text: string;
   diffLine: number;
   kind: 'context' | 'add' | 'del';
+  // Pre-highlighted inner HTML for this line, baked at generate time by Shiki
+  // (github-dark, inline styles). The client renders it verbatim after the
+  // +/-/space prefix span. Omitted when the file's language is unsupported or
+  // highlighting failed, in which case the client falls back to escaped text.
+  html?: string;
 }
 
 export interface DiffRow {
@@ -82,6 +87,10 @@ export interface FileDiff {
   // Enables GitHub-style context expansion in the review UI. Omitted for
   // deleted/binary files and files over the embed size cap.
   newLines?: string[];
+  // Pre-highlighted inner HTML for each newLines entry (parallel array, baked by
+  // Shiki at generate time). Lets expanded context rows match the highlighted
+  // diff rows. Omitted when the language is unsupported or highlighting failed.
+  newLinesHtml?: string[];
 }
 
 export interface DiffData {
