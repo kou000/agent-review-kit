@@ -44,6 +44,8 @@ const LANG_MAP: Record<string, string> = {
   yaml: 'yaml',
   sh: 'bash',
   bash: 'bash',
+  rs: 'rust',
+  py: 'python',
 };
 
 // Every language we may need to load. Passed to createHighlighter up front so
