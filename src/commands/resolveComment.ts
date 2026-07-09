@@ -1,4 +1,5 @@
 import { getCommitMeta } from '../gitDiff';
+import { encodeImageToDataUri } from '../image';
 import { reviewPaths } from '../paths';
 import { mutateComments, nowIso } from '../store';
 import { COMMENT_STATUSES, CommentStatus } from '../types';
@@ -8,6 +9,7 @@ export interface ResolveOptions {
   status?: string;
   message?: string;
   commit?: string;
+  images?: string[];
   cwd?: string;
 }
 
@@ -38,6 +40,24 @@ export function resolveComment(opts: ResolveOptions): void {
     }
   }
 
+  // Encode --image files to data URIs before taking the file lock so a bad
+  // path / unsupported format / oversize image fails loudly without leaving a
+  // half-updated comment. Like --commit, images ride on the agentResponse and
+  // therefore require --message.
+  let imageDataUris: string[] | undefined;
+  if (opts.images && opts.images.length > 0) {
+    if (!opts.message) {
+      console.error('error: --image には --message が必要です（返信に画像を添える）');
+      process.exit(1);
+    }
+    try {
+      imageDataUris = opts.images.map((p) => encodeImageToDataUri(p));
+    } catch (e) {
+      console.error(`error: ${e instanceof Error ? e.message : String(e)}`);
+      process.exit(1);
+    }
+  }
+
   const paths = reviewPaths(cwd);
   const updated = mutateComments(paths.comments, (comments) => {
     const comment = comments.find((c) => c.id === opts.id);
@@ -48,6 +68,7 @@ export function resolveComment(opts: ResolveOptions): void {
     if (opts.message) {
       comment.agentResponse = { message: opts.message, updatedAt: now };
       if (commitSha) comment.agentResponse.commit = commitSha;
+      if (imageDataUris) comment.agentResponse.images = imageDataUris;
     }
     return comment;
   });

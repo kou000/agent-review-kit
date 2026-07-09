@@ -104,10 +104,16 @@ agent-review-kit wait-comments --timeout 600   # 最大600秒待つ
 ```bash
 agent-review-kit resolve-comment comment_xxx --status fixed --message "nullチェックを追加しました"
 agent-review-kit resolve-comment comment_xxx --status answered --message "この値はAPI側で検証済みです"
+# 変更後のキャプチャを返信に添付（複数可、--message 必須。1枚あたり最大3MB）
+agent-review-kit resolve-comment comment_xxx --status fixed --message "修正後の画面です" \
+  --image ./before.png --image ./after.png
 ```
 
 status: `open` / `seen` / `fixed` / `answered` / `wontfix` / `resolved`。
 `--message` は `agentResponse` としてコメントに保存され、画面にインライン表示される。
+`--image <path>`（png/jpg/jpeg/gif/webp、複数回指定可）は画像を base64 data URI に
+変換して `agentResponse.images` に保存し、返信の下に `<img>` でインライン表示する。
+外部通信は発生せず（data URI で自己完結）、画面側は `data:` 画像のみを受け付ける。
 
 ### 5. 状態確認
 

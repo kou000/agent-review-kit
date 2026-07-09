@@ -35,6 +35,15 @@
       .replace(/"/g, '&quot;');
   }
 
+  // Only accept self-contained base64 image data URIs for inline agent images.
+  // This blocks javascript:, http(s):, and any other scheme, so a crafted
+  // comments.json can never turn an attached "image" into an external request
+  // or script. The value is still esc()'d before it lands in an attribute.
+  function isSafeImageDataUri(s) {
+    return typeof s === 'string' &&
+      /^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/=]+$/.test(s);
+  }
+
   function fmtDate(iso) {
     if (!iso) return '';
     const d = new Date(iso);
@@ -1286,6 +1295,21 @@
         html += '<a class="commit-link" href="/commit/' + encodeURIComponent(sha) +
           '" target="_blank" rel="noopener" title="このコミットの差分を新しいタブで開く">🔗 ' +
           esc(sha.slice(0, 7)) + '</a>';
+      }
+      // Inline images attached by the agent. Only data: image URIs pass the
+      // sanitizer; anything else (javascript:, http:, ...) is silently dropped
+      // so the UI never emits an external request or an unsafe src. Each image
+      // links to itself so a click opens the full-size capture in a new tab.
+      if (c.agentResponse.images && c.agentResponse.images.length) {
+        var imgs = '';
+        for (var ii = 0; ii < c.agentResponse.images.length; ii++) {
+          var uri = c.agentResponse.images[ii];
+          if (!isSafeImageDataUri(uri)) continue;
+          imgs += '<a class="agent-image-link" href="' + esc(uri) +
+            '" target="_blank" rel="noopener" title="原寸を新しいタブで開く">' +
+            '<img class="agent-image" src="' + esc(uri) + '" alt="agent の添付画像"></a>';
+        }
+        if (imgs) html += '<div class="agent-images">' + imgs + '</div>';
       }
       html += '</div>';
     }
