@@ -11,6 +11,9 @@ export interface ServeOptions {
 // --port 未指定時に DEFAULT_PORT から順に試す範囲。
 const PORT_SCAN_RANGE = 20;
 
+// ローカル専用ツール: LAN に diff・任意コミットの差分・コメントAPIを晒さない。
+const LISTEN_HOST = '127.0.0.1';
+
 export function serve(opts: ServeOptions = {}): void {
   const cwd = opts.cwd ?? process.cwd();
   const paths = reviewPaths(cwd);
@@ -29,7 +32,7 @@ export function serve(opts: ServeOptions = {}): void {
       // 明示指定されたポートは黙って変えない。自動選択時のみ次を試す。
       if (!explicitPort && port < DEFAULT_PORT + PORT_SCAN_RANGE) {
         port += 1;
-        server.listen(port);
+        server.listen(port, LISTEN_HOST);
         return;
       }
       console.error(
@@ -53,5 +56,5 @@ export function serve(opts: ServeOptions = {}): void {
     );
     console.log(`agent-review-kit serve: http://localhost:${port}`);
   });
-  server.listen(port);
+  server.listen(port, LISTEN_HOST);
 }
