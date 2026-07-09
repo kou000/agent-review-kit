@@ -366,6 +366,68 @@
     scheduleHighlight();
   }
 
+  // Read-only render for the /commit/<sha> page (window.__COMMIT__ set). Same
+  // file boxes and diff tables as renderDiff, but with none of the interactive
+  // chrome: no collapse/viewed/pin buttons, no comment wiring, no sidebar.
+  function renderCommitPage() {
+    const c = window.__COMMIT__;
+    diffMeta.textContent = c.shortSha + ' / ' + c.author + ' / ' + fmtDate(c.date);
+
+    hlDeferMode = totalDiffRows() > HIGHLIGHT_SYNC_LIMIT;
+    hlPending = [];
+    expanders = {};
+
+    const frag = document.createDocumentFragment();
+
+    const banner = document.createElement('div');
+    banner.className = 'commit-banner';
+    banner.innerHTML =
+      '<div class="commit-subject"></div><div class="commit-meta-line"></div>';
+    banner.querySelector('.commit-subject').textContent = c.subject;
+    banner.querySelector('.commit-meta-line').textContent =
+      'commit ' + c.sha + ' — ' + c.author + ' — ' + fmtDate(c.date);
+    frag.appendChild(banner);
+
+    if (!DIFF.files.length) {
+      const empty = document.createElement('div');
+      empty.className = 'empty-diff';
+      empty.textContent = 'このコミットには差分がありません。';
+      frag.appendChild(empty);
+    }
+
+    DIFF.files.forEach(function (file, fi) {
+      const box = document.createElement('div');
+      box.className = 'file';
+      box.id = 'file-' + fi;
+      box.dataset.file = file.path;
+
+      const header = document.createElement('div');
+      header.className = 'file-header';
+      let title = esc(file.path);
+      if (file.status === 'renamed' && file.oldPath !== file.path) {
+        title = esc(file.oldPath) + ' → ' + esc(file.path);
+      }
+      header.innerHTML = '<span class="file-status ' + esc(file.status) + '">' +
+        esc(statusLabel(file.status)) + '</span><span class="file-name">' + title + '</span>';
+      header.appendChild(copyPathButton(file.path));
+      box.appendChild(header);
+
+      if (file.status === 'binary' || !file.hunks.length) {
+        const p = document.createElement('div');
+        p.className = 'empty-diff';
+        p.textContent = file.status === 'binary' ? 'バイナリファイル（表示できません）' : '内容の変更はありません';
+        box.appendChild(p);
+      } else {
+        box.appendChild(buildDiffTable(file, false));
+      }
+      frag.appendChild(box);
+    });
+
+    app.innerHTML = '';
+    app.appendChild(frag);
+    scheduleHighlight();
+  }
+
   /* ---------- context expansion (GitHub-style) ---------- */
 
   const EXPAND_STEP = 20;
@@ -754,6 +816,10 @@
       btn.disabled = true;
       api('POST', '/api/comments', { body: body }).then(function () {
         textarea.value = '';
+        // Blur so a Ctrl+Enter submit (which keeps focus) doesn't leave the
+        // textarea as activeElement — isEditingDraft() would otherwise defer
+        // the refresh forever and the new comment would never appear.
+        textarea.blur();
         btn.disabled = false;
         refresh();
       }).catch(function (err) {
@@ -1295,7 +1361,17 @@
       '<div class="body">' + esc(c.body) + '</div>';
     if (c.agentResponse && c.agentResponse.message) {
       html += '<div class="agent-response"><span class="who">agent</span>' +
-        esc(c.agentResponse.message) + '</div>';
+        esc(c.agentResponse.message);
+      // A linked fix commit renders as a chip; clicking opens /commit/<sha>
+      // (this commit's diff) in a new tab. sha is hex-only so it needs no
+      // attribute escaping beyond esc() for the visible text.
+      if (c.agentResponse.commit) {
+        var sha = c.agentResponse.commit;
+        html += '<a class="commit-link" href="/commit/' + encodeURIComponent(sha) +
+          '" target="_blank" rel="noopener" title="このコミットの差分を新しいタブで開く">🔗 ' +
+          esc(sha.slice(0, 7)) + '</a>';
+      }
+      html += '</div>';
     }
     div.innerHTML = html;
 
@@ -1473,6 +1549,10 @@
           parentId: top.id,
           body: body,
         }).then(function () {
+          // Close the form (removing its textarea) before refreshing so the
+          // just-submitted text no longer counts as an in-progress draft;
+          // otherwise the refresh defers forever and the form stays frozen.
+          close();
           refresh();
         }).catch(function (err) {
           alert('返信の保存に失敗しました: ' + err);
@@ -1604,6 +1684,21 @@
 
   let lastCommentsJson = '';
 
+  // True while the user has an in-progress draft in any comment/reply form:
+  // either the textarea is focused, or it holds unsent text. Used to defer the
+  // 3s auto-refresh so re-rendering (which rebuilds thread rows) or a reload
+  // never wipes what they are typing. Deferral ends as soon as the draft is
+  // submitted, cleared, or blurred-empty; the next tick then catches up.
+  function isEditingDraft() {
+    const areas = document.querySelectorAll('.comment-form textarea, .reply-form textarea');
+    for (let i = 0; i < areas.length; i++) {
+      const ta = areas[i];
+      if (document.activeElement === ta) return true;
+      if (ta.value && ta.value.trim() !== '') return true;
+    }
+    return false;
+  }
+
   function refresh() {
     return Promise.all([
       api('GET', '/api/comments'),
@@ -1611,6 +1706,12 @@
     ]).then(function (results) {
       const cs = results[0].comments || [];
       const status = results[1];
+      // Never yank the DOM out from under an in-progress draft. Leave
+      // lastCommentsJson untouched so the change is re-detected next tick.
+      if (isEditingDraft()) {
+        connState.textContent = '入力中のため更新を保留中…';
+        return;
+      }
       connState.textContent = '';
       if (status.generatedAt && DIFF.generatedAt && status.generatedAt !== DIFF.generatedAt) {
         location.reload();
@@ -1750,6 +1851,15 @@
     } catch (e) { /* ignore */ }
     // Pin widths are per-panel and applied when a panel is created; nothing to
     // restore globally (the last-used width is read via savedPinDefault).
+  }
+
+  // Commit view: served at /commit/<sha> with window.__COMMIT__ set. It reuses
+  // the diff renderer read-only and skips all review chrome — no sidebar,
+  // comments, forms, polling or reloads. Bail out before any of that is wired.
+  if (window.__COMMIT__) {
+    renderCommitPage();
+    setupScrollTop();
+    return;
   }
 
   restorePersistedWidths();

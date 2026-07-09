@@ -1,23 +1,63 @@
 import { execFileSync } from 'child_process';
 import { DiffCell, DiffRow, FileDiff } from './types';
 
+function git(args: string[], cwd: string): string {
+  return execFileSync('git', args, {
+    cwd,
+    encoding: 'utf8',
+    maxBuffer: 256 * 1024 * 1024,
+  });
+}
+
 export function runGitDiff(base: string | undefined, cwd: string): string {
-  const run = (args: string[]): string =>
-    execFileSync('git', args, {
-      cwd,
-      encoding: 'utf8',
-      maxBuffer: 256 * 1024 * 1024,
-    });
   if (base) {
-    return run(['diff', '--no-color', '--no-ext-diff', base]);
+    return git(['diff', '--no-color', '--no-ext-diff', base], cwd);
   }
   try {
     // Working tree vs HEAD: covers both staged and unstaged changes.
-    return run(['diff', '--no-color', '--no-ext-diff', 'HEAD']);
+    return git(['diff', '--no-color', '--no-ext-diff', 'HEAD'], cwd);
   } catch {
     // Repo without any commit yet: fall back to index diff.
-    return run(['diff', '--no-color', '--no-ext-diff']);
+    return git(['diff', '--no-color', '--no-ext-diff'], cwd);
   }
+}
+
+// A raw hex sha is the only shape we ever pass to git for a commit lookup. The
+// value comes from comments.json (agent-written) and the /commit/<sha> URL, so
+// it is validated against this before ever reaching execFile — belt to the
+// suspenders of execFile already not going through a shell.
+const SHA_RE = /^[0-9a-f]{4,40}$/;
+
+export interface CommitMeta {
+  sha: string; // canonical full sha
+  shortSha: string;
+  subject: string;
+  author: string;
+  date: string; // ISO
+}
+
+// Resolve a (possibly abbreviated) sha to its commit metadata. Throws if the
+// value isn't a plausible sha or doesn't name a commit in this repo.
+export function getCommitMeta(sha: string, cwd: string): CommitMeta {
+  if (!SHA_RE.test(sha)) throw new Error(`invalid commit sha: ${sha}`);
+  // %x00 = NUL field separator: subjects can contain anything but NUL.
+  const out = git(
+    ['show', '-s', '--no-color', '--date=iso', '--format=%H%x00%h%x00%s%x00%an%x00%ad', `${sha}^{commit}`],
+    cwd
+  );
+  const [full, short, subject, author, date] = out.replace(/\n$/, '').split('\0');
+  return { sha: full, shortSha: short, subject, author, date };
+}
+
+// Unified diff introduced by a single commit (vs its first parent; a root
+// commit shows as all-additions). `--format=` suppresses the commit header so
+// only the diff body remains for parseUnifiedDiff.
+export function runGitCommitDiff(sha: string, cwd: string): string {
+  if (!SHA_RE.test(sha)) throw new Error(`invalid commit sha: ${sha}`);
+  return git(
+    ['show', '--no-color', '--no-ext-diff', '--first-parent', '--format=', `${sha}^{commit}`],
+    cwd
+  );
 }
 
 interface RawHunkLine {
