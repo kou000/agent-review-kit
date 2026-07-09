@@ -18,6 +18,10 @@ export const COMMENT_STATUSES: CommentStatus[] = [
 export interface AgentResponse {
   message: string;
   updatedAt: string;
+  // Full 40-hex sha of the commit that carries this fix, when the agent
+  // resolved with --commit. The UI renders it as a link to /commit/<sha>,
+  // which opens that commit's diff in a new tab. Omitted = no linked commit.
+  commit?: string;
 }
 
 export interface ReviewComment {

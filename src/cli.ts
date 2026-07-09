@@ -17,6 +17,7 @@ Commands:
   resolve-comment <id>     コメントの状態を更新する
     --status <status>      open|seen|fixed|answered|wontfix|resolved（デフォルト: resolved）
     --message <text>       agentResponse として保存する返信メッセージ
+    --commit <sha>         修正コミットの sha。返信に /commit/<sha> へのリンクを添える（--message 必須）
   status                   コメント集計をJSONで出力する
 `;
 
@@ -89,6 +90,7 @@ async function main(): Promise<void> {
         id,
         status: flagStr(flags, 'status'),
         message: flagStr(flags, 'message'),
+        commit: flagStr(flags, 'commit'),
       });
       break;
     }

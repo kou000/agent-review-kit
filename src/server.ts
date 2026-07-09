@@ -1,9 +1,11 @@
 import * as fs from 'fs';
 import * as http from 'http';
 import * as path from 'path';
+import { getCommitMeta, parseUnifiedDiff, runGitCommitDiff } from './gitDiff';
 import { ReviewPaths } from './paths';
+import { renderCommitHtml } from './render';
 import { loadComments, loadState, mutateComments, newCommentId, nowIso } from './store';
-import { COMMENT_STATUSES, CommentStatus, ReviewComment } from './types';
+import { COMMENT_STATUSES, CommentStatus, DiffData, ReviewComment } from './types';
 
 export const DEFAULT_PORT = 5179;
 
@@ -153,6 +155,28 @@ async function handle(
   }
   if (method === 'GET' && p === '/hljs-theme.css') {
     serveFile(res, paths.hljsCss, 'text/css; charset=utf-8');
+    return;
+  }
+
+  // Standalone diff page for a single commit, opened from a commit link in an
+  // agent response. The project git root is the parent of the .agent-review dir.
+  const commitMatch = /^\/commit\/([0-9a-f]{4,40})$/.exec(p);
+  if (method === 'GET' && commitMatch) {
+    const sha = commitMatch[1];
+    const projectDir = path.dirname(paths.dir);
+    try {
+      const meta = getCommitMeta(sha, projectDir);
+      const files = parseUnifiedDiff(runGitCommitDiff(sha, projectDir));
+      const data: DiffData = { base: `${meta.shortSha}^`, generatedAt: meta.date, files };
+      res.writeHead(200, {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-store',
+      });
+      res.end(renderCommitHtml(data, meta));
+    } catch {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end(`commit not found: ${sha}`);
+    }
     return;
   }
 

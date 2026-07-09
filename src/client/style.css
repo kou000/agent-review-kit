@@ -380,6 +380,42 @@ tr.widget-row td {
   display: block;
   margin-bottom: 2px;
 }
+/* Fix-commit link chip inside an agent response. */
+.comment-card .agent-response .commit-link {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--accent);
+  text-decoration: none;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card-bg);
+}
+.comment-card .agent-response .commit-link:hover {
+  border-color: var(--accent);
+}
+
+/* Header banner on the standalone /commit/<sha> page. */
+.commit-banner {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.commit-banner .commit-subject {
+  font-size: 15px;
+  font-weight: 600;
+}
+.commit-banner .commit-meta-line {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
 .comment-card .actions {
   padding: 0 10px 8px;
   display: flex;
