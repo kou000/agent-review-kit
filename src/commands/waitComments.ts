@@ -29,8 +29,13 @@ export async function waitComments(opts: WaitOptions = {}): Promise<void> {
         }
         return open;
       });
-      console.log(JSON.stringify({ status: 'received', comments: received }, null, 2));
-      return;
+      // The probe can win while another consumer (a concurrent wait-comments,
+      // or the user resolving the comment) drains the open set before we take
+      // the lock. An empty batch is not a receipt — keep waiting.
+      if (received.length > 0) {
+        console.log(JSON.stringify({ status: 'received', comments: received }, null, 2));
+        return;
+      }
     }
     if (deadline !== null && Date.now() >= deadline) {
       console.log(JSON.stringify({ status: 'timeout', comments: [] }, null, 2));
