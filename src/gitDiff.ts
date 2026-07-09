@@ -2,7 +2,10 @@ import { execFileSync } from 'child_process';
 import { DiffCell, DiffRow, FileDiff } from './types';
 
 function git(args: string[], cwd: string): string {
-  return execFileSync('git', args, {
+  // core.quotePath=false: 非ASCIIパス（日本語ファイル名等）をオクタルエスケープ
+  // せず素の UTF-8 で出力させる。エスケープされたままだとパス表示が壊れ、
+  // working tree からの newLines 埋め込み（コンテキスト展開）も失敗する。
+  return execFileSync('git', ['-c', 'core.quotePath=false', ...args], {
     cwd,
     encoding: 'utf8',
     maxBuffer: 256 * 1024 * 1024,
