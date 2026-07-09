@@ -1386,6 +1386,20 @@
           .catch(function (err) { alert('更新に失敗しました: ' + err); });
       });
       actions.appendChild(btn);
+      // seen のまま応答が滞留したコメントの復旧手段: open に戻して wait-comments
+      // に再配達させる。エージェント処理中に押すと同じ id で二重に届くので、
+      // 応答がないときのための手動リカバリと位置づける。
+      if (c.status === 'seen') {
+        const resend = document.createElement('button');
+        resend.textContent = 'エージェントに再送';
+        resend.title = '応答がないまま止まっているコメントを open に戻し、エージェントに再度配達する';
+        resend.addEventListener('click', function () {
+          api('PATCH', '/api/comments/' + encodeURIComponent(c.id), { status: 'open' })
+            .then(refresh)
+            .catch(function (err) { alert('更新に失敗しました: ' + err); });
+        });
+        actions.appendChild(resend);
+      }
       div.appendChild(actions);
     }
     return div;
