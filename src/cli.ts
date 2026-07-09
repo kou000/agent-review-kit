@@ -20,27 +20,43 @@ Commands:
     --status <status>      open|seen|fixed|answered|wontfix|resolved（デフォルト: resolved）
     --message <text>       agentResponse として保存する返信メッセージ
     --commit <sha>         修正コミットの sha。返信に /commit/<sha> へのリンクを添える（--message 必須）
+    --image <path>         返信にインライン表示する画像ファイル（png/jpg/jpeg/gif/webp）。
+                           複数回指定可。data URI 化して保存する（1枚あたり最大3MB、--message 必須）
   status                   コメント集計をJSONで出力する
 `;
 
+type FlagValue = string | boolean;
+
 interface ParsedArgs {
   positional: string[];
-  flags: Record<string, string | boolean>;
+  // A flag given once is a scalar; a flag repeated (e.g. --image a --image b)
+  // is collapsed into an array so callers can accept multiple values.
+  flags: Record<string, FlagValue | FlagValue[]>;
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
   const positional: string[] = [];
-  const flags: Record<string, string | boolean> = {};
+  const flags: Record<string, FlagValue | FlagValue[]> = {};
+  const set = (key: string, value: FlagValue): void => {
+    const prev = flags[key];
+    if (prev === undefined) {
+      flags[key] = value;
+    } else if (Array.isArray(prev)) {
+      prev.push(value);
+    } else {
+      flags[key] = [prev, value];
+    }
+  };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a.startsWith('--')) {
       const key = a.slice(2);
       const next = argv[i + 1];
       if (next !== undefined && !next.startsWith('--')) {
-        flags[key] = next;
+        set(key, next);
         i++;
       } else {
-        flags[key] = true;
+        set(key, true);
       }
     } else {
       positional.push(a);
@@ -49,9 +65,15 @@ function parseArgs(argv: string[]): ParsedArgs {
   return { positional, flags };
 }
 
-function flagStr(flags: Record<string, string | boolean>, key: string): string | undefined {
+type Flags = Record<string, FlagValue | FlagValue[]>;
+
+function flagStr(flags: Flags, key: string): string | undefined {
   const v = flags[key];
   if (v === undefined) return undefined;
+  if (Array.isArray(v)) {
+    console.error(`error: --${key} は一度だけ指定してください`);
+    process.exit(1);
+  }
   // 値なし（--base だけ、または次の引数が --xxx）や空文字（--base "$VAR" で
   // VAR が空）を黙ってフォールバックさせず、その場でエラーにする。
   if (v === true || v === '') {
@@ -61,10 +83,23 @@ function flagStr(flags: Record<string, string | boolean>, key: string): string |
   return v as string;
 }
 
-function flagNum(
-  flags: Record<string, string | boolean>,
-  key: string
-): number | undefined {
+// A flag that may be repeated (e.g. --image a --image b). Returns undefined
+// when absent, otherwise a list of the given values. Each value must be a
+// non-empty string; a bare flag (no value) or empty string is a hard error.
+function flagList(flags: Flags, key: string): string[] | undefined {
+  const v = flags[key];
+  if (v === undefined) return undefined;
+  const values = Array.isArray(v) ? v : [v];
+  return values.map((item) => {
+    if (item === true || item === '') {
+      console.error(`error: --${key} には値を指定してください`);
+      process.exit(1);
+    }
+    return item as string;
+  });
+}
+
+function flagNum(flags: Flags, key: string): number | undefined {
   const v = flagStr(flags, key);
   if (v === undefined) return undefined;
   const n = Number(v);
@@ -100,6 +135,7 @@ async function main(): Promise<void> {
         status: flagStr(flags, 'status'),
         message: flagStr(flags, 'message'),
         commit: flagStr(flags, 'commit'),
+        images: flagList(flags, 'image'),
       });
       break;
     }

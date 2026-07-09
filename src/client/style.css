@@ -392,6 +392,23 @@ tr.widget-row td {
 .comment-card .agent-response .commit-link:hover {
   border-color: var(--accent);
 }
+/* Inline images attached to an agent response. */
+.comment-card .agent-response .agent-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.comment-card .agent-response .agent-image-link {
+  display: inline-block;
+  line-height: 0;
+}
+.comment-card .agent-response .agent-image {
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
 
 /* Header banner on the standalone /commit/<sha> page. */
 .commit-banner {

@@ -22,6 +22,13 @@ export interface AgentResponse {
   // resolved with --commit. The UI renders it as a link to /commit/<sha>,
   // which opens that commit's diff in a new tab. Omitted = no linked commit.
   commit?: string;
+  // Inline images attached to the reply, each a self-contained base64 data URI
+  // (e.g. "data:image/png;base64,..."). The agent supplies them via --image;
+  // the UI renders each as an <img> below the message. Only data: image URIs
+  // are accepted (validated at write time and again in the client). Omitted =
+  // no images. Kept optional for backward compatibility with older
+  // comments.json files.
+  images?: string[];
 }
 
 export interface ReviewComment {
