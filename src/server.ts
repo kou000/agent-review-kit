@@ -149,14 +149,6 @@ async function handle(
     serveFile(res, paths.styleCss, 'text/css; charset=utf-8');
     return;
   }
-  if (method === 'GET' && p === '/highlight.min.js') {
-    serveFile(res, paths.hljsJs, 'text/javascript; charset=utf-8');
-    return;
-  }
-  if (method === 'GET' && p === '/hljs-theme.css') {
-    serveFile(res, paths.hljsCss, 'text/css; charset=utf-8');
-    return;
-  }
 
   // Standalone diff page for a single commit, opened from a commit link in an
   // agent response. The project git root is the parent of the .agent-review dir.

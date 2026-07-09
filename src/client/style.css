@@ -322,16 +322,12 @@ tr.hunk td {
 }
 td.selected, td.num.selected { background: var(--select-bg) !important; }
 
-/* ---------- syntax highlighting (highlight.js) ---------- */
-/* The bundled github-dark theme (loaded before this file) only needs to supply
-   token colors. Neutralize any theme-painted backgrounds so the diff row
-   backgrounds (add/del/context) show through and stay the single source of the
-   line tint. Token colors are bright enough to read over the add/del tints. */
-.hljs { background: transparent !important; color: inherit; }
-td.code .hljs-addition,
-td.code .hljs-deletion {
-  background-color: transparent;
-}
+/* ---------- syntax highlighting (Shiki, baked at generate time) ---------- */
+/* Token colors are baked into inline <span style="color:…"> at generate time by
+   Shiki (github-dark) — no runtime highlighter, no theme stylesheet. Cells carry
+   only foreground colors, so the diff row backgrounds (add/del/context) remain
+   the single source of the line tint and show through unchanged. Unhighlighted
+   fallback text inherits --fg. */
 
 .prefix { display: inline-block; width: 12px; color: var(--muted); }
 
