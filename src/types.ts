@@ -4,7 +4,10 @@ export type CommentStatus =
   | 'fixed'
   | 'answered'
   | 'wontfix'
-  | 'resolved';
+  | 'resolved'
+  // An AI review finding the user never acted on. Set in bulk when the review
+  // is finished (POST /api/finish); excluded from the unresolved count.
+  | 'dismissed';
 
 export const COMMENT_STATUSES: CommentStatus[] = [
   'open',
@@ -13,7 +16,18 @@ export const COMMENT_STATUSES: CommentStatus[] = [
   'answered',
   'wontfix',
   'resolved',
+  'dismissed',
 ];
+
+// Who wrote a comment. 'agent' marks AI review findings posted via
+// `add-comment`; they are skipped by wait-comments (only replies from the
+// user flow to the agent) and auto-dismissed on finish. Comments without an
+// author field (older comments.json files) are treated as 'user'.
+export type CommentAuthor = 'user' | 'agent';
+
+export function commentAuthor(c: ReviewComment): CommentAuthor {
+  return c.author ?? 'user';
+}
 
 export interface AgentResponse {
   message: string;
@@ -29,6 +43,11 @@ export interface AgentResponse {
   // no images. Kept optional for backward compatibility with older
   // comments.json files.
   images?: string[];
+  // Id of the snapshot (see SnapshotMeta) that carries this fix, when the
+  // agent resolved with --snapshot. The UI renders it as a link to
+  // /snapshot/<id>. Lets a fix be reviewed as its own diff page without
+  // creating a commit on the branch. Omitted = no linked snapshot.
+  snapshot?: string;
 }
 
 export interface ReviewComment {
@@ -50,6 +69,12 @@ export interface ReviewComment {
   // line numbers) is copied from its parent, and parentId always points at a
   // top-level comment (threads are one level deep). Omitted/null = top-level.
   parentId?: string | null;
+  // See CommentAuthor. Omitted = 'user' (backward compatible).
+  author?: CommentAuthor;
+  // Soft delete. Deleted comments stay in comments.json (recoverable by
+  // hand-editing) but are hidden from the UI, excluded from status counts and
+  // never delivered by wait-comments. Omitted/false = live.
+  deleted?: boolean;
 }
 
 export interface CommentsFile {
@@ -59,6 +84,54 @@ export interface CommentsFile {
 export interface ReviewState {
   base: string | null;
   generatedAt: string;
+}
+
+// Persisted to .agent-review/settings.json, edited from the browser via
+// GET/PUT /api/settings. Missing file or missing keys fall back to defaults,
+// so the file only ever needs to hold what the user changed.
+export interface ReviewSettings {
+  // When false, `snapshot create` becomes a no-op (exits with
+  // {"status":"skipped"}), so no per-fix diff pages are produced.
+  snapshotsEnabled: boolean;
+  // Review-only mode for someone else's MR: the agent answers comments but
+  // must not modify code. Enforced by the skill; surfaced as a badge in the UI.
+  readOnlyMode: boolean;
+}
+
+export const DEFAULT_SETTINGS: ReviewSettings = {
+  snapshotsEnabled: true,
+  readOnlyMode: false,
+};
+
+// One captured fix: a git-format patch stored under .agent-review/snapshots/.
+// seq is a 1-based counter that fixes the chronological replay order (the
+// patch files are also prefixed with it, e.g. 0001_snap_xxx.patch).
+export interface SnapshotMeta {
+  id: string;
+  seq: number;
+  // The review comment this fix responds to.
+  commentId: string;
+  title?: string;
+  createdAt: string;
+  // File name relative to the snapshots directory.
+  patchFile: string;
+}
+
+export interface SnapshotIndex {
+  // Working-tree state at the FIRST `snapshot begin` of the review, as a git
+  // tree sha. A per-comment commit replay restores this state first, then
+  // applies the patches in seq order — required for a clean replay when the
+  // review started with uncommitted changes (patch #1's context lines exist
+  // in this tree, not in HEAD).
+  baselineTree?: string;
+  snapshots: SnapshotMeta[];
+}
+
+// Presence of .agent-review/finished.json means the review was ended from the
+// browser (POST /api/finish): wait-comments exits with status "finished" and
+// the server shuts down. `generate` deletes the file, starting a new review.
+export interface FinishState {
+  finishedAt: string;
 }
 
 export interface DiffCell {

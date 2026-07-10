@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { CommitMeta } from './gitDiff';
 import { clientAssetDir, ReviewPaths } from './paths';
-import { DiffData } from './types';
+import { DiffData, SnapshotMeta } from './types';
 
 function escapeForScript(json: string): string {
   return json
@@ -64,6 +64,46 @@ export function renderCommitHtml(data: DiffData, meta: CommitMeta): string {
 <body>
 <script>window.__DIFF__ = ${payload};</script>
 <script>window.__COMMIT__ = ${commitPayload};</script>
+<header id="topbar">
+  <div class="topbar-inner">
+    <span class="brand">agent-review-kit</span>
+    <span id="diff-meta"></span>
+    <span id="unresolved-badge" class="badge" hidden>-</span>
+    <span id="conn-state" class="conn"></span>
+  </div>
+</header>
+<main id="app"></main>
+<script src="/app.js"></script>
+</body>
+</html>
+`;
+}
+
+// What the /snapshot/<id> page shows in its banner: the snapshot metadata
+// plus (when the comment still exists) an excerpt of the comment this fix
+// responds to.
+export interface SnapshotPageInfo extends SnapshotMeta {
+  commentBody: string | null;
+}
+
+// Standalone page for one fix snapshot's diff, opened from a snapshot link in
+// an agent response. Mirrors renderCommitHtml: same client bundle, app.js
+// switches to the read-only snapshot view when window.__SNAPSHOT__ is set.
+export function renderSnapshotHtml(data: DiffData, info: SnapshotPageInfo): string {
+  const payload = escapeForScript(JSON.stringify(data));
+  const snapshotPayload = escapeForScript(JSON.stringify(info));
+  const title = info.title ?? `修正 #${info.seq}`;
+  return `<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(title)} — snapshot</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<script>window.__DIFF__ = ${payload};</script>
+<script>window.__SNAPSHOT__ = ${snapshotPayload};</script>
 <header id="topbar">
   <div class="topbar-inner">
     <span class="brand">agent-review-kit</span>

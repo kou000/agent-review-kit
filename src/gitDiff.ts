@@ -52,6 +52,28 @@ export function getCommitMeta(sha: string, cwd: string): CommitMeta {
   return { sha: full, shortSha: short, subject, author, date };
 }
 
+// Commits between base and HEAD (newest first), for the review's commit list
+// (GitHub PR "Commits" tab equivalent). An unresolvable base yields [] rather
+// than an error: the list is auxiliary and must never break the review page.
+export function runGitCommitLog(base: string, cwd: string): CommitMeta[] {
+  let out: string;
+  try {
+    out = git(
+      ['log', '--no-color', '--date=iso', '--format=%H%x00%h%x00%s%x00%an%x00%ad', `${base}..HEAD`],
+      cwd
+    );
+  } catch {
+    return [];
+  }
+  return out
+    .split('\n')
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      const [full, short, subject, author, date] = line.split('\0');
+      return { sha: full, shortSha: short, subject, author, date };
+    });
+}
+
 // Unified diff introduced by a single commit (vs its first parent; a root
 // commit shows as all-additions). `--format=` suppresses the commit header so
 // only the diff body remains for parseUnifiedDiff.
