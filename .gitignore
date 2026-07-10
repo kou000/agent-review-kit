@@ -3,3 +3,6 @@ dist/
 .agent-review/
 *.log
 .claude/worktrees/
+
+# GitLab 反映用ローカルスクリプト（リポジトリには含めない）
+scripts/sync-gitlab.sh
