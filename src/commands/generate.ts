@@ -4,7 +4,7 @@ import { parseUnifiedDiff, readOldSideContent, runGitDiff } from '../gitDiff';
 import { bakeHighlight, HighlightSources } from '../highlight';
 import { ensureDir, reviewPaths } from '../paths';
 import { renderHtml, writeAssets } from '../render';
-import { loadState, nowIso, saveComments, saveState } from '../store';
+import { clearFinished, loadState, nowIso, saveComments, saveState } from '../store';
 import { DiffData, FileDiff } from '../types';
 
 // Files larger than this are embedded without expansion content, keeping the
@@ -60,8 +60,12 @@ export async function generate(opts: GenerateOptions = {}): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
   const paths = reviewPaths(cwd);
   ensureDir(paths.dir);
+  ensureDir(paths.branchDir);
   // Self-ignoring directory: keep review artifacts out of the project's git diff.
   fs.writeFileSync(path.join(paths.dir, '.gitignore'), '*\n');
+  // A regenerate starts (or resumes) a review: clear any leftover finished
+  // marker so wait-comments goes back to waiting.
+  clearFinished(paths.finished);
 
   // --base 省略時は前回 generate の base を引き継ぐ（修正コミット後の再生成で
   // ブランチ全体レビューが working-tree-only に化けてコメントが orphan 化する

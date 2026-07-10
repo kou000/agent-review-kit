@@ -1,6 +1,6 @@
 ---
 name: my-interactive-review
-description: 修正完了後に agent-review-kit でレビューHTMLを生成し、ユーザーがブラウザで書いた差分コメントを同一セッションで受け取り、回答・修正・resolve を未解決0件まで繰り返すレビューループ。Use when the user wants to review changes in a browser (GitHub-like diff review) and iterate on fixes with inline comments.
+description: 修正完了後に agent-review-kit でレビューHTMLを生成し、ユーザーがブラウザで書いた差分コメントを同一セッションで受け取り、回答・修正・resolve を未解決0件まで繰り返すレビューループ。AIレビューの指摘を add-comment でブラウザ上のコメントとして表示し、ユーザーが返信した指摘だけ修正する「AIレビューモード」も含む。他のレビュースキルの結果の出力先として agent-review-kit が指定された場合も、このスキルを読んで AI レビューモードの手順に従うこと。Use when the user wants to review changes in a browser (GitHub-like diff review), iterate on fixes with inline comments, or display AI review findings as browser comments (output target: agent-review-kit).
 ---
 
 # my-interactive-review
@@ -13,6 +13,13 @@ agent-review-kit を使って、ユーザーとブラウザ経由のレビュー
 
 - `agent-review-kit` コマンドが使えること（グローバルインストール済み、または `npx agent-review-kit`）。
 - 対象プロジェクトの作業ディレクトリ（git リポジトリ）で実行すること。`.agent-review/` がそこに作られる。
+
+## 設定（settings）の扱い
+
+設定はユーザーがブラウザの歯車メニューから**レビュー中いつでも切り替えられる**。現在の設定は `wait-comments` の受信出力（`received`）に**毎回同乗してくる**ので、**そのバッチの処理はその `settings` に従う**。別途 `status` で確認しにいく必要はない（受信より前に把握したい場合のみ `agent-review-kit status` を使う）:
+
+- `settings.readOnlyMode: true` — **読み取り専用モード**。他人の MR を閲覧するだけのレビューなど、コードを変更してはいけないモード。修正指摘が来ても**コードを変更せず**、調査結果・修正案を `--status answered` で回答するだけにする。サブエージェント委譲もしない。**received の settings を見ずに修正へ進むことを禁止する。**
+- `settings.snapshotsEnabled: false` — 修正スナップショット（後述）を保存しない設定。`snapshot create` は `{"status":"skipped"}` を返すので、コマンド手順は変えなくてよい（`resolve-comment` に `--snapshot` を付けないだけ）。
 
 ## 手順
 
@@ -56,7 +63,9 @@ agent-review-kit を使って、ユーザーとブラウザ経由のレビュー
    agent-review-kit wait-comments --timeout 0
    ```
 
-   受信すると `{"status": "received", "comments": [...]}` が stdout に返り、該当コメントは `seen` になる。
+   受信すると `{"status": "received", "settings": {...}, "comments": [...]}` が stdout に返り、該当コメントは `seen` になる。`settings` は受信時点の設定で、**このバッチの処理方針はここに従う**（「設定（settings）の扱い」参照）。
+
+   ユーザーがブラウザの「レビュー終了」ボタンを押すと `{"status": "finished", "comments": []}` が返る。この場合はループを抜けて手順12の完了報告に進む（AI指摘の見送り処理とサーバー停止はサーバー側で完了済み。wait-comments の再起動もしない）。
 
    **最初の wait-comments を起動する前に、取りこぼしを回収する。** `agent-review-kit status` の `counts.seen` が 0 でなければ、前回セッションが受信したまま対応せずに終わったコメントが残っている（`seen` は wait-comments では二度と配達されない）。`.agent-review/comments.json` から `status: "seen"` のコメントを読み、通常の受信分と同じように手順5以降でトリアージする。
 
@@ -73,14 +82,29 @@ agent-review-kit を使って、ユーザーとブラウザ経由のレビュー
    agent-review-kit resolve-comment <id> --status answered --message "回答内容"
    ```
 
-7. コメントが**修正指摘**なら、メインセッションは自分でコードを編集せず、**サブエージェントに委譲する**（1件だけでも委譲する。方針は「修正の委譲」）。サブエージェントの変更を取り込み、**メイン側で**テストまたは型チェックが通ることを確認したら、**その修正を1コミットとしてコミットし**、その sha を `--commit` で添えて resolve する:
+7. コメントが**修正指摘**なら、まず**そのバッチの `received.settings.readOnlyMode`** を確認する（true なら修正せず、修正案を `answered` で回答する）。修正する場合、メインセッションは自分でコードを編集せず、**サブエージェントに委譲する**（1件だけでも委譲する。方針は「修正の委譲」）。
+
+   **修正はコミットせず、スナップショットとして記録する。** git 履歴を汚さずに「この指摘に対する修正だけ」の差分ページをユーザーに見せられる。流れ:
 
    ```bash
-   git commit -am "fix: <対応内容>"          # 1指摘=1コミットを推奨（差分を単独で見せられる）
-   agent-review-kit resolve-comment <id> --status fixed --message "対応内容の説明" --commit "$(git rev-parse HEAD)"
+   # (1) サブエージェントの変更をメイン working tree に取り込む【直前】に、現状を記録
+   agent-review-kit snapshot begin
+
+   # (2) 変更を取り込み、メイン側で型チェック/テストを通す
+
+   # (3) この修正の patch を保存し、スナップショット id を得る
+   agent-review-kit snapshot create --comment <コメントid> --title "対応内容の短い説明"
+   # → {"status":"created","snapshot":{"id":"snap_xxx",...}}
+
+   # (4) スナップショットリンク付きで resolve する
+   agent-review-kit resolve-comment <コメントid> --status fixed --message "対応内容の説明" --snapshot snap_xxx
    ```
 
-   `--commit` を付けると返信にコミットリンク（🔗 短縮sha）が表示され、ユーザーがクリックするとそのコミットの差分だけを新しいタブで確認できる（GitHub 不要・ローカル完結）。`--commit` には `--message` が必須。テスト・型チェックの実行は必須で、失敗したまま fixed にしない。
+   `--snapshot` を付けると返信に「📄 修正差分」リンクが表示され、ユーザーがクリックするとその修正だけの差分を新しいタブで確認できる（コミット不要・ローカル完結）。`--snapshot` には `--message` が必須。テスト・型チェックの実行は必須で、失敗したまま fixed にしない。
+
+   - サブエージェントが worktree 内で**コミット済み**の場合は、begin/create の代わりに `snapshot create --comment <id> --commit <そのsha>` でそのコミットの差分を patch として取り込める（worktree のコミットは共有 object DB 経由で解決される）。
+   - `snapshot create` が `{"status":"skipped"}` を返したら設定でスナップショットが OFF。`--snapshot` を付けずに resolve する。
+   - **メインブランチへのコミットはユーザーが明示的に指示した時だけ行う**（粒度は「コミット指示への対応」参照）。
 
 8. 対応すべきか**判断できない**場合は、理由を書いて返す:
 
@@ -108,7 +132,68 @@ agent-review-kit を使って、ユーザーとブラウザ経由のレビュー
 
 11. 未解決コメントが残っている、またはユーザーのレビューが続いている間は、手順4の `wait-comments` に戻る。
 
-12. 未解決コメントが 0 になり、ユーザーがレビュー完了を示したら、対応内容をまとめて完了報告する。
+12. 次のいずれかでループを終了し、対応内容をまとめて完了報告する:
+    - `wait-comments` が `{"status":"finished"}` を返した（ユーザーがブラウザの「レビュー終了」ボタンを押した）
+    - `unresolved` が 0 になり、ユーザーが会話でレビュー完了を示した
+
+    コミットの指示があればここで対応する（「コミット指示への対応」参照）。
+
+## コミット指示への対応
+
+レビュー中の修正は working tree に未コミットのまま蓄積されている。ユーザーからコミットの指示を受けたら、指定された粒度でコミットする:
+
+- **まとめて1コミット**: 現在の working tree をそのままコミットするだけ。
+- **コメント単位でコミットを分ける**: `.agent-review/snapshots/` の patch を時系列（ファイル名の連番）順に再生する。各 patch は「その時点の working tree」を前提に作られているため、**先に最初の `snapshot begin` 時点の状態（`index.json` の `baselineTree`）を復元してから**再生する。レビュー開始時に未コミット変更があった場合、この復元を飛ばすと patch #1 が適用できない:
+
+  ```bash
+  # (0) 最終状態を tree として記録してから退避（安全ネット兼、再生後の検証基準。
+  #     stash@{0} との diff は untracked ファイルが stash^3 に分かれて正しく比較
+  #     できないため、必ずこの tree と比較する）
+  git add -A && FINAL_TREE=$(git write-tree)
+  git stash -u
+
+  # (1) ベースライン（最初の snapshot begin 時点）を復元する。
+  #     HEAD と一致していれば diff は空で、このコミットはスキップされる
+  BASE_TREE=$(node -p 'JSON.parse(require("fs").readFileSync(".agent-review/snapshots/index.json")).baselineTree')
+  git diff HEAD "$BASE_TREE" > /tmp/ark-baseline.patch
+  if [ -s /tmp/ark-baseline.patch ]; then
+    git apply --index /tmp/ark-baseline.patch
+    git commit -m "wip: レビュー開始時点の変更"   # メッセージ・扱いはユーザーに確認
+  fi
+
+  # (2) 連番順に、patch 適用 → コミット を繰り返す
+  for p in .agent-review/snapshots/0*.patch; do
+    git apply --index "$p"
+    git commit -m "fix: <index.json の該当エントリの title / commentId から要約>"
+  done
+
+  git diff "$FINAL_TREE"           # 空なら再生完了（最終状態を完全再現）。退避を破棄:
+  git stash drop
+  ```
+
+  `git diff "$FINAL_TREE"` に差分が残る場合、それはスナップショットの外で行われた変更（手動編集など）。その差分を最後の別コミットにするかユーザーに確認する。patch 適用が失敗した場合は `git apply --3way --index` を試し、それでも駄目なら `git reset --hard HEAD` 後に `git stash pop` で元に戻してから状況を報告する。ベースラインのコミットを履歴に残したくない場合は、再生後に rebase 等での整理をユーザーと相談する。
+
+## AI レビューモード
+
+ユーザーが「AI にレビューさせたい」「まず自分（エージェント）でレビューして」と指示した場合の変形モード。ループの仕組み（serve / wait-comments / resolve / generate）は通常と同一で、**ループ開始前に自分が diff をレビューして指摘をコメントとして投稿する**前段だけが追加される。
+
+1. 手順1〜2（generate / serve）まで通常どおり実行する。
+2. レビュー対象の diff を読み、観点（バグ・セキュリティ・性能・可読性・規約）ごとにレビューする。指摘は1件ずつコメントとして投稿する:
+
+   ```bash
+   # 行に紐づく指摘
+   agent-review-kit add-comment --file src/foo.ts --line 42 --body "指摘内容"
+   # 行範囲
+   agent-review-kit add-comment --file src/foo.ts --start-line 10 --end-line 20 --body "指摘内容"
+   # レビュー全体への所感
+   agent-review-kit add-comment --body "全体の所感"
+   ```
+
+   指摘は**現在の diff に含まれる行**に対して行う（diff 外の行は「現在の差分に位置づけできないコメント」として画面下部に落ちる）。`--side old` で削除側の行にも付けられる。
+3. 投稿を終えたら、ユーザーに件数と URL を伝えて手順3〜4（案内・wait-comments）に進む。このとき「対応不要と判断した指摘は放置してよい（レビュー終了時に自動で見送りになる）」ことを一言添える。
+4. **自分が投稿した指摘（AI コメント）はこの時点では処理しない。** wait-comments にも流れてこない（配達されるのはユーザー名義の open コメントだけ）。ユーザーが AI 指摘に**返信**したら、その返信が通常のコメントとして届くので、スレッド全体（親=自分の指摘）を読んで修正または回答する。修正の流れは手順7と同じ。
+   - **修正完了時は2つ resolve する**: 届いた返信コメントを `--status fixed --message ... [--snapshot ...]` で resolve し、**親の AI 指摘も `--status fixed` で resolve する**（親が open のまま残ると未解決カウントに残り続ける）。
+5. ユーザーが返信しなかった AI 指摘は、「レビュー終了」ボタンの押下時にサーバーが一括で `dismissed`（見送り）にする。エージェント側での後始末は不要。
 
 ## 修正の委譲
 
@@ -132,3 +217,7 @@ agent-review-kit を使って、ユーザーとブラウザ経由のレビュー
 - ユーザーのブラウザには、`seen` のまま応答が滞留したコメントを open に戻す「エージェントに再送」ボタンがある。再送されたコメントは**同じ id** で再度 wait-comments に届くので、既に対応済み・対応中の id なら重複として扱い、現在の状況（対応中/検証中など）を `--message` で返す。
 - 受信したら即トリアージする: 質問はサブエージェントの完了を待たずメインセッションがその場で回答（`answered`）し、実装が必要なものは「修正の委譲」の方針に従って委譲またはキューイングする。
 - レビュー対象の diff を変えたい場合（例: コミット後に base を変える）は `generate --base <ref>` を再実行する。
+- ユーザーはコメントを論理削除できる（削除済みは wait-comments に配達されず、未解決数にも入らない）。対応中だったコメントが消えていたら、対応を中止してよい。
+- `unresolved`（open + seen）にはユーザーが未対応の **AI 指摘も含まれる**。AI レビューモードでは「unresolved が 0 になるまで」を終了条件にせず、`finished` シグナルまたはユーザーの完了宣言で終了する。
+- サイドバー下部にレビュー対象（base..HEAD）のコミット一覧があり、ユーザーはコミット単体の差分ページを開ける。エージェント側の操作は不要。
+- **agent-review-kit 本体を更新した後は `generate` を再実行する**（`.agent-review/` の app.js / style.css は generate 時にコピーされるため、古いままだと新 UI・新 API が動かない）。

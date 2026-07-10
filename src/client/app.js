@@ -9,6 +9,7 @@
   const connState = document.getElementById('conn-state');
 
   let comments = [];
+  let refreshTimer = null; // 3s polling handle; cleared when the review finishes
   let selection = null; // {file, side, anchor:{line,diffLine}, head:{line,diffLine}}
   let openForm = null; // form row element currently shown
   let dragging = false;
@@ -300,30 +301,14 @@
     renderComments();
   }
 
-  // Read-only render for the /commit/<sha> page (window.__COMMIT__ set). Same
-  // file boxes and diff tables as renderDiff, but with none of the interactive
-  // chrome: no collapse/viewed/pin buttons, no comment wiring, no sidebar.
-  function renderCommitPage() {
-    const c = window.__COMMIT__;
-    diffMeta.textContent = c.shortSha + ' / ' + c.author + ' / ' + fmtDate(c.date);
-
-    expanders = {};
-
-    const frag = document.createDocumentFragment();
-
-    const banner = document.createElement('div');
-    banner.className = 'commit-banner';
-    banner.innerHTML =
-      '<div class="commit-subject"></div><div class="commit-meta-line"></div>';
-    banner.querySelector('.commit-subject').textContent = c.subject;
-    banner.querySelector('.commit-meta-line').textContent =
-      'commit ' + c.sha + ' — ' + c.author + ' — ' + fmtDate(c.date);
-    frag.appendChild(banner);
-
+  // Shared by the standalone /commit and /snapshot pages: same file boxes and
+  // diff tables as renderDiff, but with none of the interactive chrome — no
+  // collapse/viewed/pin buttons, no comment wiring, no sidebar.
+  function renderReadOnlyFiles(frag, emptyText) {
     if (!DIFF.files.length) {
       const empty = document.createElement('div');
       empty.className = 'empty-diff';
-      empty.textContent = 'このコミットには差分がありません。';
+      empty.textContent = emptyText;
       frag.appendChild(empty);
     }
 
@@ -354,6 +339,62 @@
       }
       frag.appendChild(box);
     });
+  }
+
+  // Read-only render for the /commit/<sha> page (window.__COMMIT__ set).
+  function renderCommitPage() {
+    const c = window.__COMMIT__;
+    diffMeta.textContent = c.shortSha + ' / ' + c.author + ' / ' + fmtDate(c.date);
+
+    expanders = {};
+
+    const frag = document.createDocumentFragment();
+
+    const banner = document.createElement('div');
+    banner.className = 'commit-banner';
+    banner.innerHTML =
+      '<div class="commit-subject"></div><div class="commit-meta-line"></div>';
+    banner.querySelector('.commit-subject').textContent = c.subject;
+    banner.querySelector('.commit-meta-line').textContent =
+      'commit ' + c.sha + ' — ' + c.author + ' — ' + fmtDate(c.date);
+    frag.appendChild(banner);
+
+    renderReadOnlyFiles(frag, 'このコミットには差分がありません。');
+
+    app.innerHTML = '';
+    app.appendChild(frag);
+  }
+
+  // Read-only render for the /snapshot/<id> page (window.__SNAPSHOT__ set):
+  // one fix's diff, captured as a patch instead of a commit. The banner names
+  // the review comment the fix responds to.
+  function renderSnapshotPage() {
+    const s = window.__SNAPSHOT__;
+    diffMeta.textContent = '修正 #' + s.seq + ' / ' + fmtDate(s.createdAt);
+
+    expanders = {};
+
+    const frag = document.createDocumentFragment();
+
+    const banner = document.createElement('div');
+    banner.className = 'commit-banner';
+    banner.innerHTML =
+      '<div class="commit-subject"></div><div class="commit-meta-line"></div>' +
+      '<div class="snapshot-comment"></div>';
+    banner.querySelector('.commit-subject').textContent =
+      s.title || ('修正スナップショット #' + s.seq);
+    banner.querySelector('.commit-meta-line').textContent =
+      'snapshot ' + s.id + ' — 修正 #' + s.seq + ' — ' + fmtDate(s.createdAt) +
+      ' — コメント ' + s.commentId;
+    const commentEl = banner.querySelector('.snapshot-comment');
+    if (s.commentBody) {
+      commentEl.textContent = '対象コメント: ' + s.commentBody;
+    } else {
+      commentEl.remove();
+    }
+    frag.appendChild(banner);
+
+    renderReadOnlyFiles(frag, 'このスナップショットには差分がありません。');
 
     app.innerHTML = '';
     app.appendChild(frag);
@@ -902,6 +943,18 @@
     cList.className = 'comment-list';
     sidebar.appendChild(cList);
 
+    // Commits under review (base..HEAD), like GitHub's Commits tab. Fetched
+    // once per page load; `generate` triggers a full reload, which refetches.
+    const commitHeading = document.createElement('div');
+    commitHeading.className = 'sidebar-title sidebar-commits-title';
+    commitHeading.id = 'sidebar-commits-title';
+    const commitList = document.createElement('div');
+    commitList.className = 'commit-list';
+    commitList.id = 'sidebar-commit-list';
+    sidebar.appendChild(commitHeading);
+    sidebar.appendChild(commitList);
+    loadCommitList(commitHeading, commitList);
+
     // Vertical drag handle between the sidebar and #app.
     const resizer = document.createElement('div');
     resizer.className = 'sidebar-resizer';
@@ -918,6 +971,52 @@
     // Populate the tree/確認済み sections now that the sidebar is in the DOM
     // (renderSidebarTree looks its containers up by id/selector).
     renderSidebarTree();
+  }
+
+  // Fill the sidebar commits section: base..HEAD, newest first, each row
+  // opening the existing /commit/<sha> diff page in a new tab. The heading
+  // toggles the list (collapsed by default to keep the sidebar compact). With
+  // no base or no commits the whole section stays hidden.
+  function loadCommitList(heading, list) {
+    heading.style.display = 'none';
+    list.style.display = 'none';
+    api('GET', '/api/commits').then(function (data) {
+      const commits = data.commits || [];
+      if (!commits.length) return;
+      heading.style.display = '';
+      let collapsed = true;
+      function syncHeading() {
+        heading.textContent = (collapsed ? '▸' : '▾') + ' コミット (' + commits.length + ')';
+        list.style.display = collapsed ? 'none' : '';
+      }
+      heading.addEventListener('click', function () {
+        collapsed = !collapsed;
+        syncHeading();
+      });
+      heading.title = 'クリックで開閉';
+      syncHeading();
+
+      commits.forEach(function (cm) {
+        const item = document.createElement('div');
+        item.className = 'commit-item';
+        item.title = cm.subject + '\n' + cm.author + ' — ' + cm.date;
+
+        const sha = document.createElement('span');
+        sha.className = 'commit-item-sha';
+        sha.textContent = cm.shortSha;
+
+        const subject = document.createElement('span');
+        subject.className = 'commit-item-subject';
+        subject.textContent = cm.subject;
+
+        item.appendChild(sha);
+        item.appendChild(subject);
+        item.addEventListener('click', function () {
+          window.open('/commit/' + encodeURIComponent(cm.sha), '_blank', 'noopener');
+        });
+        list.appendChild(item);
+      });
+    }).catch(function () { /* auxiliary; ignore fetch failures */ });
   }
 
   // (Re)render the sidebar tree: unviewed files as the nested tree, viewed files
@@ -991,6 +1090,15 @@
       '.comment-card[data-comment-id="' + id + '"]'
     );
     if (!card) return;
+    // A collapsed thread hides its cards; expand it before scrolling so the
+    // jump from the sidebar always lands on something visible.
+    const block = card.closest('.comment-thread-block');
+    if (block && block.classList.contains('collapsed')) {
+      block.classList.remove('collapsed');
+      if (block.dataset.topId) setThreadCollapsed(block.dataset.topId, false);
+      const caret = block.querySelector('.thread-caret');
+      if (caret) caret.textContent = '▾';
+    }
     if (typeof card.scrollIntoView === 'function') {
       card.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
@@ -1015,6 +1123,12 @@
     body.className = 'comment-item-body';
     body.textContent = bodySnippet(c.body);
 
+    if (isAgentComment(c)) {
+      const who = document.createElement('span');
+      who.className = 'who-pill';
+      who.textContent = 'AI';
+      item.appendChild(who);
+    }
     item.appendChild(pill);
     item.appendChild(loc);
     item.appendChild(body);
@@ -1261,9 +1375,14 @@
 
   /* ---------- comment threads ---------- */
 
+  function isAgentComment(c) {
+    return (c.author || 'user') === 'agent';
+  }
+
   function commentCard(c, isReply) {
     const div = document.createElement('div');
-    div.className = 'comment-card' + (isReply ? ' reply-card' : '');
+    div.className = 'comment-card' + (isReply ? ' reply-card' : '') +
+      (isAgentComment(c) ? ' agent-comment' : '');
     div.dataset.commentId = c.id;
 
     // Replies are visually nested under their parent, so the anchor location is
@@ -1279,6 +1398,7 @@
     }
     let html =
       '<div class="meta">' +
+      (isAgentComment(c) ? '<span class="who-pill">AI</span>' : '') +
       '<span class="status-pill status-' + esc(c.status) + '">' + esc(c.status) + '</span>' +
       '<span>' + posText + '</span>' +
       '<span>' + esc(fmtDate(c.createdAt)) + '</span>' +
@@ -1295,6 +1415,14 @@
         html += '<a class="commit-link" href="/commit/' + encodeURIComponent(sha) +
           '" target="_blank" rel="noopener" title="このコミットの差分を新しいタブで開く">🔗 ' +
           esc(sha.slice(0, 7)) + '</a>';
+      }
+      // A linked fix snapshot renders like a commit link but opens
+      // /snapshot/<id>. The id is validated against its fixed shape before it
+      // lands in an href, same policy as image data URIs.
+      if (c.agentResponse.snapshot && /^snap_[a-z0-9]+$/.test(c.agentResponse.snapshot)) {
+        html += '<a class="commit-link" href="/snapshot/' +
+          encodeURIComponent(c.agentResponse.snapshot) +
+          '" target="_blank" rel="noopener" title="この修正の差分を新しいタブで開く">📄 修正差分</a>';
       }
       // Inline images attached by the agent. Only data: image URIs pass the
       // sanitizer; anything else (javascript:, http:, ...) is silently dropped
@@ -1315,9 +1443,29 @@
     }
     div.innerHTML = html;
 
+    const actions = document.createElement('div');
+    actions.className = 'actions';
+    // One-click fix request on an unhandled AI finding: posts a canned reply
+    // as the user, which rides the normal reply pipeline (wait-comments only
+    // delivers user comments). The canned text is a self-contained
+    // instruction, so the consumer needs no knowledge of this button.
+    if (!isReply && isAgentComment(c) && (c.status === 'open' || c.status === 'seen')) {
+      const fixBtn = document.createElement('button');
+      fixBtn.className = 'primary';
+      fixBtn.textContent = '🔧 修正を依頼';
+      fixBtn.title = '返信を書かずに、この指摘の修正をエージェントに依頼する';
+      fixBtn.addEventListener('click', function () {
+        fixBtn.disabled = true;
+        api('POST', '/api/comments', { parentId: c.id, body: '上記の指摘の通り修正してください' })
+          .then(refresh)
+          .catch(function (err) {
+            fixBtn.disabled = false;
+            alert('修正依頼に失敗しました: ' + err);
+          });
+      });
+      actions.appendChild(fixBtn);
+    }
     if (c.status !== 'resolved') {
-      const actions = document.createElement('div');
-      actions.className = 'actions';
       const btn = document.createElement('button');
       btn.textContent = 'Resolve';
       btn.addEventListener('click', function () {
@@ -1340,8 +1488,25 @@
         });
         actions.appendChild(resend);
       }
-      div.appendChild(actions);
     }
+    // Soft delete (any status, any author). A top-level delete takes its
+    // replies with it on the server side, so warn accordingly.
+    const del = document.createElement('button');
+    del.className = 'delete-btn';
+    del.textContent = '削除';
+    del.title = 'コメントを削除する（画面と集計から消える。データ上は論理削除）';
+    del.addEventListener('click', function () {
+      const isTop = c.parentId === null || c.parentId === undefined;
+      const msg = isTop
+        ? 'このコメントを削除しますか？返信もまとめて削除されます。'
+        : 'この返信を削除しますか？';
+      if (!confirm(msg)) return;
+      api('POST', '/api/comments/' + encodeURIComponent(c.id) + '/delete', {})
+        .then(refresh)
+        .catch(function (err) { alert('削除に失敗しました: ' + err); });
+    });
+    actions.appendChild(del);
+    div.appendChild(actions);
     return div;
   }
 
@@ -1378,28 +1543,122 @@
     return { tops: tops, repliesByParent: repliesByParent };
   }
 
+  /* ---------- thread collapse state ---------- */
+
+  // A thread whose every comment is settled (resolved / dismissed / wontfix)
+  // starts collapsed to a one-line summary, like GitHub's resolved threads.
+  // Only an explicit user toggle is persisted (localStorage); the default is
+  // recomputed from statuses on every render, so a thread that gets reopened
+  // expands again by itself.
+  const THREAD_COLLAPSE_KEY = 'ark-thread-collapse';
+  let threadCollapse = {};
+  try { threadCollapse = JSON.parse(localStorage.getItem(THREAD_COLLAPSE_KEY)) || {}; } catch (e) { threadCollapse = {}; }
+
+  function saveThreadCollapse() {
+    try { localStorage.setItem(THREAD_COLLAPSE_KEY, JSON.stringify(threadCollapse)); } catch (e) { /* ignore */ }
+  }
+
+  function setThreadCollapsed(topId, on) {
+    threadCollapse[topId] = on ? 1 : 0;
+    saveThreadCollapse();
+  }
+
+  // Drop persisted toggles for comments that no longer exist (same pattern as
+  // loadViewed's pruning).
+  function pruneThreadCollapse() {
+    const ids = {};
+    comments.forEach(function (c) { ids[c.id] = true; });
+    let changed = false;
+    Object.keys(threadCollapse).forEach(function (k) {
+      if (!ids[k]) { delete threadCollapse[k]; changed = true; }
+    });
+    if (changed) saveThreadCollapse();
+  }
+
+  const SETTLED_STATUSES = { resolved: true, dismissed: true, wontfix: true };
+
+  function isThreadCollapsed(top, replies) {
+    if (Object.prototype.hasOwnProperty.call(threadCollapse, top.id)) {
+      return !!threadCollapse[top.id];
+    }
+    if (!SETTLED_STATUSES[top.status]) return false;
+    for (let i = 0; i < replies.length; i++) {
+      if (!SETTLED_STATUSES[replies[i].status]) return false;
+    }
+    return true;
+  }
+
   // Render a thread (top-level cards, each followed by its nested replies and a
   // reply form) into a container. Shared by line threads, the overall section
-  // and the orphan section.
+  // and the orphan section. Each thread gets a slim summary header that
+  // toggles the body; settled threads start collapsed.
   function renderThread(container, list) {
     const s = threadStructure(list);
     s.tops.forEach(function (top) {
       const block = document.createElement('div');
       block.className = 'comment-thread-block';
-      block.appendChild(commentCard(top));
+      block.dataset.topId = top.id;
       const replies = s.repliesByParent[top.id] || [];
+
+      const summary = document.createElement('div');
+      summary.className = 'thread-summary';
+      const caret = document.createElement('span');
+      caret.className = 'thread-caret';
+      const pill = document.createElement('span');
+      pill.className = 'status-pill status-' + top.status;
+      pill.textContent = top.status;
+      const snippet = document.createElement('span');
+      snippet.className = 'thread-snippet';
+      snippet.textContent = bodySnippet(top.body);
+      summary.appendChild(caret);
+      if (isAgentComment(top)) {
+        const who = document.createElement('span');
+        who.className = 'who-pill';
+        who.textContent = 'AI';
+        summary.appendChild(who);
+      }
+      summary.appendChild(pill);
+      summary.appendChild(snippet);
+      if (replies.length) {
+        const count = document.createElement('span');
+        count.className = 'thread-reply-count';
+        count.textContent = '返信 ' + replies.length;
+        summary.appendChild(count);
+      }
+
+      const body = document.createElement('div');
+      body.className = 'thread-body';
+      body.appendChild(commentCard(top));
       if (replies.length) {
         const nest = document.createElement('div');
         nest.className = 'reply-thread';
         replies.forEach(function (r) { nest.appendChild(commentCard(r, true)); });
-        block.appendChild(nest);
+        body.appendChild(nest);
       }
-      appendReplyUI(block, top);
+      appendReplyUI(body, top);
+
+      function syncCaret() {
+        const on = block.classList.contains('collapsed');
+        caret.textContent = on ? '▸' : '▾';
+        summary.title = on ? 'クリックで展開' : 'クリックで折りたたむ';
+      }
+      summary.addEventListener('click', function () {
+        const on = !block.classList.contains('collapsed');
+        block.classList.toggle('collapsed', on);
+        setThreadCollapsed(top.id, on);
+        syncCaret();
+      });
+
+      if (isThreadCollapsed(top, replies)) block.classList.add('collapsed');
+      syncCaret();
+      block.appendChild(summary);
+      block.appendChild(body);
       container.appendChild(block);
     });
   }
 
   function renderComments() {
+    pruneThreadCollapse();
     document.querySelectorAll('tr.thread-row, .orphan-section').forEach(function (el) {
       el.remove();
     });
@@ -1658,7 +1917,9 @@
       api('GET', '/api/comments'),
       api('GET', '/api/status'),
     ]).then(function (results) {
-      const cs = results[0].comments || [];
+      // Soft-deleted comments never render. Filtering at the single entry
+      // point covers every consumer: threads, sidebar list and tree counts.
+      const cs = (results[0].comments || []).filter(function (c) { return !c.deleted; });
       const status = results[1];
       // Never yank the DOM out from under an in-progress draft. Leave
       // lastCommentsJson untouched so the change is re-detected next tick.
@@ -1672,6 +1933,8 @@
         return;
       }
       renderBadge(status);
+      updateModeBadge(status.settings);
+      updateBranchLabel(status.branch);
       const json = JSON.stringify(cs);
       if (json !== lastCommentsJson) {
         lastCommentsJson = json;
@@ -1681,6 +1944,134 @@
       }
     }).catch(function () {
       connState.textContent = 'サーバー未接続（agent-review-kit serve を起動してください）';
+    });
+  }
+
+  /* ---------- topbar controls (settings gear + mode badge) ---------- */
+
+  let modeBadge = null;
+  let branchLabel = null;
+  let settingsPanel = null;
+
+  function updateModeBadge(settings) {
+    if (!modeBadge || !settings) return;
+    modeBadge.hidden = !settings.readOnlyMode;
+  }
+
+  function updateBranchLabel(branch) {
+    if (!branchLabel || !branch) return;
+    branchLabel.textContent = '⎇ ' + branch;
+    branchLabel.title = 'レビュー対象ブランチ（コメント等はブランチ単位で管理されます）';
+  }
+
+  function closeSettingsPanel() {
+    if (settingsPanel) {
+      settingsPanel.remove();
+      settingsPanel = null;
+    }
+  }
+
+  function openSettingsPanel() {
+    const panel = document.createElement('div');
+    panel.id = 'settings-panel';
+    panel.innerHTML =
+      '<div class="settings-title">設定</div>' +
+      '<label class="settings-row"><input type="checkbox" data-key="snapshotsEnabled">' +
+      '<span>修正スナップショットを保存する' +
+      '<span class="settings-hint">修正ごとに差分ページを作る（コミットは作らない）</span></span></label>' +
+      '<label class="settings-row"><input type="checkbox" data-key="readOnlyMode">' +
+      '<span>読み取り専用モード' +
+      '<span class="settings-hint">エージェントはコードを修正せず、コメントへの回答のみ行う</span></span></label>';
+    document.body.appendChild(panel);
+    settingsPanel = panel;
+
+    api('GET', '/api/settings').then(function (data) {
+      panel.querySelectorAll('input[data-key]').forEach(function (input) {
+        input.checked = !!(data.settings && data.settings[input.dataset.key]);
+        input.addEventListener('change', function () {
+          const body = {};
+          body[input.dataset.key] = input.checked;
+          api('PUT', '/api/settings', body).then(function (r) {
+            updateModeBadge(r.settings);
+          }).catch(function (err) {
+            input.checked = !input.checked;
+            alert('設定の保存に失敗しました: ' + err);
+          });
+        });
+      });
+    }).catch(function () {
+      panel.innerHTML = '<div class="settings-title">設定を読み込めませんでした</div>';
+    });
+  }
+
+  function setupTopbarControls() {
+    const inner = document.querySelector('#topbar .topbar-inner');
+    if (!inner) return;
+
+    // conn-state carries margin-left:auto, so everything appended after it
+    // (badge, gear) sits at the right edge of the topbar.
+    branchLabel = document.createElement('span');
+    branchLabel.id = 'branch-label';
+    inner.appendChild(branchLabel);
+
+    modeBadge = document.createElement('span');
+    modeBadge.id = 'mode-badge';
+    modeBadge.textContent = '読み取り専用';
+    modeBadge.title = '読み取り専用モード: エージェントはコードを修正せず回答のみ行います';
+    modeBadge.hidden = true;
+    inner.appendChild(modeBadge);
+
+    const finishBtn = document.createElement('button');
+    finishBtn.id = 'finish-btn';
+    finishBtn.type = 'button';
+    finishBtn.textContent = 'レビュー終了';
+    finishBtn.title = 'レビューを終了する（コメント待機とサーバーを停止）';
+    finishBtn.addEventListener('click', finishReview);
+    inner.appendChild(finishBtn);
+
+    const gear = document.createElement('button');
+    gear.id = 'settings-btn';
+    gear.type = 'button';
+    gear.textContent = '⚙';
+    gear.title = '設定';
+    gear.addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (settingsPanel) closeSettingsPanel();
+      else openSettingsPanel();
+    });
+    inner.appendChild(gear);
+
+    // Click anywhere outside closes the panel.
+    document.addEventListener('click', function (e) {
+      if (settingsPanel && !settingsPanel.contains(e.target)) closeSettingsPanel();
+    });
+  }
+
+  // End the review from the browser. The server dismisses untouched AI
+  // findings, signals wait-comments to exit, and then shuts itself down —
+  // so stop polling and cover the page with a done overlay.
+  function finishReview() {
+    const msg =
+      'レビューを終了しますか？\n' +
+      '未対応の AI 指摘は見送り（dismissed）になり、コメント待機とサーバーを停止します。';
+    if (!confirm(msg)) return;
+    api('POST', '/api/finish', {}).then(function () {
+      if (refreshTimer) {
+        clearInterval(refreshTimer);
+        refreshTimer = null;
+      }
+      connState.textContent = 'レビューを終了しました';
+      const overlay = document.createElement('div');
+      overlay.id = 'finish-overlay';
+      overlay.innerHTML =
+        '<div class="finish-box">' +
+        '<div class="finish-title">レビューを終了しました</div>' +
+        '<div class="finish-note">サーバーは停止しました。このタブは閉じて構いません。<br>' +
+        'レビューを再開するには agent-review-kit generate / serve を再実行してください。</div>' +
+        '</div>';
+      document.body.appendChild(overlay);
+    }).catch(function (err) {
+      alert('レビュー終了に失敗しました: ' + err);
     });
   }
 
@@ -1807,18 +2198,21 @@
     // restore globally (the last-used width is read via savedPinDefault).
   }
 
-  // Commit view: served at /commit/<sha> with window.__COMMIT__ set. It reuses
-  // the diff renderer read-only and skips all review chrome — no sidebar,
-  // comments, forms, polling or reloads. Bail out before any of that is wired.
-  if (window.__COMMIT__) {
-    renderCommitPage();
+  // Standalone views: /commit/<sha> (window.__COMMIT__) and /snapshot/<id>
+  // (window.__SNAPSHOT__). Both reuse the diff renderer read-only and skip all
+  // review chrome — no sidebar, comments, forms, polling or reloads. Bail out
+  // before any of that is wired.
+  if (window.__COMMIT__ || window.__SNAPSHOT__) {
+    if (window.__COMMIT__) renderCommitPage();
+    else renderSnapshotPage();
     setupScrollTop();
     return;
   }
 
   restorePersistedWidths();
+  setupTopbarControls();
   renderDiff();
   refresh();
-  setInterval(refresh, 3000);
+  refreshTimer = setInterval(refresh, 3000);
   setupScrollTop();
 })();

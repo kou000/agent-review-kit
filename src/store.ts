@@ -1,6 +1,14 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { CommentsFile, ReviewComment, ReviewState } from './types';
+import {
+  CommentsFile,
+  DEFAULT_SETTINGS,
+  FinishState,
+  ReviewComment,
+  ReviewSettings,
+  ReviewState,
+  SnapshotIndex,
+} from './types';
 
 function readJson<T>(file: string, fallback: T): T {
   let raw: string;
@@ -93,6 +101,9 @@ export function mutateComments<T>(
   commentsFile: string,
   fn: (comments: ReviewComment[]) => T
 ): T {
+  // First write may precede `generate` (e.g. add-comment on a fresh branch):
+  // the branch data dir must exist before a lock can be taken inside it.
+  fs.mkdirSync(path.dirname(commentsFile), { recursive: true });
   return withFileLock(path.dirname(commentsFile), () => {
     const comments = loadComments(commentsFile);
     const result = fn(comments);
@@ -109,9 +120,76 @@ export function saveState(file: string, state: ReviewState): void {
   writeJsonAtomic(file, state);
 }
 
+export function loadSettings(file: string): ReviewSettings {
+  // Merge over the defaults key by key so a settings.json written by an older
+  // version (or edited by hand) never yields undefined for a known setting,
+  // and unknown keys are dropped.
+  const raw = readJson<Partial<ReviewSettings>>(file, {});
+  return {
+    snapshotsEnabled:
+      typeof raw.snapshotsEnabled === 'boolean'
+        ? raw.snapshotsEnabled
+        : DEFAULT_SETTINGS.snapshotsEnabled,
+    readOnlyMode:
+      typeof raw.readOnlyMode === 'boolean'
+        ? raw.readOnlyMode
+        : DEFAULT_SETTINGS.readOnlyMode,
+  };
+}
+
+export function saveSettings(file: string, settings: ReviewSettings): void {
+  writeJsonAtomic(file, settings);
+}
+
+/**
+ * Read-modify-write on settings.json under the same lock as comments.json
+ * (updates are rare, so sharing the lock keeps things simple).
+ */
+export function mutateSettings(
+  settingsFile: string,
+  fn: (settings: ReviewSettings) => void
+): ReviewSettings {
+  fs.mkdirSync(path.dirname(settingsFile), { recursive: true });
+  return withFileLock(path.dirname(settingsFile), () => {
+    const settings = loadSettings(settingsFile);
+    fn(settings);
+    saveSettings(settingsFile, settings);
+    return settings;
+  });
+}
+
+export function loadFinished(file: string): FinishState | null {
+  return readJson<FinishState | null>(file, null);
+}
+
+export function saveFinished(file: string): void {
+  writeJsonAtomic(file, { finishedAt: nowIso() } satisfies FinishState);
+}
+
+export function clearFinished(file: string): void {
+  try {
+    fs.unlinkSync(file);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+  }
+}
+
+export function loadSnapshotIndex(file: string): SnapshotIndex {
+  return readJson<SnapshotIndex>(file, { snapshots: [] });
+}
+
+export function saveSnapshotIndex(file: string, index: SnapshotIndex): void {
+  writeJsonAtomic(file, index);
+}
+
 export function newCommentId(): string {
   const rand = Math.random().toString(36).slice(2, 8);
   return `comment_${Date.now().toString(36)}${rand}`;
+}
+
+export function newSnapshotId(): string {
+  const rand = Math.random().toString(36).slice(2, 8);
+  return `snap_${Date.now().toString(36)}${rand}`;
 }
 
 export function nowIso(): string {

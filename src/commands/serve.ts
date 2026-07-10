@@ -26,7 +26,26 @@ export function serve(opts: ServeOptions = {}): void {
     );
   }
 
-  const server = createServer(paths);
+  const server = createServer(paths, {
+    onFinish: () => {
+      // Let the finish response (and any in-flight poll) flush first, then
+      // stop accepting connections and exit. closeAllConnections (Node 18.2+)
+      // drops the browser's keep-alive sockets, which close() alone would
+      // wait on; the delayed exit is the backstop either way.
+      setTimeout(() => {
+        console.log('agent-review-kit serve: レビュー終了により停止します');
+        try {
+          fs.unlinkSync(paths.serverJson);
+        } catch {
+          // Best effort: the projectDir check guards stale files anyway.
+        }
+        server.close();
+        const closeAll = (server as { closeAllConnections?: () => void }).closeAllConnections;
+        if (typeof closeAll === 'function') closeAll.call(server);
+        setTimeout(() => process.exit(0), 200);
+      }, 500);
+    },
+  });
   server.on('error', (err: NodeJS.ErrnoException) => {
     if (err.code === 'EADDRINUSE') {
       // 明示指定されたポートは黙って変えない。自動選択時のみ次を試す。

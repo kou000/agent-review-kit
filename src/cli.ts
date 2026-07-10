@@ -1,7 +1,9 @@
 #!/usr/bin/env node
+import { addComment } from './commands/addComment';
 import { generate } from './commands/generate';
 import { resolveComment } from './commands/resolveComment';
 import { serve } from './commands/serve';
+import { snapshotBegin, snapshotCreate, snapshotList } from './commands/snapshot';
 import { status } from './commands/status';
 import { waitComments } from './commands/waitComments';
 
@@ -17,12 +19,31 @@ Commands:
   wait-comments            新規（status: open）コメントが来るまで待つ
     --timeout <sec>        タイムアウト秒。0 で無期限待機（デフォルト: 0）
   resolve-comment <id>     コメントの状態を更新する
-    --status <status>      open|seen|fixed|answered|wontfix|resolved（デフォルト: resolved）
+    --status <status>      open|seen|fixed|answered|wontfix|resolved|dismissed（デフォルト: resolved）
     --message <text>       agentResponse として保存する返信メッセージ
     --commit <sha>         修正コミットの sha。返信に /commit/<sha> へのリンクを添える（--message 必須）
+    --snapshot <id>        修正スナップショットの id。返信に /snapshot/<id> へのリンクを添える（--message 必須）
     --image <path>         返信にインライン表示する画像ファイル（png/jpg/jpeg/gif/webp）。
                            複数回指定可。data URI 化して保存する（1枚あたり最大3MB、--message 必須）
-  status                   コメント集計をJSONで出力する
+  add-comment              AIレビューの指摘をエージェント名義のコメントとして投稿する。
+                           投稿した指摘は wait-comments には配達されない（エージェント自身は
+                           処理しない）。ユーザーがその指摘に返信したものだけが wait-comments
+                           に届くので、それを待って修正・回答する。未返信の指摘はレビュー終了時に
+                           自動で dismissed になる（手順の詳細は my-interactive-review スキル）
+    --body <text>          コメント本文（必須）
+    --file <path>          対象ファイル。省略時はレビュー全体へのコメント
+    --line <n>             対象行（単一行）
+    --start-line <n>       対象範囲の開始行（--end-line とセット）
+    --end-line <n>         対象範囲の終了行
+    --side <old|new>       変更前/変更後どちらの行か（デフォルト: new）
+  snapshot begin           修正の適用前に working tree の状態を記録する
+  snapshot create          修正の patch を保存し、/snapshot/<id> で差分表示できるようにする
+    --comment <id>         対象コメントの id（必須）
+    --title <text>         スナップショットの表題
+    --commit <sha>         begin との差分の代わりに、このコミットの差分を patch にする
+    --patch-file <path>    begin との差分の代わりに、この patch ファイルを取り込む
+  snapshot list            スナップショット一覧をJSONで出力する
+  status                   コメント集計・設定・レビュー終了状態をJSONで出力する
 `;
 
 type FlagValue = string | boolean;
@@ -135,8 +156,38 @@ async function main(): Promise<void> {
         status: flagStr(flags, 'status'),
         message: flagStr(flags, 'message'),
         commit: flagStr(flags, 'commit'),
+        snapshot: flagStr(flags, 'snapshot'),
         images: flagList(flags, 'image'),
       });
+      break;
+    }
+    case 'add-comment':
+      addComment({
+        body: flagStr(flags, 'body'),
+        file: flagStr(flags, 'file'),
+        line: flagNum(flags, 'line'),
+        startLine: flagNum(flags, 'start-line'),
+        endLine: flagNum(flags, 'end-line'),
+        side: flagStr(flags, 'side'),
+      });
+      break;
+    case 'snapshot': {
+      const sub = positional[0];
+      if (sub === 'begin') {
+        snapshotBegin();
+      } else if (sub === 'create') {
+        snapshotCreate({
+          comment: flagStr(flags, 'comment'),
+          title: flagStr(flags, 'title'),
+          commit: flagStr(flags, 'commit'),
+          patchFile: flagStr(flags, 'patch-file'),
+        });
+      } else if (sub === 'list') {
+        snapshotList();
+      } else {
+        console.error('error: snapshot のサブコマンドは begin / create / list です');
+        process.exit(1);
+      }
       break;
     }
     case 'status':

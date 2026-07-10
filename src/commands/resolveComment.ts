@@ -1,6 +1,7 @@
 import { getCommitMeta } from '../gitDiff';
 import { encodeImageToDataUri } from '../image';
 import { reviewPaths } from '../paths';
+import { findSnapshot } from '../snapshot';
 import { mutateComments, nowIso } from '../store';
 import { COMMENT_STATUSES, CommentStatus } from '../types';
 
@@ -9,6 +10,7 @@ export interface ResolveOptions {
   status?: string;
   message?: string;
   commit?: string;
+  snapshot?: string;
   images?: string[];
   cwd?: string;
 }
@@ -40,6 +42,22 @@ export function resolveComment(opts: ResolveOptions): void {
     }
   }
 
+  // Like --commit, --snapshot is validated up front (the id must exist in the
+  // snapshot index) so a typo fails here instead of rendering a dead link.
+  const paths = reviewPaths(cwd);
+  let snapshotId: string | undefined;
+  if (opts.snapshot) {
+    if (!opts.message) {
+      console.error('error: --snapshot には --message が必要です（返信にスナップショットリンクを添える）');
+      process.exit(1);
+    }
+    if (!findSnapshot(paths, opts.snapshot)) {
+      console.error(`error: snapshot が見つかりません: ${opts.snapshot}`);
+      process.exit(1);
+    }
+    snapshotId = opts.snapshot;
+  }
+
   // Encode --image files to data URIs before taking the file lock so a bad
   // path / unsupported format / oversize image fails loudly without leaving a
   // half-updated comment. Like --commit, images ride on the agentResponse and
@@ -58,7 +76,6 @@ export function resolveComment(opts: ResolveOptions): void {
     }
   }
 
-  const paths = reviewPaths(cwd);
   const updated = mutateComments(paths.comments, (comments) => {
     const comment = comments.find((c) => c.id === opts.id);
     if (!comment) return null;
@@ -68,6 +85,7 @@ export function resolveComment(opts: ResolveOptions): void {
     if (opts.message) {
       comment.agentResponse = { message: opts.message, updatedAt: now };
       if (commitSha) comment.agentResponse.commit = commitSha;
+      if (snapshotId) comment.agentResponse.snapshot = snapshotId;
       if (imageDataUris) comment.agentResponse.images = imageDataUris;
     }
     return comment;

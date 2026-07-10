@@ -1,11 +1,23 @@
 import * as fs from 'fs';
 import * as http from 'http';
 import * as path from 'path';
-import { getCommitMeta, parseUnifiedDiff, runGitCommitDiff } from './gitDiff';
-import { ReviewPaths } from './paths';
-import { renderCommitHtml } from './render';
-import { loadComments, loadState, mutateComments, newCommentId, nowIso } from './store';
-import { COMMENT_STATUSES, CommentStatus, DiffData, ReviewComment } from './types';
+import { getCommitMeta, parseUnifiedDiff, runGitCommitDiff, runGitCommitLog } from './gitDiff';
+import { ReviewPaths, reviewPaths } from './paths';
+import { renderCommitHtml, renderSnapshotHtml } from './render';
+import { findSnapshot, readSnapshotPatch, SNAPSHOT_ID_RE } from './snapshot';
+import {
+  loadComments,
+  loadFinished,
+  loadSettings,
+  loadSnapshotIndex,
+  loadState,
+  mutateComments,
+  mutateSettings,
+  newCommentId,
+  nowIso,
+  saveFinished,
+} from './store';
+import { COMMENT_STATUSES, CommentStatus, DiffData, ReviewComment, commentAuthor } from './types';
 
 export const DEFAULT_PORT = 5179;
 
@@ -50,7 +62,9 @@ function serveFile(res: http.ServerResponse, file: string, type: string): void {
 }
 
 export function buildStatus(paths: ReviewPaths): Record<string, unknown> {
-  const comments = loadComments(paths.comments);
+  // Soft-deleted comments are invisible everywhere: counts, totals and the
+  // unresolved badge all ignore them.
+  const comments = loadComments(paths.comments).filter((c) => !c.deleted);
   const counts: Record<CommentStatus, number> = {
     open: 0,
     seen: 0,
@@ -58,18 +72,24 @@ export function buildStatus(paths: ReviewPaths): Record<string, unknown> {
     answered: 0,
     wontfix: 0,
     resolved: 0,
+    dismissed: 0,
   };
   for (const c of comments) counts[c.status] += 1;
   const state = loadState(paths.state);
+  const finished = loadFinished(paths.finished);
   return {
     // どのプロジェクトを serve しているかをクライアント側が検証できるようにする
     // （複数プロジェクト同時レビュー時のポート取り違え検知用）。
     projectDir: path.dirname(paths.dir),
+    branch: paths.branch,
     total: comments.length,
     unresolved: counts.open + counts.seen,
     counts,
     base: state?.base ?? null,
     generatedAt: state?.generatedAt ?? null,
+    settings: loadSettings(paths.settings),
+    finished: finished?.finishedAt ?? null,
+    snapshots: loadSnapshotIndex(paths.snapshotsIndex).snapshots.length,
   };
 }
 
@@ -120,9 +140,15 @@ function validateCommentInput(b: Record<string, unknown>): CommentInput | string
   };
 }
 
-export function createServer(paths: ReviewPaths): http.Server {
+export interface ServerHooks {
+  // Called after POST /api/finish has been fully processed and answered.
+  // serve() uses this to shut the process down gracefully.
+  onFinish?: () => void;
+}
+
+export function createServer(paths: ReviewPaths, hooks: ServerHooks = {}): http.Server {
   return http.createServer((req, res) => {
-    void handle(req, res, paths).catch((e: unknown) => {
+    void handle(req, res, paths, hooks).catch((e: unknown) => {
       json(res, 500, { error: String(e) });
     });
   });
@@ -131,8 +157,13 @@ export function createServer(paths: ReviewPaths): http.Server {
 async function handle(
   req: http.IncomingMessage,
   res: http.ServerResponse,
-  paths: ReviewPaths
+  basePaths: ReviewPaths,
+  hooks: ServerHooks = {}
 ): Promise<void> {
+  // Review data is branch-scoped and the branch can change under a running
+  // server (checkout + regenerate), so resolve the paths per request instead
+  // of trusting the ones captured at serve startup.
+  const paths = reviewPaths(path.dirname(basePaths.dir));
   const url = new URL(req.url ?? '/', 'http://localhost');
   const p = url.pathname;
   const method = req.method ?? 'GET';
@@ -172,6 +203,39 @@ async function handle(
     return;
   }
 
+  // Standalone diff page for one fix snapshot, opened from a snapshot link in
+  // an agent response. Same shape as the commit page, but the diff comes from
+  // the stored patch file instead of the object database.
+  const snapshotMatch = /^\/snapshot\/([^/]+)$/.exec(p);
+  if (method === 'GET' && snapshotMatch) {
+    const id = decodeURIComponent(snapshotMatch[1]);
+    if (!SNAPSHOT_ID_RE.test(id)) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end(`invalid snapshot id: ${id}`);
+      return;
+    }
+    const meta = findSnapshot(paths, id);
+    if (!meta) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end(`snapshot not found: ${id}`);
+      return;
+    }
+    try {
+      const files = parseUnifiedDiff(readSnapshotPatch(paths, meta));
+      const data: DiffData = { base: null, generatedAt: meta.createdAt, files };
+      const comment = loadComments(paths.comments).find((c) => c.id === meta.commentId);
+      res.writeHead(200, {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-store',
+      });
+      res.end(renderSnapshotHtml(data, { ...meta, commentBody: comment?.body ?? null }));
+    } catch {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end(`snapshot patch not readable: ${id}`);
+    }
+    return;
+  }
+
   if (method === 'GET' && p === '/api/comments') {
     json(res, 200, { comments: loadComments(paths.comments) });
     return;
@@ -179,6 +243,33 @@ async function handle(
 
   if (method === 'GET' && p === '/api/status') {
     json(res, 200, buildStatus(paths));
+    return;
+  }
+
+  if (method === 'GET' && p === '/api/settings') {
+    json(res, 200, { settings: loadSettings(paths.settings) });
+    return;
+  }
+
+  // Partial update: only known keys with the right type are applied, anything
+  // else in the body is ignored. Returns the full settings after the merge.
+  if (method === 'PUT' && p === '/api/settings') {
+    const body = await readBody(req);
+    const settings = mutateSettings(paths.settings, (s) => {
+      if (typeof body.snapshotsEnabled === 'boolean') s.snapshotsEnabled = body.snapshotsEnabled;
+      if (typeof body.readOnlyMode === 'boolean') s.readOnlyMode = body.readOnlyMode;
+    });
+    json(res, 200, { settings });
+    return;
+  }
+
+  // Commits under review (base..HEAD, newest first). With no base the review
+  // is working-tree-vs-HEAD only, so there is nothing to list.
+  if (method === 'GET' && p === '/api/commits') {
+    const state = loadState(paths.state);
+    const base = state?.base ?? null;
+    const projectDir = path.dirname(paths.dir);
+    json(res, 200, { commits: base ? runGitCommitLog(base, projectDir) : [] });
     return;
   }
 
@@ -280,6 +371,62 @@ async function handle(
       if (newBody !== undefined) comment.body = newBody;
       if (newStatus !== undefined) comment.status = newStatus;
       comment.updatedAt = nowIso();
+      return comment;
+    });
+    if (!updated) {
+      json(res, 404, { error: `comment not found: ${id}` });
+      return;
+    }
+    json(res, 200, { comment: updated });
+    return;
+  }
+
+  // End the review: AI findings the user never acted on are dismissed in
+  // bulk (server-side, so the skill doesn't have to), the finished marker is
+  // written for wait-comments to pick up, and the server shuts itself down
+  // via the onFinish hook. `generate` clears the marker, starting fresh.
+  if (method === 'POST' && p === '/api/finish') {
+    const dismissed = mutateComments(paths.comments, (comments) => {
+      const now = nowIso();
+      let n = 0;
+      for (const c of comments) {
+        if (
+          !c.deleted &&
+          commentAuthor(c) === 'agent' &&
+          (c.status === 'open' || c.status === 'seen')
+        ) {
+          c.status = 'dismissed';
+          c.updatedAt = now;
+          n += 1;
+        }
+      }
+      return n;
+    });
+    saveFinished(paths.finished);
+    json(res, 200, { status: 'finished', dismissed });
+    hooks.onFinish?.();
+    return;
+  }
+
+  const deleteMatch = /^\/api\/comments\/([^/]+)\/delete$/.exec(p);
+  if (method === 'POST' && deleteMatch) {
+    const id = decodeURIComponent(deleteMatch[1]);
+    const updated = mutateComments(paths.comments, (comments) => {
+      const comment = comments.find((c) => c.id === id);
+      if (!comment) return null;
+      const now = nowIso();
+      comment.deleted = true;
+      comment.updatedAt = now;
+      // Deleting a top-level comment takes its replies with it; otherwise
+      // threadStructure would promote them to orphaned top-level comments.
+      if (!comment.parentId) {
+        for (const reply of comments) {
+          if (reply.parentId === id && !reply.deleted) {
+            reply.deleted = true;
+            reply.updatedAt = now;
+          }
+        }
+      }
       return comment;
     });
     if (!updated) {
