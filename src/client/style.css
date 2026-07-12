@@ -949,3 +949,78 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   from { opacity: 0; transform: translateX(16px); }
   to { opacity: 1; transform: translateX(0); }
 }
+
+/* ---------- HTML document review (/doc/<id>) ---------- */
+
+/* Two panes: the rendered document (iframe) and the comment panel. Each pane
+   scrolls internally so the topbar and toolbar stay put. */
+.doc-layout {
+  display: flex;
+  gap: 0;
+  height: calc(100vh - 45px);
+}
+.doc-frame-wrap {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: #fff; /* documents usually assume a light canvas */
+}
+#doc-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+.doc-comments {
+  flex: 0 0 400px;
+  max-width: 46vw;
+  border-left: 1px solid var(--border);
+  background: var(--bg);
+  overflow-y: auto;
+  padding: 10px 12px 40px;
+}
+.doc-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.doc-toolbar button { font-size: 12px; }
+#doc-pick-btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(88, 166, 255, 0.15);
+}
+#doc-form-slot .comment-form { margin: 0 0 12px; }
+.doc-thread-section { margin: 0 0 18px; }
+.doc-thread-section h2 {
+  font-size: 13px;
+  margin: 0 0 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.doc-thread-section .hint,
+.doc-empty {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0 0 8px;
+}
+.doc-jump {
+  margin-left: auto;
+  flex: 0 0 auto;
+  padding: 0 6px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+#doc-float-btn {
+  position: fixed;
+  z-index: 60;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
+  color: var(--fg);
+  background: var(--header-bg);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+}
+#doc-float-btn:hover { background: var(--btn-hover-bg); }

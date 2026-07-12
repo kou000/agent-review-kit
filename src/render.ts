@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { CommitMeta } from './gitDiff';
 import { clientAssetDir, ReviewPaths } from './paths';
-import { DiffData, SnapshotMeta } from './types';
+import { DiffData, HtmlDocumentMeta, SnapshotMeta } from './types';
 
 function escapeForScript(json: string): string {
   return json
@@ -109,6 +109,38 @@ export function renderSnapshotHtml(data: DiffData, info: SnapshotPageInfo): stri
     <span class="brand">agent-review-kit</span>
     <span id="diff-meta"></span>
     <span id="unresolved-badge" class="badge" hidden>-</span>
+    <span id="conn-state" class="conn"></span>
+  </div>
+</header>
+<main id="app"></main>
+<script src="/app.js"></script>
+</body>
+</html>
+`;
+}
+
+// Review page for one published HTML document (/doc/<id>). Mirrors the other
+// standalone pages: same client bundle, app.js switches to the HTML-review
+// view when window.__DOC__ is set. The document body itself is NOT embedded
+// here — the client loads it into an iframe from /doc/<id>/content, whose
+// response carries a no-script CSP.
+export function renderDocumentHtml(meta: HtmlDocumentMeta): string {
+  const payload = escapeForScript(JSON.stringify(meta));
+  return `<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(meta.title)} — agent-review-kit</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<script>window.__DOC__ = ${payload};</script>
+<header id="topbar">
+  <div class="topbar-inner">
+    <span class="brand">agent-review-kit</span>
+    <span id="diff-meta"></span>
+    <span id="unresolved-badge" class="badge">-</span>
     <span id="conn-state" class="conn"></span>
   </div>
 </header>
