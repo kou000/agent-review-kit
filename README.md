@@ -99,7 +99,7 @@ API:
 | GET | `/commit/:sha` | コミット単体の差分ページ（読み取り専用） |
 | GET | `/snapshot/:id` | 修正スナップショットの差分ページ（読み取り専用） |
 | GET | `/doc/:id` | HTMLレビューページ |
-| GET | `/doc/:id/content` | サニタイズ済み本文（no-script CSP付き、iframe用） |
+| GET | `/doc/:id/content` | 登録した本文そのまま（no-script CSP付き、iframe用） |
 | GET | `/api/documents` | 登録ドキュメント一覧 |
 | GET | `/api/documents/:id` | ドキュメントメタ（revision 監視用） |
 
@@ -270,7 +270,7 @@ HTMLレビューのコメントは `file` / `side` / 行番号 が全て `null` 
 ```
 .agent-review/branches/<ブランチ>/documents/
   index.json          # {documents:[{id,title,revision,createdAt,updatedAt}]}
-  <document-id>.html  # サニタイズ済み本文
+  <document-id>.html  # 登録した本文そのまま（表示時に no-script CSP で保護）
 ```
 
 ## Skill として使う（Claude Code）
