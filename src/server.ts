@@ -2,11 +2,13 @@ import * as fs from 'fs';
 import * as http from 'http';
 import * as path from 'path';
 import { getCommitMeta, parseUnifiedDiff, runGitCommitDiff, runGitCommitLog } from './gitDiff';
+import { documentHtmlPath, findDocument } from './htmlDocument';
 import { ReviewPaths, reviewPaths } from './paths';
-import { renderCommitHtml, renderSnapshotHtml } from './render';
+import { renderCommitHtml, renderDocumentHtml, renderSnapshotHtml } from './render';
 import { findSnapshot, readSnapshotPatch, SNAPSHOT_ID_RE } from './snapshot';
 import {
   loadComments,
+  loadDocumentIndex,
   loadFinished,
   loadSettings,
   loadSnapshotIndex,
@@ -17,7 +19,14 @@ import {
   nowIso,
   saveFinished,
 } from './store';
-import { COMMENT_STATUSES, CommentStatus, DiffData, ReviewComment, commentAuthor } from './types';
+import {
+  COMMENT_STATUSES,
+  CommentStatus,
+  DiffData,
+  HtmlTarget,
+  ReviewComment,
+  commentAuthor,
+} from './types';
 
 export const DEFAULT_PORT = 5179;
 
@@ -90,7 +99,47 @@ export function buildStatus(paths: ReviewPaths): Record<string, unknown> {
     settings: loadSettings(paths.settings),
     finished: finished?.finishedAt ?? null,
     snapshots: loadSnapshotIndex(paths.snapshotsIndex).snapshots.length,
+    documents: loadDocumentIndex(paths.documentsIndex).documents.length,
   };
+}
+
+// Cap on every free-text field inside an htmlTarget, so a crafted request
+// can't balloon comments.json. Real selectors/snippets are far below this.
+const MAX_TARGET_FIELD = 2000;
+
+function targetStr(v: unknown, required: boolean): string | null | 'bad' {
+  if (v === undefined || v === null) return required ? 'bad' : null;
+  if (typeof v !== 'string' || (required && !v)) return 'bad';
+  return v.slice(0, MAX_TARGET_FIELD);
+}
+
+// Validate the browser-supplied anchor of an HTML-review comment. Returns the
+// normalized target, null for an explicit "whole document" comment, or an
+// error string.
+function validateHtmlTarget(v: unknown): HtmlTarget | null | string {
+  if (v === undefined || v === null) return null;
+  if (typeof v !== 'object') return 'htmlTarget must be an object';
+  const b = v as Record<string, unknown>;
+  if (b.kind !== 'element' && b.kind !== 'text') {
+    return 'htmlTarget.kind must be "element" or "text"';
+  }
+  const selector = targetStr(b.selector, true);
+  const tag = targetStr(b.tag, true);
+  const label = targetStr(b.label, true);
+  if (selector === 'bad' || tag === 'bad' || label === 'bad' || !selector || !tag || !label) {
+    return 'htmlTarget.selector/tag/label are required strings';
+  }
+  const target: HtmlTarget = { kind: b.kind, selector, tag, label };
+  const optional = ['elementText', 'selectedText', 'contextBefore', 'contextAfter'] as const;
+  for (const key of optional) {
+    const s = targetStr(b[key], false);
+    if (s === 'bad') return `htmlTarget.${key} must be a string`;
+    if (s !== null) target[key] = s;
+  }
+  if (target.kind === 'text' && !target.selectedText) {
+    return 'htmlTarget.selectedText is required for kind "text"';
+  }
+  return target;
 }
 
 interface CommentInput {
@@ -236,6 +285,76 @@ async function handle(
     return;
   }
 
+  // Review page for one published HTML document. The page shell only carries
+  // the document meta; the body is loaded into an iframe from .../content.
+  const docPageMatch = /^\/doc\/([^/]+)$/.exec(p);
+  if (method === 'GET' && docPageMatch) {
+    const id = decodeURIComponent(docPageMatch[1]);
+    const meta = findDocument(paths, id);
+    if (!meta) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end(`document not found: ${id}. Run \`agent-review-kit publish-html\` first.`);
+      return;
+    }
+    res.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+    });
+    res.end(renderDocumentHtml(meta));
+    return;
+  }
+
+  // The rendered document body, served for the review page's iframe. The CSP
+  // is the sole no-script guarantee (the body is stored verbatim): nothing in
+  // default-src allows scripts, external fetches, form posts or <base> tricks.
+  // Inline styles and data: images stay usable so agent-generated documents
+  // render as intended.
+  const docContentMatch = /^\/doc\/([^/]+)\/content$/.exec(p);
+  if (method === 'GET' && docContentMatch) {
+    const id = decodeURIComponent(docContentMatch[1]);
+    const meta = findDocument(paths, id);
+    if (!meta) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end(`document not found: ${id}`);
+      return;
+    }
+    fs.readFile(documentHtmlPath(paths, meta.id), (err, data) => {
+      if (err) {
+        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end(`document body not found: ${id}`);
+        return;
+      }
+      res.writeHead(200, {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'Content-Security-Policy':
+          "default-src 'none'; img-src data:; media-src data:; style-src 'unsafe-inline'; font-src data:; form-action 'none'; base-uri 'none'",
+        'X-Content-Type-Options': 'nosniff',
+      });
+      res.end(data);
+    });
+    return;
+  }
+
+  if (method === 'GET' && p === '/api/documents') {
+    json(res, 200, { documents: loadDocumentIndex(paths.documentsIndex).documents });
+    return;
+  }
+
+  // Meta of one document. The review page polls this to detect a re-publish
+  // (revision bump) and reload, the same way the diff page watches generatedAt.
+  const docApiMatch = /^\/api\/documents\/([^/]+)$/.exec(p);
+  if (method === 'GET' && docApiMatch) {
+    const id = decodeURIComponent(docApiMatch[1]);
+    const meta = findDocument(paths, id);
+    if (!meta) {
+      json(res, 404, { error: `document not found: ${id}` });
+      return;
+    }
+    json(res, 200, { document: meta });
+    return;
+  }
+
   if (method === 'GET' && p === '/api/comments') {
     json(res, 200, { comments: loadComments(paths.comments) });
     return;
@@ -315,6 +434,12 @@ async function handle(
           updatedAt: now,
           parentId: topId,
         };
+        // HTML-review threads: replies inherit the document anchor too, so a
+        // reply delivered by wait-comments is self-describing.
+        if (anchor.documentId) {
+          comment.documentId = anchor.documentId;
+          comment.htmlTarget = anchor.htmlTarget ?? null;
+        }
         comments.push(comment);
         return comment;
       });
@@ -323,6 +448,44 @@ async function handle(
         return;
       }
       json(res, 201, { comment: created });
+      return;
+    }
+
+    // HTML-review comment: anchored inside a published document instead of
+    // the diff. file/side/line are all null; the anchor is the htmlTarget
+    // (or null for a whole-document comment).
+    if (body.documentId !== undefined && body.documentId !== null) {
+      if (typeof body.documentId !== 'string' || !findDocument(paths, body.documentId)) {
+        json(res, 400, { error: `unknown documentId: ${String(body.documentId)}` });
+        return;
+      }
+      if (typeof body.body !== 'string' || !body.body.trim()) {
+        json(res, 400, { error: 'body is required' });
+        return;
+      }
+      const target = validateHtmlTarget(body.htmlTarget);
+      if (typeof target === 'string') {
+        json(res, 400, { error: target });
+        return;
+      }
+      const now = nowIso();
+      const comment: ReviewComment = {
+        id: newCommentId(),
+        file: null,
+        side: null,
+        startLine: null,
+        endLine: null,
+        startDiffLine: null,
+        endDiffLine: null,
+        body: body.body.trim(),
+        status: 'open',
+        createdAt: now,
+        updatedAt: now,
+        documentId: body.documentId,
+        htmlTarget: target,
+      };
+      mutateComments(paths.comments, (comments) => comments.push(comment));
+      json(res, 201, { comment });
       return;
     }
 

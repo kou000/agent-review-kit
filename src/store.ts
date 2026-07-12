@@ -4,6 +4,7 @@ import {
   CommentsFile,
   DEFAULT_SETTINGS,
   FinishState,
+  HtmlDocumentIndex,
   ReviewComment,
   ReviewSettings,
   ReviewState,
@@ -180,6 +181,32 @@ export function loadSnapshotIndex(file: string): SnapshotIndex {
 
 export function saveSnapshotIndex(file: string, index: SnapshotIndex): void {
   writeJsonAtomic(file, index);
+}
+
+export function loadDocumentIndex(file: string): HtmlDocumentIndex {
+  return readJson<HtmlDocumentIndex>(file, { documents: [] });
+}
+
+export function saveDocumentIndex(file: string, index: HtmlDocumentIndex): void {
+  writeJsonAtomic(file, index);
+}
+
+/**
+ * Read-modify-write on documents/index.json under a lock in the documents
+ * directory (its own lock: document publishes never contend with comment
+ * writes). The callback's return value is passed through.
+ */
+export function mutateDocumentIndex<T>(
+  indexFile: string,
+  fn: (index: HtmlDocumentIndex) => T
+): T {
+  fs.mkdirSync(path.dirname(indexFile), { recursive: true });
+  return withFileLock(path.dirname(indexFile), () => {
+    const index = loadDocumentIndex(indexFile);
+    const result = fn(index);
+    saveDocumentIndex(indexFile, index);
+    return result;
+  });
 }
 
 export function newCommentId(): string {

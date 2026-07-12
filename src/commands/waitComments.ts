@@ -4,6 +4,14 @@ import { ReviewComment, commentAuthor } from '../types';
 
 export interface WaitOptions {
   timeout?: number; // seconds, 0 = wait forever
+  // Deliver only comments belonging to this published HTML document
+  // (comment.documentId matches). Without it every comment — diff review and
+  // all documents — is delivered, as before.
+  documentId?: string;
+  // Exclude comments addressed to an HTML document (comment.documentId is
+  // set), delivering only diff review comments. Mutually exclusive with
+  // documentId (enforced in cli.ts).
+  diffOnly?: boolean;
   cwd?: string;
 }
 
@@ -12,7 +20,9 @@ const POLL_INTERVAL_MS = 1000;
 // Only the user's live open comments are deliverable. Agent-authored comments
 // (AI review findings posted via add-comment) stay open until the user replies
 // or the review finishes; the reply is what flows to the agent.
-function isDeliverable(c: ReviewComment): boolean {
+function isDeliverable(c: ReviewComment, documentId?: string, diffOnly?: boolean): boolean {
+  if (documentId !== undefined && c.documentId !== documentId) return false;
+  if (diffOnly && c.documentId !== undefined) return false;
   return c.status === 'open' && !c.deleted && commentAuthor(c) === 'user';
 }
 
@@ -26,13 +36,15 @@ export async function waitComments(opts: WaitOptions = {}): Promise<void> {
     // while waiting should shift the watch to the new branch's comments.
     const paths = reviewPaths(cwd);
     // Unlocked probe: reads always see a consistent snapshot (rename is atomic).
-    const hasOpen = loadComments(paths.comments).some(isDeliverable);
+    const hasOpen = loadComments(paths.comments).some((c) =>
+      isDeliverable(c, opts.documentId, opts.diffOnly)
+    );
     if (hasOpen) {
       // Re-extract open comments inside the lock so any that appeared between
       // the probe and lock acquisition are included in the received set.
       const received = mutateComments(paths.comments, (comments) => {
         const now = nowIso();
-        const open = comments.filter(isDeliverable);
+        const open = comments.filter((c) => isDeliverable(c, opts.documentId, opts.diffOnly));
         for (const c of open) {
           c.status = 'seen';
           c.updatedAt = now;
