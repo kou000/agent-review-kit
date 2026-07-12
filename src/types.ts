@@ -50,6 +50,31 @@ export interface AgentResponse {
   snapshot?: string;
 }
 
+// Where an HTML-review comment points inside the rendered document. Captured
+// by the browser at comment time; re-resolved (selector first, then text
+// search with context) on every render, so a re-published document keeps its
+// comments as long as the target still exists. Unresolvable targets render in
+// the "位置を特定できないコメント" section — never dropped.
+export interface HtmlTarget {
+  // 'element' = a whole element was picked; 'text' = a drag-selected range.
+  kind: 'element' | 'text';
+  // CSS selector path of the target element (element comments) or of the
+  // element containing the selection (text comments).
+  selector: string;
+  // Lowercase tag name of that element (fallback matching + display).
+  tag: string;
+  // Human-readable label shown in comment cards, e.g. 'h2 「認証フロー」'.
+  label: string;
+  // Element comments: leading text of the element, used to re-find it when
+  // the selector no longer matches after a re-publish.
+  elementText?: string;
+  // Text comments: the exact selected text and its surrounding context in
+  // document order, used to re-locate (and disambiguate) the range.
+  selectedText?: string;
+  contextBefore?: string;
+  contextAfter?: string;
+}
+
 export interface ReviewComment {
   id: string;
   // An "overall" comment is not tied to any file or line: file/side and all
@@ -65,6 +90,13 @@ export interface ReviewComment {
   createdAt: string;
   updatedAt: string;
   agentResponse?: AgentResponse;
+  // HTML-review comment: the id of the published document (see
+  // HtmlDocumentMeta) this comment belongs to. Diff-review comments omit it.
+  // file/side/line fields are all null for document comments.
+  documentId?: string | null;
+  // Anchor inside the rendered document. null/omitted = a comment on the
+  // whole document (the HTML-review analog of an overall comment).
+  htmlTarget?: HtmlTarget | null;
   // A reply to another comment. When set, this comment's anchor (file/side/all
   // line numbers) is copied from its parent, and parentId always points at a
   // top-level comment (threads are one level deep). Omitted/null = top-level.
@@ -125,6 +157,24 @@ export interface SnapshotIndex {
   // in this tree, not in HEAD).
   baselineTree?: string;
   snapshots: SnapshotMeta[];
+}
+
+// One published HTML document under review (an agent-generated plan, design
+// doc, report, ...). The HTML body is stored verbatim next to the index as
+// documents/<id>.html and only ever served under a no-script CSP (see
+// server.ts); re-publishing the same id bumps `revision`, which the browser
+// polls to reload the rendered view.
+export interface HtmlDocumentMeta {
+  id: string;
+  title: string;
+  // 1-based, incremented on every publish of the same id.
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface HtmlDocumentIndex {
+  documents: HtmlDocumentMeta[];
 }
 
 // Presence of .agent-review/finished.json means the review was ended from the

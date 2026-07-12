@@ -14,7 +14,8 @@
     "build": "tsc -p tsconfig.json && mkdir -p dist/client && cp src/client/* dist/client/",
     "dev": "tsx src/cli.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint src"
+    "lint": "eslint src",
+    "test": "tsx --test tests/*.test.ts"
   },
   "engines": {
     "node": ">=18"

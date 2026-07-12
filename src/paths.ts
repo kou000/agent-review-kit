@@ -20,6 +20,8 @@ export interface ReviewPaths {
   finished: string;
   snapshotsDir: string;
   snapshotsIndex: string;
+  documentsDir: string;
+  documentsIndex: string;
 }
 
 // Raw current-branch name. Detached HEAD falls back to the short sha (each
@@ -83,6 +85,7 @@ export function reviewPaths(cwd: string = process.cwd()): ReviewPaths {
     fs.mkdirSync(branchDir, { recursive: true });
   }
   const snapshotsDir = path.join(branchDir, 'snapshots');
+  const documentsDir = path.join(branchDir, 'documents');
   return {
     dir,
     html: path.join(dir, 'review.html'),
@@ -97,6 +100,8 @@ export function reviewPaths(cwd: string = process.cwd()): ReviewPaths {
     finished: path.join(branchDir, 'finished.json'),
     snapshotsDir,
     snapshotsIndex: path.join(snapshotsDir, 'index.json'),
+    documentsDir,
+    documentsIndex: path.join(documentsDir, 'index.json'),
   };
 }
 
