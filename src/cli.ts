@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { addComment } from './commands/addComment';
 import { generate } from './commands/generate';
+import { publishHtml } from './commands/publishHtml';
 import { resolveComment } from './commands/resolveComment';
 import { serve } from './commands/serve';
 import { snapshotBegin, snapshotCreate, snapshotList } from './commands/snapshot';
@@ -16,8 +17,20 @@ Commands:
                            working tree vs HEAD に戻すには --base HEAD を指定する
   serve                    レビュー画面とAPIのローカルサーバーを起動する
     --port <n>             ポート番号（省略時: 5179 から空きポートを自動選択し .agent-review/server.json に記録）
+  publish-html             任意の HTML をレビュー対象ドキュメントとして登録・更新する。
+                           レンダリングされた状態が /doc/<id> で表示され、要素や
+                           テキスト範囲にコメントできる。同じ --document-id で再実行
+                           すると revision が上がり、ブラウザは自動リロードして既存
+                           コメントを可能な範囲で元の位置に再表示する
+    --input <path>         レビュー対象の HTML ファイル（必須）
+    --document-id <id>     ドキュメントID。英数字で始まる 64 文字以内のスラッグ（必須）
+    --title <text>         表示タイトル（省略時: 前回のタイトル → HTML の <title> → ID）
   wait-comments            新規（status: open）コメントが来るまで待つ
     --timeout <sec>        タイムアウト秒。0 で無期限待機（デフォルト: 0）
+    --document-id <id>     指定した HTML ドキュメントへのコメントだけを待つ
+                           （省略時: diff・全ドキュメントのコメントを配達）
+    --diff-only            HTMLドキュメント宛を除き、diffレビューのコメントだけを待つ
+                           （--document-id と同時指定はエラー）
   resolve-comment <id>     コメントの状態を更新する
     --status <status>      open|seen|fixed|answered|wontfix|resolved|dismissed（デフォルト: resolved）
     --message <text>       agentResponse として保存する返信メッセージ
@@ -131,6 +144,19 @@ function flagNum(flags: Flags, key: string): number | undefined {
   return n;
 }
 
+// A value-less boolean flag (e.g. --diff-only). Present without a value ->
+// true; absent -> undefined; given a value (e.g. --diff-only foo) is a hard
+// error since the flag has nothing to parse it into.
+function flagBool(flags: Flags, key: string): boolean | undefined {
+  const v = flags[key];
+  if (v === undefined) return undefined;
+  if (v !== true) {
+    console.error(`error: --${key} は値を取りません`);
+    process.exit(1);
+  }
+  return true;
+}
+
 async function main(): Promise<void> {
   const [command, ...rest] = process.argv.slice(2);
   const { positional, flags } = parseArgs(rest);
@@ -142,9 +168,27 @@ async function main(): Promise<void> {
     case 'serve':
       serve({ port: flagNum(flags, 'port') });
       break;
-    case 'wait-comments':
-      await waitComments({ timeout: flagNum(flags, 'timeout') });
+    case 'publish-html':
+      publishHtml({
+        input: flagStr(flags, 'input'),
+        documentId: flagStr(flags, 'document-id'),
+        title: flagStr(flags, 'title'),
+      });
       break;
+    case 'wait-comments': {
+      const documentId = flagStr(flags, 'document-id');
+      const diffOnly = flagBool(flags, 'diff-only');
+      if (diffOnly && documentId !== undefined) {
+        console.error('error: --diff-only と --document-id は同時に指定できません');
+        process.exit(1);
+      }
+      await waitComments({
+        timeout: flagNum(flags, 'timeout'),
+        documentId,
+        diffOnly,
+      });
+      break;
+    }
     case 'resolve-comment': {
       const id = positional[0];
       if (!id) {

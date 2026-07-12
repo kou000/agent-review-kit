@@ -3,6 +3,9 @@
   'use strict';
 
   const DIFF = window.__DIFF__ || { files: [], base: null, generatedAt: '' };
+  // HTML document review mode (/doc/<id>): set by renderDocumentHtml. The
+  // document body renders in an iframe; all review chrome stays out here.
+  const DOC = window.__DOC__ || null;
   const app = document.getElementById('app');
   const badge = document.getElementById('unresolved-badge');
   const diffMeta = document.getElementById('diff-meta');
@@ -1073,6 +1076,7 @@
   }
 
   function commentLocShort(c) {
+    if (c.documentId) return docTargetText(c);
     if (c.file === null || c.file === undefined) return '全体';
     const range = c.startLine === c.endLine
       ? 'L' + c.startLine
@@ -1390,6 +1394,8 @@
     let posText;
     if (isReply) {
       posText = '↳ 返信';
+    } else if (c.documentId) {
+      posText = esc(docTargetText(c));
     } else if (c.file === null || c.file === undefined) {
       posText = 'レビュー全体';
     } else {
@@ -1912,14 +1918,25 @@
     return false;
   }
 
+  // Shared entry point: every "something changed, re-sync" call site uses
+  // refresh(), so it dispatches on the page mode.
   function refresh() {
+    return DOC ? docRefresh() : diffRefresh();
+  }
+
+  function diffRefresh() {
     return Promise.all([
       api('GET', '/api/comments'),
       api('GET', '/api/status'),
     ]).then(function (results) {
-      // Soft-deleted comments never render. Filtering at the single entry
-      // point covers every consumer: threads, sidebar list and tree counts.
-      const cs = (results[0].comments || []).filter(function (c) { return !c.deleted; });
+      // Soft-deleted comments never render, and HTML-document comments
+      // (documentId set, file null) belong to their /doc/<id> page — without
+      // this filter they would leak into the overall section here. Filtering
+      // at the single entry point covers every consumer: threads, sidebar
+      // list and tree counts.
+      const cs = (results[0].comments || []).filter(function (c) {
+        return !c.deleted && !c.documentId;
+      });
       const status = results[1];
       // Never yank the DOM out from under an in-progress draft. Leave
       // lastCommentsJson untouched so the change is re-detected next tick.
@@ -1932,7 +1949,13 @@
         location.reload();
         return;
       }
-      renderBadge(status);
+      // status.unresolved is branch-wide (it includes HTML-document
+      // comments); this page's badge counts only what it can show.
+      let unresolved = 0;
+      cs.forEach(function (c) {
+        if (c.status === 'open' || c.status === 'seen') unresolved++;
+      });
+      renderBadge({ unresolved: unresolved });
       updateModeBadge(status.settings);
       updateBranchLabel(status.branch);
       const json = JSON.stringify(cs);
@@ -2198,6 +2221,760 @@
     // restore globally (the last-used width is read via savedPinDefault).
   }
 
+  /* ---------- HTML document review (window.__DOC__) ---------- */
+
+  // The published document renders inside an iframe whose response carries a
+  // no-script CSP, so nothing in the agent-generated HTML can execute; all
+  // interaction below runs in this (parent) page and only reads/annotates the
+  // frame's DOM. Comment anchors are re-resolved on every render — CSS
+  // selector first, then selected-text search scored by surrounding context —
+  // so a re-published document keeps its comments wherever the target still
+  // exists, and everything else lands in the "位置を特定できない" section.
+
+  let docFrame = null; // iframe element
+  let docFrameWired = false; // load fired and listeners attached
+  let docThreadsEl = null; // right-panel threads container
+  let docFormSlot = null; // right-panel slot for the comment form
+  let docCountEl = null; // right-panel comment count heading
+  let docPickMode = false;
+  let docPickBtn = null;
+  let docFloatBtn = null; // floating「コメント」button over a text selection
+  let docHoverEl = null; // element currently outlined in pick mode
+
+  function docTargetText(c) {
+    const t = c.htmlTarget;
+    if (!t) return 'ドキュメント全体';
+    if (t.kind === 'text' && t.selectedText) return '“' + bodySnippet(t.selectedText) + '”';
+    return t.label || t.tag || '要素';
+  }
+
+  function frameDoc() {
+    try {
+      return docFrame && docFrame.contentDocument;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function cssEscapeIdent(s) {
+    if (window.CSS && CSS.escape) return CSS.escape(s);
+    return String(s).replace(/[^a-zA-Z0-9_-]/g, '\\$&');
+  }
+
+  // Selector path for an element: a unique #id if it has one, otherwise a
+  // body-rooted tag:nth-of-type chain. Computed at comment time and stored in
+  // the htmlTarget; querySelector'd back on every render.
+  function docCssPath(el) {
+    const doc = el.ownerDocument;
+    const parts = [];
+    let cur = el;
+    while (cur && cur.nodeType === 1) {
+      const tag = cur.nodeName.toLowerCase();
+      if (tag === 'html') break;
+      if (cur.id && doc.querySelectorAll('#' + cssEscapeIdent(cur.id)).length === 1) {
+        parts.unshift('#' + cssEscapeIdent(cur.id));
+        return parts.join(' > ');
+      }
+      if (tag === 'body') {
+        parts.unshift('body');
+        break;
+      }
+      let nth = 1;
+      let sib = cur;
+      while ((sib = sib.previousElementSibling)) {
+        if (sib.nodeName === cur.nodeName) nth++;
+      }
+      parts.unshift(tag + ':nth-of-type(' + nth + ')');
+      cur = cur.parentElement;
+    }
+    return parts.join(' > ');
+  }
+
+  function docElementLabel(el) {
+    const tag = el.nodeName.toLowerCase();
+    const text = String(el.textContent || '').replace(/\s+/g, ' ').trim();
+    return text ? tag + ' 「' + (text.length > 24 ? text.slice(0, 24) + '…' : text) + '」' : tag;
+  }
+
+  // Concatenated text of the frame body plus a map back to its text nodes.
+  // Marks are unwrapped before this is built, so offsets are stable across
+  // renders of the same revision.
+  function docTextIndex(root) {
+    const parts = [];
+    const nodes = [];
+    const walker = root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    let pos = 0;
+    let n;
+    while ((n = walker.nextNode())) {
+      const parent = n.parentNode && n.parentNode.nodeName;
+      if (parent === 'STYLE' || parent === 'SCRIPT' || parent === 'NOSCRIPT') continue;
+      const len = n.nodeValue.length;
+      nodes.push({ node: n, start: pos, end: pos + len });
+      parts.push(n.nodeValue);
+      pos += len;
+    }
+    return { text: parts.join(''), nodes: nodes };
+  }
+
+  // Map a live selection Range to [start, end) offsets in the text index.
+  function docRangeOffsets(range, index) {
+    let start = -1;
+    let end = -1;
+    for (let i = 0; i < index.nodes.length; i++) {
+      const entry = index.nodes[i];
+      let intersects = false;
+      try { intersects = range.intersectsNode(entry.node); } catch (e) { intersects = false; }
+      if (!intersects) continue;
+      let s = entry.start;
+      let e2 = entry.end;
+      if (range.startContainer === entry.node) s = entry.start + range.startOffset;
+      if (range.endContainer === entry.node) e2 = entry.start + range.endOffset;
+      if (start === -1) start = s;
+      end = e2;
+    }
+    if (start === -1 || end <= start) return null;
+    return { start: start, end: end };
+  }
+
+  function commonSuffixLen(a, b) {
+    let n = 0;
+    while (n < a.length && n < b.length && a[a.length - 1 - n] === b[b.length - 1 - n]) n++;
+    return n;
+  }
+
+  function commonPrefixLen(a, b) {
+    let n = 0;
+    while (n < a.length && n < b.length && a[n] === b[n]) n++;
+    return n;
+  }
+
+  // Find the best occurrence of `sel` in `text`: score each hit by how much of
+  // the stored before/after context still matches, with a bonus for landing
+  // inside the originally recorded element (`prefer` = its text span).
+  function docFindOccurrence(text, sel, before, after, prefer) {
+    const hits = [];
+    let i = text.indexOf(sel);
+    while (i !== -1 && hits.length < 500) {
+      hits.push(i);
+      i = text.indexOf(sel, i + 1);
+    }
+    if (!hits.length) return -1;
+    if (hits.length === 1) return hits[0];
+    let best = hits[0];
+    let bestScore = -1;
+    hits.forEach(function (h) {
+      let score = 0;
+      if (before) score += commonSuffixLen(text.slice(Math.max(0, h - before.length), h), before);
+      if (after) score += commonPrefixLen(text.slice(h + sel.length, h + sel.length + after.length), after);
+      if (prefer && h >= prefer.start && h < prefer.end) score += 5;
+      if (score > bestScore) {
+        bestScore = score;
+        best = h;
+      }
+    });
+    return best;
+  }
+
+  function docSafeQuery(doc, selector) {
+    if (!selector) return null;
+    try {
+      const el = doc.querySelector(selector);
+      return el && doc.body.contains(el) ? el : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Text span [start, end) of an element within the index, or null when it has
+  // no text nodes of its own.
+  function docElementSpan(index, el) {
+    let start = -1;
+    let end = -1;
+    for (let i = 0; i < index.nodes.length; i++) {
+      if (!el.contains(index.nodes[i].node)) continue;
+      if (start === -1) start = index.nodes[i].start;
+      end = index.nodes[i].end;
+    }
+    return start === -1 ? null : { start: start, end: end };
+  }
+
+  function docResolveElement(doc, index, t) {
+    const bySelector = docSafeQuery(doc, t.selector);
+    if (bySelector) return bySelector;
+    // Selector broke (document re-published): fall back to the smallest
+    // same-tag element that still contains the recorded leading text.
+    const needle = String(t.elementText || '').trim();
+    if (!needle) return null;
+    const cands = doc.body.querySelectorAll(t.tag || '*');
+    let best = null;
+    let bestLen = Infinity;
+    for (let i = 0; i < cands.length; i++) {
+      const txt = cands[i].textContent || '';
+      if (txt.indexOf(needle) === -1) continue;
+      if (txt.length < bestLen) {
+        best = cands[i];
+        bestLen = txt.length;
+      }
+    }
+    return best;
+  }
+
+  // Resolve one htmlTarget against the current frame DOM. Returns
+  // {kind:'element', el, pos} or {kind:'text', start, end, pos}, or null when
+  // the target no longer exists (the comment then renders as unlocatable).
+  function docResolveTarget(doc, index, t) {
+    if (t.kind === 'element') {
+      const el = docResolveElement(doc, index, t);
+      if (!el) return null;
+      const span = docElementSpan(index, el);
+      return { kind: 'element', el: el, pos: span ? span.start : 0 };
+    }
+    if (!t.selectedText) return null;
+    const container = docSafeQuery(doc, t.selector);
+    const prefer = container ? docElementSpan(index, container) : null;
+    const hit = docFindOccurrence(
+      index.text, t.selectedText, t.contextBefore || '', t.contextAfter || '', prefer
+    );
+    if (hit === -1) return null;
+    return { kind: 'text', start: hit, end: hit + t.selectedText.length, pos: hit };
+  }
+
+  /* ---------- frame annotation (marks / element outlines) ---------- */
+
+  function clearDocMarks(doc) {
+    const marks = doc.querySelectorAll('mark.ark-mark');
+    for (let i = 0; i < marks.length; i++) {
+      const m = marks[i];
+      const p = m.parentNode;
+      while (m.firstChild) p.insertBefore(m.firstChild, m);
+      p.removeChild(m);
+    }
+    const els = doc.querySelectorAll('.ark-el-anchor');
+    for (let j = 0; j < els.length; j++) {
+      els[j].classList.remove('ark-el-anchor', 'ark-flash');
+      els[j].removeAttribute('data-ark-comment');
+    }
+    doc.body.normalize();
+  }
+
+  // Wrap [s, e) of one text node in a comment mark. splitText keeps the
+  // leading part on the original node, so processing segments in reverse
+  // document order leaves earlier offsets valid.
+  function wrapTextNodeSegment(doc, node, s, e, topId, title) {
+    const len = node.nodeValue.length;
+    s = Math.max(0, Math.min(s, len));
+    e = Math.max(s, Math.min(e, len));
+    if (s === e) return;
+    const target = s > 0 ? node.splitText(s) : node;
+    if (e - s < target.nodeValue.length) target.splitText(e - s);
+    const mark = doc.createElement('mark');
+    mark.className = 'ark-mark';
+    mark.setAttribute('data-ark-comment', topId);
+    mark.title = title;
+    target.parentNode.insertBefore(mark, target);
+    mark.appendChild(target);
+  }
+
+  function wrapDocRange(doc, index, start, end, top) {
+    const title = 'コメント: ' + bodySnippet(top.body);
+    const segs = [];
+    for (let i = 0; i < index.nodes.length; i++) {
+      const entry = index.nodes[i];
+      if (entry.end <= start || entry.start >= end) continue;
+      segs.push({
+        node: entry.node,
+        s: Math.max(0, start - entry.start),
+        e: Math.min(entry.end, end) - entry.start,
+      });
+    }
+    for (let j = segs.length - 1; j >= 0; j--) {
+      try {
+        wrapTextNodeSegment(doc, segs[j].node, segs[j].s, segs[j].e, top.id, title);
+      } catch (e) {
+        // Overlapping ranges can invalidate a segment; skip it rather than
+        // losing the whole render.
+      }
+    }
+  }
+
+  function markDocElement(el, top) {
+    el.classList.add('ark-el-anchor');
+    el.setAttribute('data-ark-comment', top.id);
+    if (!el.title) el.title = 'コメント: ' + bodySnippet(top.body);
+  }
+
+  function docJumpTo(topId) {
+    const doc = frameDoc();
+    if (!doc) return;
+    const el = doc.querySelector('[data-ark-comment="' + topId + '"]');
+    if (!el) return;
+    if (typeof el.scrollIntoView === 'function') {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    el.classList.add('ark-flash');
+    setTimeout(function () { el.classList.remove('ark-flash'); }, 1500);
+  }
+
+  /* ---------- document comment rendering ---------- */
+
+  function docSection(title, hint) {
+    const sec = document.createElement('section');
+    sec.className = 'doc-thread-section';
+    let html = '<h2>' + esc(title) + '</h2>';
+    if (hint) html += '<p class="hint">' + esc(hint) + '</p>';
+    sec.innerHTML = html;
+    return sec;
+  }
+
+  // Render one thread and add a 📍 jump chip to its summary when the target
+  // was located in the document.
+  function docAppendThread(container, list, canJump, topId) {
+    const holder = document.createElement('div');
+    renderThread(holder, list);
+    if (canJump) {
+      const summary = holder.querySelector('.thread-summary');
+      if (summary) {
+        const jump = document.createElement('button');
+        jump.className = 'doc-jump';
+        jump.type = 'button';
+        jump.textContent = '📍';
+        jump.title = 'ドキュメント内の対象へ移動';
+        jump.addEventListener('click', function (e) {
+          e.stopPropagation();
+          docJumpTo(topId);
+        });
+        summary.appendChild(jump);
+      }
+    }
+    while (holder.firstChild) container.appendChild(holder.firstChild);
+  }
+
+  function docRenderComments() {
+    pruneThreadCollapse();
+    if (!docThreadsEl) return;
+    const doc = frameDoc();
+    // Until the frame has loaded there is nothing to resolve against; the
+    // load handler forces a re-render.
+    if (!docFrameWired || !doc || !doc.body) return;
+
+    if (docCountEl) docCountEl.textContent = 'コメント (' + comments.length + ')';
+    docThreadsEl.innerHTML = '';
+    clearDocMarks(doc);
+    const index = docTextIndex(doc.body);
+
+    const s = threadStructure(comments);
+    const anchored = []; // {top, list, res}
+    const overall = [];
+    const orphans = []; // [{top, list}]
+    s.tops.forEach(function (top) {
+      const list = [top].concat(s.repliesByParent[top.id] || []);
+      if (!top.htmlTarget) {
+        overall.push.apply(overall, list);
+        return;
+      }
+      const res = docResolveTarget(doc, index, top.htmlTarget);
+      if (!res) {
+        orphans.push({ top: top, list: list });
+        return;
+      }
+      anchored.push({ top: top, list: list, res: res });
+    });
+
+    // Text marks are applied in reverse document order so splitText never
+    // invalidates an earlier segment; element outlines are just classes.
+    anchored
+      .filter(function (a) { return a.res.kind === 'text'; })
+      .sort(function (a, b) { return b.res.start - a.res.start; })
+      .forEach(function (a) { wrapDocRange(doc, index, a.res.start, a.res.end, a.top); });
+    anchored
+      .filter(function (a) { return a.res.kind === 'element'; })
+      .forEach(function (a) { markDocElement(a.res.el, a.top); });
+
+    anchored.sort(function (a, b) { return a.res.pos - b.res.pos; });
+    if (anchored.length) {
+      const sec = docSection('ドキュメント内のコメント');
+      anchored.forEach(function (a) {
+        docAppendThread(sec, a.list, true, a.top.id);
+      });
+      docThreadsEl.appendChild(sec);
+    }
+    if (overall.length) {
+      const sec = docSection('ドキュメント全体');
+      renderThread(sec, overall);
+      docThreadsEl.appendChild(sec);
+    }
+    if (orphans.length) {
+      const sec = docSection(
+        '位置を特定できないコメント',
+        'ドキュメントの更新により対象が見つからなくなった可能性があります。コメントは保持されています。'
+      );
+      orphans.forEach(function (o) {
+        docAppendThread(sec, o.list, false, o.top.id);
+      });
+      docThreadsEl.appendChild(sec);
+    }
+    if (!comments.length) {
+      const empty = document.createElement('p');
+      empty.className = 'hint doc-empty';
+      empty.textContent =
+        'コメントはまだありません。本文の文章をドラッグ選択するか、「要素を選択してコメント」を使ってください。';
+      docThreadsEl.appendChild(empty);
+    }
+  }
+
+  /* ---------- document comment creation ---------- */
+
+  function closeDocForm() {
+    if (docFormSlot) docFormSlot.innerHTML = '';
+  }
+
+  // Plain text; the caller esc()'s it before it lands in innerHTML (the
+  // selected text / label come from the reviewed document, which is untrusted).
+  function docTargetPreview(target) {
+    if (!target) return 'ドキュメント全体にコメント';
+    if (target.kind === 'text') return '“' + bodySnippet(target.selectedText) + '” にコメント';
+    return target.label + ' にコメント';
+  }
+
+  function openDocCommentForm(target) {
+    if (!docFormSlot) return;
+    closeDocForm();
+    hideDocFloatBtn();
+    const wrap = document.createElement('div');
+    wrap.className = 'comment-form doc-comment-form';
+    wrap.innerHTML =
+      '<div class="form-meta">' + esc(docTargetPreview(target)) + '</div>' +
+      '<textarea placeholder="コメントを入力（Ctrl+Enterで送信）"></textarea>' +
+      '<div class="buttons">' +
+      '<button class="primary submit">コメントを追加</button>' +
+      '<button class="cancel">キャンセル</button>' +
+      '</div>';
+    docFormSlot.appendChild(wrap);
+    const textarea = wrap.querySelector('textarea');
+    textarea.focus();
+
+    function submit() {
+      const body = textarea.value.trim();
+      if (!body) return;
+      wrap.querySelector('.submit').disabled = true;
+      api('POST', '/api/comments', {
+        documentId: DOC.id,
+        htmlTarget: target,
+        body: body,
+      }).then(function () {
+        closeDocForm();
+        refresh();
+      }).catch(function (err) {
+        alert('コメントの保存に失敗しました: ' + err);
+        wrap.querySelector('.submit').disabled = false;
+      });
+    }
+    wrap.querySelector('.submit').addEventListener('click', submit);
+    wrap.querySelector('.cancel').addEventListener('click', closeDocForm);
+    textarea.addEventListener('keydown', function (e) {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') submit();
+    });
+  }
+
+  function hideDocFloatBtn() {
+    if (docFloatBtn) {
+      docFloatBtn.remove();
+      docFloatBtn = null;
+    }
+  }
+
+  // Floating「コメント」button just under the text selection, positioned in
+  // parent coordinates (frame rect + in-frame rect).
+  function showDocFloatBtn(rect, target) {
+    hideDocFloatBtn();
+    const frameRect = docFrame.getBoundingClientRect();
+    const btn = document.createElement('button');
+    btn.id = 'doc-float-btn';
+    btn.type = 'button';
+    btn.textContent = '💬 コメント';
+    const left = Math.max(8, frameRect.left + rect.left);
+    const top = Math.min(window.innerHeight - 40, frameRect.top + rect.bottom + 6);
+    btn.style.left = left + 'px';
+    btn.style.top = top + 'px';
+    btn.addEventListener('mousedown', function (e) { e.preventDefault(); });
+    btn.addEventListener('click', function () {
+      openDocCommentForm(target);
+      const win = docFrame.contentWindow;
+      if (win && win.getSelection) win.getSelection().removeAllRanges();
+    });
+    document.body.appendChild(btn);
+    docFloatBtn = btn;
+  }
+
+  function setDocPickMode(on) {
+    docPickMode = on;
+    if (docPickBtn) docPickBtn.classList.toggle('active', on);
+    const doc = frameDoc();
+    if (doc && doc.body) doc.body.classList.toggle('ark-picking', on);
+    if (!on && docHoverEl) {
+      docHoverEl.classList.remove('ark-pick-hover');
+      docHoverEl = null;
+    }
+  }
+
+  // Comment marks are synthetic elements this tool injects and rebuilds on
+  // every render — a selector that includes one can never resolve again.
+  // Targets picked on (or inside) a mark climb out to the real element.
+  // Marks wrap only text nodes, so the chain is at most a few marks deep.
+  function climbOutOfMarks(el) {
+    while (
+      el && el.nodeType === 1 && el.nodeName === 'MARK' &&
+      el.classList.contains('ark-mark')
+    ) {
+      el = el.parentElement;
+    }
+    return el;
+  }
+
+  function buildElementTarget(el) {
+    const text = String(el.textContent || '').replace(/\s+/g, ' ').trim();
+    const target = {
+      kind: 'element',
+      selector: docCssPath(el),
+      tag: el.nodeName.toLowerCase(),
+      label: docElementLabel(el),
+    };
+    if (text) target.elementText = text.slice(0, 120);
+    return target;
+  }
+
+  function buildTextTarget(index, off, range) {
+    let container = range.commonAncestorContainer;
+    if (container.nodeType !== 1) container = container.parentElement;
+    container = climbOutOfMarks(container);
+    const CONTEXT = 60;
+    return {
+      kind: 'text',
+      selector: container ? docCssPath(container) : 'body',
+      tag: container ? container.nodeName.toLowerCase() : 'body',
+      label: container ? docElementLabel(container) : 'body',
+      selectedText: index.text.slice(off.start, off.end),
+      contextBefore: index.text.slice(Math.max(0, off.start - CONTEXT), off.start),
+      contextAfter: index.text.slice(off.end, off.end + CONTEXT),
+    };
+  }
+
+  function onDocFrameMouseUp() {
+    if (docPickMode) return;
+    // Selection is finalized after mouseup; read it on the next tick.
+    setTimeout(function () {
+      const doc = frameDoc();
+      const win = docFrame && docFrame.contentWindow;
+      if (!doc || !win || !win.getSelection) return;
+      const sel = win.getSelection();
+      if (!sel || sel.isCollapsed || !sel.rangeCount || !String(sel.toString()).trim()) {
+        hideDocFloatBtn();
+        return;
+      }
+      const range = sel.getRangeAt(0);
+      const index = docTextIndex(doc.body);
+      const off = docRangeOffsets(range, index);
+      if (!off) {
+        hideDocFloatBtn();
+        return;
+      }
+      showDocFloatBtn(range.getBoundingClientRect(), buildTextTarget(index, off, range));
+    }, 0);
+  }
+
+  function onDocFrameClick(e) {
+    if (docPickMode) {
+      e.preventDefault();
+      e.stopPropagation();
+      let el = e.target;
+      if (el && el.nodeType !== 1) el = el.parentElement;
+      el = climbOutOfMarks(el);
+      if (!el || el.nodeName === 'HTML' || el.nodeName === 'BODY') return;
+      setDocPickMode(false);
+      openDocCommentForm(buildElementTarget(el));
+      return;
+    }
+    // Click on an existing mark/outline focuses its thread in the panel.
+    const marked = e.target.closest && e.target.closest('[data-ark-comment]');
+    if (marked) {
+      e.preventDefault();
+      focusComment(marked.getAttribute('data-ark-comment'));
+      return;
+    }
+    // Links: never navigate the review frame. External links open a new tab,
+    // in-document anchors scroll inside the frame.
+    const a = e.target.closest && e.target.closest('a[href]');
+    if (a) {
+      e.preventDefault();
+      const href = a.getAttribute('href') || '';
+      if (/^https?:/i.test(href)) {
+        window.open(href, '_blank', 'noopener');
+      } else if (href.charAt(0) === '#') {
+        const doc = frameDoc();
+        const dest = doc && doc.getElementById(href.slice(1));
+        if (dest && typeof dest.scrollIntoView === 'function') {
+          dest.scrollIntoView({ behavior: 'smooth' });
+        }
+      }
+    }
+  }
+
+  function onDocFrameMouseOver(e) {
+    if (!docPickMode) return;
+    let el = e.target;
+    if (el && el.nodeType !== 1) el = el.parentElement;
+    if (!el || el.nodeName === 'HTML' || el.nodeName === 'BODY') return;
+    if (docHoverEl) docHoverEl.classList.remove('ark-pick-hover');
+    docHoverEl = el;
+    el.classList.add('ark-pick-hover');
+  }
+
+  const DOC_FRAME_CSS =
+    'mark.ark-mark { background: rgba(210, 153, 34, 0.35); border-bottom: 2px solid rgba(210, 153, 34, 0.9); ' +
+    'color: inherit; cursor: pointer; }\n' +
+    '.ark-el-anchor { outline: 2px solid rgba(88, 166, 255, 0.7); outline-offset: 2px; cursor: pointer; }\n' +
+    '.ark-pick-hover { outline: 2px dashed rgba(88, 166, 255, 0.95) !important; outline-offset: 2px; }\n' +
+    'body.ark-picking, body.ark-picking * { cursor: crosshair !important; }\n' +
+    '.ark-flash, mark.ark-mark.ark-flash { background: rgba(88, 166, 255, 0.35) !important; }';
+
+  function docFrameReady() {
+    const doc = frameDoc();
+    if (!doc || !doc.body) return;
+    const style = doc.createElement('style');
+    style.textContent = DOC_FRAME_CSS;
+    (doc.head || doc.documentElement).appendChild(style);
+    doc.addEventListener('mouseup', onDocFrameMouseUp);
+    doc.addEventListener('click', onDocFrameClick, true);
+    doc.addEventListener('mouseover', onDocFrameMouseOver);
+    doc.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') {
+        setDocPickMode(false);
+        hideDocFloatBtn();
+      }
+    });
+    docFrameWired = true;
+    // Anchors could not be resolved before the frame existed: force a
+    // comment re-render against the loaded DOM.
+    lastCommentsJson = '';
+    refresh();
+  }
+
+  function buildDocLayout() {
+    const layout = document.createElement('div');
+    layout.className = 'doc-layout';
+
+    const frameWrap = document.createElement('div');
+    frameWrap.className = 'doc-frame-wrap';
+    docFrame = document.createElement('iframe');
+    docFrame.id = 'doc-frame';
+    docFrame.title = DOC.title;
+    docFrame.addEventListener('load', docFrameReady);
+    docFrame.src = '/doc/' + encodeURIComponent(DOC.id) + '/content';
+    frameWrap.appendChild(docFrame);
+    layout.appendChild(frameWrap);
+
+    const panel = document.createElement('aside');
+    panel.className = 'doc-comments';
+
+    const toolbar = document.createElement('div');
+    toolbar.className = 'doc-toolbar';
+    docPickBtn = document.createElement('button');
+    docPickBtn.id = 'doc-pick-btn';
+    docPickBtn.type = 'button';
+    docPickBtn.textContent = '要素を選択してコメント';
+    docPickBtn.title = 'クリックした要素にコメントする（Escで解除）。文章はドラッグ選択でもコメントできます';
+    docPickBtn.addEventListener('click', function () {
+      hideDocFloatBtn();
+      setDocPickMode(!docPickMode);
+    });
+    toolbar.appendChild(docPickBtn);
+
+    const overallBtn = document.createElement('button');
+    overallBtn.type = 'button';
+    overallBtn.textContent = 'ドキュメント全体にコメント';
+    overallBtn.addEventListener('click', function () {
+      setDocPickMode(false);
+      openDocCommentForm(null);
+    });
+    toolbar.appendChild(overallBtn);
+    panel.appendChild(toolbar);
+
+    docFormSlot = document.createElement('div');
+    docFormSlot.id = 'doc-form-slot';
+    panel.appendChild(docFormSlot);
+
+    docCountEl = document.createElement('div');
+    docCountEl.className = 'sidebar-title';
+    docCountEl.textContent = 'コメント (0)';
+    panel.appendChild(docCountEl);
+
+    docThreadsEl = document.createElement('div');
+    docThreadsEl.id = 'doc-threads';
+    panel.appendChild(docThreadsEl);
+
+    layout.appendChild(panel);
+    app.appendChild(layout);
+  }
+
+  function docRefresh() {
+    return Promise.all([
+      api('GET', '/api/comments'),
+      api('GET', '/api/status'),
+      api('GET', '/api/documents/' + encodeURIComponent(DOC.id)),
+    ]).then(function (results) {
+      // Only this document's live comments; everything else (diff comments,
+      // other documents) belongs to other pages.
+      const cs = (results[0].comments || []).filter(function (c) {
+        return !c.deleted && c.documentId === DOC.id;
+      });
+      const status = results[1];
+      const meta = results[2].document || {};
+      if (isEditingDraft()) {
+        connState.textContent = '入力中のため更新を保留中…';
+        return;
+      }
+      connState.textContent = '';
+      // A re-publish bumps the revision: reload to pick up the new body (the
+      // same pattern as the diff page watching generatedAt).
+      if (meta.revision && DOC.revision && meta.revision !== DOC.revision) {
+        location.reload();
+        return;
+      }
+      let unresolved = 0;
+      cs.forEach(function (c) {
+        if (c.status === 'open' || c.status === 'seen') unresolved++;
+      });
+      renderBadge({ unresolved: unresolved });
+      updateModeBadge(status.settings);
+      updateBranchLabel(status.branch);
+      const json = JSON.stringify(cs);
+      if (json !== lastCommentsJson) {
+        lastCommentsJson = json;
+        comments = cs;
+        docRenderComments();
+        notifyAgentUpdates(cs);
+      }
+    }).catch(function () {
+      connState.textContent = 'サーバー未接続（agent-review-kit serve を起動してください）';
+    });
+  }
+
+  function initDocMode() {
+    document.title = DOC.title + ' — agent-review-kit';
+    diffMeta.textContent = 'ドキュメント: ' + DOC.title + ' (rev.' + DOC.revision + ')';
+    setupTopbarControls();
+    buildDocLayout();
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') {
+        setDocPickMode(false);
+        hideDocFloatBtn();
+        closeDocForm();
+      }
+    });
+    refresh();
+    refreshTimer = setInterval(refresh, 3000);
+  }
+
   // Standalone views: /commit/<sha> (window.__COMMIT__) and /snapshot/<id>
   // (window.__SNAPSHOT__). Both reuse the diff renderer read-only and skip all
   // review chrome — no sidebar, comments, forms, polling or reloads. Bail out
@@ -2206,6 +2983,13 @@
     if (window.__COMMIT__) renderCommitPage();
     else renderSnapshotPage();
     setupScrollTop();
+    return;
+  }
+
+  // HTML document review (/doc/<id>): its own layout and refresh loop; none
+  // of the diff chrome below applies.
+  if (DOC) {
+    initDocMode();
     return;
   }
 

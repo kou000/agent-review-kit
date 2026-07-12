@@ -1,6 +1,6 @@
 ---
 name: my-interactive-review
-description: 修正完了後に agent-review-kit でレビューHTMLを生成し、ユーザーがブラウザで書いた差分コメントを同一セッションで受け取り、回答・修正・resolve を未解決0件まで繰り返すレビューループ。AIレビューの指摘を add-comment でブラウザ上のコメントとして表示し、ユーザーが返信した指摘だけ修正する「AIレビューモード」も含む。他のレビュースキルの結果の出力先として agent-review-kit が指定された場合も、このスキルを読んで AI レビューモードの手順に従うこと。Use when the user wants to review changes in a browser (GitHub-like diff review), iterate on fixes with inline comments, or display AI review findings as browser comments (output target: agent-review-kit).
+description: 修正完了後に agent-review-kit でレビューHTMLを生成し、ユーザーがブラウザで書いた差分コメントを同一セッションで受け取り、回答・修正・resolve を未解決0件まで繰り返すレビューループ。AIレビューの指摘を add-comment でブラウザ上のコメントとして表示し、ユーザーが返信した指摘だけ修正する「AIレビューモード」も含む。実装プラン・設計書などの任意HTMLを publish-html でレンダリング済みのまま表示し、要素クリック・テキスト範囲でコメントを受け取る「HTMLレビューモード」も含む。他のレビュースキルの結果の出力先として agent-review-kit が指定された場合も、このスキルを読んで AI レビューモードの手順に従うこと。Use when the user wants to review changes in a browser (GitHub-like diff review), review a rendered HTML doc (plan/design doc) in a browser, iterate on fixes with inline comments, or display AI review findings as browser comments (output target: agent-review-kit).
 ---
 
 # my-interactive-review
@@ -194,6 +194,42 @@ agent-review-kit を使って、ユーザーとブラウザ経由のレビュー
 4. **自分が投稿した指摘（AI コメント）はこの時点では処理しない。** wait-comments にも流れてこない（配達されるのはユーザー名義の open コメントだけ）。ユーザーが AI 指摘に**返信**したら、その返信が通常のコメントとして届くので、スレッド全体（親=自分の指摘）を読んで修正または回答する。修正の流れは手順7と同じ。
    - **修正完了時は2つ resolve する**: 届いた返信コメントを `--status fixed --message ... [--snapshot ...]` で resolve し、**親の AI 指摘も `--status fixed` で resolve する**（親が open のまま残ると未解決カウントに残り続ける）。
 5. ユーザーが返信しなかった AI 指摘は、「レビュー終了」ボタンの押下時にサーバーが一括で `dismissed`（見送り）にする。エージェント側での後始末は不要。
+
+## HTMLレビューモード
+
+diff ではなく、実装プラン・設計書・調査結果などの任意HTMLをブラウザでレンダリング済みのまま見せてレビューさせたい場合の変形モード。ユーザーは要素クリック（要素選択モード）または文章のドラッグ選択でコメントする。ループの仕組み（serve / wait-comments / resolve）は通常と同一で、`generate` の代わりに `publish-html` でHTMLを登録・更新する。
+
+1. レビュー対象のHTML（実装プラン等）を生成する。自己完結HTML（インラインCSS、外部リソース参照なし、スクリプト不要）にすること。HTMLは加工されずそのまま保存されるが、表示は iframe + CSP のためスクリプトは実行されず、外部CDN画像・外部CSS 等の外部リソースは読み込まれない（「セキュリティ」参照）。
+2. 登録する:
+
+   ```bash
+   agent-review-kit publish-html --input <path> --document-id <id> --title "<タイトル>"
+   ```
+
+3. サーバーが未起動なら手順2と同じ確認方法で `agent-review-kit serve` をバックグラウンド起動する。
+4. ユーザーに `http://localhost:<実ポート>/doc/<id>` を案内する。「要素を選択してコメント」ボタンで要素クリック、または文章をドラッグ選択してコメントできることを添える。
+5. コメントを待つ:
+
+   ```bash
+   agent-review-kit wait-comments --document-id <id> --timeout 0
+   ```
+
+   常にバックグラウンドで常駐させ、完了通知（バックグラウンドタスクの終了）で受信を判定する（`ps`/`pgrep` での生存確認はしない）。二重起動もしない（「注意」の項目と同じ）。
+
+6. 届いたコメントの `htmlTarget`（`label` / `selectedText` / `contextBefore` / `contextAfter`）でどこへの指摘か特定し、`documentId` に対応するHTMLの本体に対応する。
+7. 必要に応じて元のプラン・設計・HTML・関連ファイルを修正する。
+8. 更新したHTMLを同じ `--document-id` で `publish-html` し直す。開いているブラウザは自動リロードし、既存コメントは可能な範囲で元の位置に再配置される（再解決できないものは「位置を特定できないコメント」に残る）。
+9. 対応を記録する:
+
+   ```bash
+   agent-review-kit resolve-comment <id> --status fixed --message "..."
+   agent-review-kit resolve-comment <id> --status answered --message "..."
+   agent-review-kit resolve-comment <id> --status wontfix --message "..."
+   ```
+
+10. 未解決コメントが無くなるか、`wait-comments` が `finished` を返すまで手順5〜9を繰り返す。
+
+HTMLレビューでも、修正はサブエージェントに委譲し、メインセッションは受付・トリアージ・回答・resolve に徹する役割分担は通常のdiffレビューと同じ（「修正の委譲」参照）。`settings.readOnlyMode` 等の設定も同様に尊重する。
 
 ## 修正の委譲
 
