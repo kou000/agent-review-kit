@@ -13,10 +13,13 @@ import {
   loadSettings,
   loadSnapshotIndex,
   loadState,
+  loadViewed,
   mutateComments,
   mutateSettings,
+  mutateViewed,
   newCommentId,
   nowIso,
+  reconcileViewed,
   saveFinished,
 } from './store';
 import {
@@ -111,6 +114,29 @@ function targetStr(v: unknown, required: boolean): string | null | 'bad' {
   if (v === undefined || v === null) return required ? 'bad' : null;
   if (typeof v !== 'string' || (required && !v)) return 'bad';
   return v.slice(0, MAX_TARGET_FIELD);
+}
+
+// Bounds on a viewed-state map (PUT /api/viewed, POST /api/viewed/reconcile),
+// so a crafted request can't balloon viewed.json. Real diffs are far below
+// these; keys are file paths, values are short djb2 hashes.
+const MAX_VIEWED_ENTRIES = 5000;
+const MAX_VIEWED_KEY = 2000;
+const MAX_VIEWED_VALUE = 128;
+
+// Coerce an untrusted value into a { [filePath]: hash } string map, or return
+// null if it is the wrong shape / over the bounds. undefined/null map to {}.
+function sanitizeHashMap(v: unknown): Record<string, string> | null {
+  if (v === undefined || v === null) return {};
+  if (typeof v !== 'object' || Array.isArray(v)) return null;
+  const out: Record<string, string> = {};
+  let n = 0;
+  for (const [key, value] of Object.entries(v as Record<string, unknown>)) {
+    if (typeof value !== 'string') return null;
+    if (key.length > MAX_VIEWED_KEY || value.length > MAX_VIEWED_VALUE) return null;
+    if (++n > MAX_VIEWED_ENTRIES) return null;
+    out[key] = value;
+  }
+  return out;
 }
 
 // Validate the browser-supplied anchor of an HTML-review comment. Returns the
@@ -379,6 +405,43 @@ async function handle(
       if (typeof body.readOnlyMode === 'boolean') s.readOnlyMode = body.readOnlyMode;
     });
     json(res, 200, { settings });
+    return;
+  }
+
+  // "確認済み" (Viewed) state, persisted server-side so marks survive a serve
+  // restart (the port changes, which used to strand browser-localStorage marks).
+  if (method === 'GET' && p === '/api/viewed') {
+    json(res, 200, { viewed: loadViewed(paths.viewed) });
+    return;
+  }
+
+  // Full replace of the viewed map. Used by a viewed toggle (the client keeps
+  // the whole map and re-sends it) and by the one-time localStorage migration.
+  if (method === 'PUT' && p === '/api/viewed') {
+    const body = await readBody(req);
+    const map = sanitizeHashMap(body.viewed);
+    if (map === null) {
+      json(res, 400, { error: 'viewed must be an object of string hashes' });
+      return;
+    }
+    const viewed = mutateViewed(paths.viewed, () => map);
+    json(res, 200, { viewed });
+    return;
+  }
+
+  // Reconcile the stored viewed map against the current diff's per-file content
+  // hashes: entries whose hash no longer matches (the file's diff changed) or
+  // whose file is gone are dropped, and the pruned map is persisted. This is
+  // the "auto-revert on diff change" rule, moved off the browser.
+  if (method === 'POST' && p === '/api/viewed/reconcile') {
+    const body = await readBody(req);
+    const hashes = sanitizeHashMap(body.hashes);
+    if (hashes === null) {
+      json(res, 400, { error: 'hashes must be an object of string hashes' });
+      return;
+    }
+    const viewed = mutateViewed(paths.viewed, (saved) => reconcileViewed(saved, hashes));
+    json(res, 200, { viewed });
     return;
   }
 
