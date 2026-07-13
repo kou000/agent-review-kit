@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as http from 'http';
 import * as path from 'path';
 import { getCommitMeta, parseUnifiedDiff, runGitCommitDiff, runGitCommitLog } from './gitDiff';
+import { bakeDiffHighlight } from './highlight';
 import { documentHtmlPath, findDocument } from './htmlDocument';
 import { ReviewPaths, reviewPaths } from './paths';
 import { renderCommitHtml, renderDocumentHtml, renderSnapshotHtml } from './render';
@@ -265,6 +266,9 @@ async function handle(
     try {
       const meta = getCommitMeta(sha, projectDir);
       const files = parseUnifiedDiff(runGitCommitDiff(sha, projectDir));
+      // Bake syntax highlighting like the main review page (generate) does, so
+      // the standalone commit diff isn't rendered as plain uncolored text.
+      await bakeDiffHighlight(files);
       const data: DiffData = { base: `${meta.shortSha}^`, generatedAt: meta.date, files };
       res.writeHead(200, {
         'Content-Type': 'text/html; charset=utf-8',
@@ -297,6 +301,9 @@ async function handle(
     }
     try {
       const files = parseUnifiedDiff(readSnapshotPatch(paths, meta));
+      // Bake syntax highlighting like the main review page (generate) does, so
+      // the fix-snapshot diff isn't rendered as plain uncolored text.
+      await bakeDiffHighlight(files);
       const data: DiffData = { base: null, generatedAt: meta.createdAt, files };
       const comment = loadComments(paths.comments).find((c) => c.id === meta.commentId);
       res.writeHead(200, {
