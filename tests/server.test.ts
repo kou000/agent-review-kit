@@ -8,6 +8,7 @@ import { after, before, test } from 'node:test';
 import { publishHtml } from '../src/commands/publishHtml';
 import { reviewPaths } from '../src/paths';
 import { createServer } from '../src/server';
+import { createSnapshot } from '../src/snapshot';
 import { reconcileViewed } from '../src/store';
 
 let tmp: string;
@@ -177,6 +178,42 @@ test('既存 diff コメント投稿は回帰なく動作する', async () => {
   assert.equal(res.status, 201);
   const data = (await res.json()) as { comment: { file: string } };
   assert.equal(data.comment.file, 'a.ts');
+});
+
+// Regression: the standalone /snapshot/<id> diff page must carry the same
+// baked Shiki highlighting as the main review page. Before the fix the snapshot
+// route built DiffData straight from the patch without calling bakeHighlight,
+// so every cell rendered as uncolored plain text.
+test('GET /snapshot/<id> は Shiki のハイライト（inline color span）を含む', async () => {
+  const gitOut = (args: string[]): string =>
+    execFileSync('git', args, { cwd: tmp, encoding: 'utf8' });
+
+  // A TypeScript change to highlight, captured as a snapshot off a commit.
+  fs.writeFileSync(path.join(tmp, 'snap.ts'), 'export const answer: number = 42;\n');
+  git(['add', 'snap.ts'], tmp);
+  git(['commit', '-m', 'add snap.ts'], tmp);
+  const sha = gitOut(['rev-parse', 'HEAD']).trim();
+
+  const created = await fetch(`${baseUrl}/api/comments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ body: 'スナップショット対象コメント' }),
+  });
+  const commentId = ((await created.json()) as { comment: { id: string } }).comment.id;
+
+  const paths = reviewPaths(tmp);
+  const snap = silence(() => createSnapshot(paths, tmp, { commentId, commit: sha }));
+
+  const res = await fetch(`${baseUrl}/snapshot/${snap.id}`);
+  assert.equal(res.status, 200);
+  const body = await res.text();
+  // Shiki bakes token colors as inline <span style="color:…"> into the diff
+  // payload; that inline color is the highlighting the main page also emits
+  // (the stylesheet itself only uses CSS vars, never a literal color:#hex).
+  assert.match(body, /color:#[0-9a-fA-F]{6}/);
+  // The colors live on the diff cell's per-line `html` field, proving it is the
+  // diff content that is highlighted (not incidental chrome).
+  assert.ok(body.includes('"html":'));
 });
 
 /* ---------- viewed ("確認済み") state ---------- */
