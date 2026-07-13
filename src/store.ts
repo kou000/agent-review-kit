@@ -9,6 +9,7 @@ import {
   ReviewSettings,
   ReviewState,
   SnapshotIndex,
+  ViewedFile,
 } from './types';
 
 function readJson<T>(file: string, fallback: T): T {
@@ -110,6 +111,53 @@ export function mutateComments<T>(
     const result = fn(comments);
     saveComments(commentsFile, comments);
     return result;
+  });
+}
+
+// "確認済み" (Viewed) state is a flat { [filePath]: contentHash } map stored
+// per branch in viewed.json, mirroring the comments.json read/write pattern.
+export function loadViewed(file: string): Record<string, string> {
+  return readJson<ViewedFile>(file, { viewed: {} }).viewed;
+}
+
+export function saveViewed(file: string, viewed: Record<string, string>): void {
+  writeJsonAtomic(file, { viewed } satisfies ViewedFile);
+}
+
+/**
+ * Keep only the entries whose stored hash still matches the caller-supplied
+ * current hash for that file, dropping files that are absent from the current
+ * diff. This is the "auto-revert on diff change" rule that used to live in the
+ * browser: a file whose diff content changed since it was marked viewed no
+ * longer matches and is silently invalidated.
+ */
+export function reconcileViewed(
+  saved: Record<string, string>,
+  currentHashes: Record<string, string>
+): Record<string, string> {
+  const next: Record<string, string> = {};
+  for (const [filePath, hash] of Object.entries(currentHashes)) {
+    if (typeof hash === 'string' && saved[filePath] === hash) {
+      next[filePath] = hash;
+    }
+  }
+  return next;
+}
+
+/**
+ * Read-modify-write on viewed.json under the same directory lock as
+ * comments.json. Used for both a full replace (PUT) and a reconcile against
+ * the current diff (see reconcileViewed). Returns the persisted map.
+ */
+export function mutateViewed(
+  viewedFile: string,
+  fn: (viewed: Record<string, string>) => Record<string, string>
+): Record<string, string> {
+  fs.mkdirSync(path.dirname(viewedFile), { recursive: true });
+  return withFileLock(path.dirname(viewedFile), () => {
+    const next = fn(loadViewed(viewedFile));
+    saveViewed(viewedFile, next);
+    return next;
   });
 }
 

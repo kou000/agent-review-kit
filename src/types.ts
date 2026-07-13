@@ -113,6 +113,16 @@ export interface CommentsFile {
   comments: ReviewComment[];
 }
 
+// Persisted "確認済み" (GitHub "Viewed") state, one file per review branch
+// (branches/<slug>/viewed.json). Maps a file path to the content hash it had
+// when the user marked it viewed; a file counts as viewed only while its
+// current diff hash still matches (see reconcileViewed), so a file whose diff
+// changed automatically reverts to unviewed. Moved off browser localStorage so
+// marks survive a server restart on a different port.
+export interface ViewedFile {
+  viewed: Record<string, string>;
+}
+
 export interface ReviewState {
   base: string | null;
   generatedAt: string;

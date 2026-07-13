@@ -22,11 +22,14 @@
   let pins = []; // [{ index, width, el }]
   let pinStack = null; // right-side flex-row container (created lazily)
 
-  // Viewed ("確認済み") state, GitHub "Viewed" semantics. Persisted in
-  // localStorage as { [filePath]: contentHash }. On load a file counts as viewed
-  // only when its stored hash still matches the current diff's hash, so a file
-  // whose diff changed automatically reverts to unviewed. `fileHashes` caches the
-  // current hash of every file (path -> hash).
+  // Viewed ("確認済み") state, GitHub "Viewed" semantics. Persisted server-side
+  // per branch (viewed.json via /api/viewed) as { [filePath]: contentHash }.
+  // A file counts as viewed only when its stored hash still matches the current
+  // diff's hash, so a file whose diff changed automatically reverts to unviewed
+  // (the server does this pruning in POST /api/viewed/reconcile). Moving off
+  // browser localStorage means marks survive a serve restart on a new port.
+  // VIEWED_KEY is now only read once, to migrate any legacy localStorage marks
+  // left over on this origin into the server, then deleted.
   const VIEWED_KEY = 'ark-viewed';
   let viewed = {}; // { [filePath]: contentHash } for currently-viewed files
   let fileHashes = {}; // { [filePath]: contentHash } for the current diff
@@ -130,24 +133,60 @@
     (DIFF.files || []).forEach(function (f) { fileHashes[f.path] = fileHash(f); });
   }
 
-  // Load persisted viewed state, keeping only entries whose stored hash still
-  // matches the current file (auto-reset on diff change) and whose file still
-  // exists. Stale/mismatched entries are pruned and the cleaned map is saved.
+  // Load persisted viewed state from the server. Any legacy localStorage marks
+  // on this origin are migrated into the server exactly once (then deleted), so
+  // marks made before this became server-backed are not lost. The server then
+  // reconciles the stored map against the current diff's hashes (fileHashes),
+  // dropping files whose diff changed or that are gone. Returns a promise that
+  // resolves once `viewed` holds the reconciled map. Best-effort: on any
+  // failure `viewed` is left as {} (everything shows unviewed) rather than
+  // throwing, so an offline server never blanks the diff.
   function loadViewed() {
-    let saved = {};
-    try { saved = JSON.parse(localStorage.getItem(VIEWED_KEY)) || {}; } catch (e) { saved = {}; }
-    const next = {};
-    (DIFF.files || []).forEach(function (f) {
-      if (saved[f.path] && saved[f.path] === fileHashes[f.path]) {
-        next[f.path] = fileHashes[f.path];
-      }
+    let legacy = {};
+    try {
+      const raw = localStorage.getItem(VIEWED_KEY);
+      if (raw) legacy = JSON.parse(raw) || {};
+    } catch (e) { legacy = {}; }
+    if (!legacy || typeof legacy !== 'object') legacy = {};
+    const hasLegacy = Object.keys(legacy).length > 0;
+
+    const migrated = hasLegacy
+      ? api('GET', '/api/viewed').then(function (data) {
+          // Server wins over legacy on conflict (it is the newer source of
+          // truth); reconcile below prunes anything not in the current diff.
+          const merged = Object.assign({}, legacy, (data && data.viewed) || {});
+          return api('PUT', '/api/viewed', { viewed: merged });
+        }).then(function () {
+          try { localStorage.removeItem(VIEWED_KEY); } catch (e) { /* ignore */ }
+        }, function () { /* migration is best-effort; ignore failures */ })
+      : Promise.resolve();
+
+    return migrated.then(function () {
+      return api('POST', '/api/viewed/reconcile', { hashes: fileHashes });
+    }).then(function (data) {
+      viewed = (data && data.viewed) || {};
+    }, function () {
+      viewed = {};
     });
-    viewed = next;
-    saveViewed();
   }
 
+  // Persist the current viewed map (full replace). Called on every toggle; the
+  // whole map is small (one short hash per file) so no debounce is needed.
   function saveViewed() {
-    try { localStorage.setItem(VIEWED_KEY, JSON.stringify(viewed)); } catch (e) { /* ignore */ }
+    api('PUT', '/api/viewed', { viewed: viewed }).catch(function () { /* offline: ignore */ });
+  }
+
+  // Apply the (async-loaded) viewed state to the already-built diff DOM: collapse
+  // viewed file boxes, sync their toggle buttons, and re-split the sidebar tree.
+  function applyViewedState() {
+    (DIFF.files || []).forEach(function (f, fi) {
+      const box = document.getElementById('file-' + fi);
+      if (box) box.classList.toggle('viewed', isViewed(f.path));
+    });
+    document.querySelectorAll('.viewed-btn[data-file]').forEach(function (btn) {
+      updateViewedButton(btn, isViewed(btn.dataset.file));
+    });
+    renderSidebarTree();
   }
 
   function isViewed(path) {
@@ -179,10 +218,11 @@
     diffMeta.textContent = (DIFF.base ? 'base: ' + DIFF.base : 'working tree vs HEAD') +
       ' / generated: ' + fmtDate(DIFF.generatedAt);
 
-    // Compute per-file content hashes and load persisted viewed state (which
-    // auto-resets files whose diff changed) before building any boxes.
+    // Compute per-file content hashes up front. Persisted viewed state is
+    // fetched from the server asynchronously (see below) and applied once the
+    // boxes exist, so `viewed` starts empty and every file builds as unviewed.
     computeFileHashes();
-    loadViewed();
+    viewed = {};
 
     expanders = {};
 
@@ -302,6 +342,11 @@
     app.appendChild(frag);
     buildSidebar();
     renderComments();
+
+    // Fetch persisted viewed state and apply it to the freshly built boxes.
+    // Done after the DOM exists (and after renderComments) so async ordering
+    // never leaves comments unrendered; a brief all-unviewed flash is fine.
+    loadViewed().then(applyViewedState);
   }
 
   // Shared by the standalone /commit and /snapshot pages: same file boxes and

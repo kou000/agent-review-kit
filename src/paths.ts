@@ -15,6 +15,7 @@ export interface ReviewPaths {
   branch: string;
   branchDir: string;
   comments: string;
+  viewed: string;
   state: string;
   settings: string;
   finished: string;
@@ -95,6 +96,7 @@ export function reviewPaths(cwd: string = process.cwd()): ReviewPaths {
     branch,
     branchDir,
     comments: path.join(branchDir, 'comments.json'),
+    viewed: path.join(branchDir, 'viewed.json'),
     state: path.join(branchDir, 'state.json'),
     settings: path.join(branchDir, 'settings.json'),
     finished: path.join(branchDir, 'finished.json'),

@@ -8,6 +8,7 @@ import { after, before, test } from 'node:test';
 import { publishHtml } from '../src/commands/publishHtml';
 import { reviewPaths } from '../src/paths';
 import { createServer } from '../src/server';
+import { reconcileViewed } from '../src/store';
 
 let tmp: string;
 let server: http.Server;
@@ -176,4 +177,75 @@ test('既存 diff コメント投稿は回帰なく動作する', async () => {
   assert.equal(res.status, 201);
   const data = (await res.json()) as { comment: { file: string } };
   assert.equal(data.comment.file, 'a.ts');
+});
+
+/* ---------- viewed ("確認済み") state ---------- */
+
+test('reconcileViewed は現在ハッシュと一致するエントリだけ残す', () => {
+  const saved = { 'a.ts': 'h1', 'b.ts': 'h2', 'gone.ts': 'h3' };
+  const current = { 'a.ts': 'h1', 'b.ts': 'CHANGED' };
+  // a.ts matches (kept); b.ts hash changed (dropped); gone.ts absent from the
+  // current diff (dropped). Nothing not in `current` is ever kept.
+  assert.deepEqual(reconcileViewed(saved, current), { 'a.ts': 'h1' });
+});
+
+test('GET /api/viewed は初期状態で空マップを返す', async () => {
+  const res = await fetch(`${baseUrl}/api/viewed`);
+  assert.equal(res.status, 200);
+  const data = (await res.json()) as { viewed: Record<string, string> };
+  assert.deepEqual(data.viewed, {});
+});
+
+test('PUT /api/viewed は全置換で保存し GET で取得できる', async () => {
+  const put = await fetch(`${baseUrl}/api/viewed`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ viewed: { 'a.ts': 'h1', 'b.ts': 'h2' } }),
+  });
+  assert.equal(put.status, 200);
+  const putData = (await put.json()) as { viewed: Record<string, string> };
+  assert.deepEqual(putData.viewed, { 'a.ts': 'h1', 'b.ts': 'h2' });
+
+  const get = await fetch(`${baseUrl}/api/viewed`);
+  const getData = (await get.json()) as { viewed: Record<string, string> };
+  assert.deepEqual(getData.viewed, { 'a.ts': 'h1', 'b.ts': 'h2' });
+});
+
+test('POST /api/viewed/reconcile はハッシュ不一致・消えたファイルを無効化して永続化する', async () => {
+  await fetch(`${baseUrl}/api/viewed`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ viewed: { 'a.ts': 'h1', 'b.ts': 'h2', 'gone.ts': 'h3' } }),
+  });
+
+  const rec = await fetch(`${baseUrl}/api/viewed/reconcile`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    // b.ts changed, gone.ts no longer in the diff, c.ts is new & unviewed.
+    body: JSON.stringify({ hashes: { 'a.ts': 'h1', 'b.ts': 'CHANGED', 'c.ts': 'h4' } }),
+  });
+  assert.equal(rec.status, 200);
+  const recData = (await rec.json()) as { viewed: Record<string, string> };
+  assert.deepEqual(recData.viewed, { 'a.ts': 'h1' });
+
+  // The pruned map is persisted, not just returned.
+  const get = await fetch(`${baseUrl}/api/viewed`);
+  const getData = (await get.json()) as { viewed: Record<string, string> };
+  assert.deepEqual(getData.viewed, { 'a.ts': 'h1' });
+});
+
+test('PUT /api/viewed に不正な形（配列や非文字列値）を渡すと 400 になる', async () => {
+  const arr = await fetch(`${baseUrl}/api/viewed`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ viewed: ['a.ts'] }),
+  });
+  assert.equal(arr.status, 400);
+
+  const nonString = await fetch(`${baseUrl}/api/viewed`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ viewed: { 'a.ts': 123 } }),
+  });
+  assert.equal(nonString.status, 400);
 });
