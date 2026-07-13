@@ -12,17 +12,66 @@ function git(args: string[], cwd: string): string {
   });
 }
 
-export function runGitDiff(base: string | undefined, cwd: string): string {
-  if (base) {
-    return git(['diff', '--no-color', '--no-ext-diff', base], cwd);
-  }
+// Run git and return stdout regardless of exit status. `git diff --no-index`
+// exits 1 whenever the two inputs differ (its documented "differences found"
+// signal, not an error), so the throwing `git()` helper can't be used for it.
+function gitAllowDiffExit(args: string[], cwd: string): string {
   try {
-    // Working tree vs HEAD: covers both staged and unstaged changes.
-    return git(['diff', '--no-color', '--no-ext-diff', 'HEAD'], cwd);
-  } catch {
-    // Repo without any commit yet: fall back to index diff.
-    return git(['diff', '--no-color', '--no-ext-diff'], cwd);
+    return git(args, cwd);
+  } catch (err) {
+    // execFileSync surfaces the child's stdout on the thrown error; a genuine
+    // failure (invalid path, not a repo) yields empty stdout, so returning it
+    // is a safe no-op in that case.
+    const stdout = (err as { stdout?: Buffer | string }).stdout;
+    if (stdout == null) throw err;
+    return typeof stdout === 'string' ? stdout : stdout.toString('utf8');
   }
+}
+
+// Synthesize an "added file" diff for every untracked (but not ignored) file, so
+// brand-new files/directories that haven't been `git add`-ed yet still show up in
+// the review. Ignored files are excluded via --exclude-standard (honors
+// .gitignore). Each file is diffed against /dev/null, producing exactly the
+// `diff --git … / new file mode …` shape parseUnifiedDiff already handles for
+// added files — binary untracked files come through as "Binary files … differ",
+// matching how tracked binaries are rendered.
+function runUntrackedDiff(cwd: string): string {
+  let listed: string;
+  try {
+    listed = git(['ls-files', '--others', '--exclude-standard', '-z'], cwd);
+  } catch {
+    return '';
+  }
+  const files = listed.split('\0').filter((p) => p.length > 0);
+  let out = '';
+  for (const file of files) {
+    out += gitAllowDiffExit(
+      ['diff', '--no-color', '--no-ext-diff', '--no-index', '--', '/dev/null', file],
+      cwd
+    );
+  }
+  return out;
+}
+
+export function runGitDiff(base: string | undefined, cwd: string): string {
+  let tracked: string;
+  if (base) {
+    tracked = git(['diff', '--no-color', '--no-ext-diff', base], cwd);
+  } else {
+    try {
+      // Working tree vs HEAD: covers both staged and unstaged changes.
+      tracked = git(['diff', '--no-color', '--no-ext-diff', 'HEAD'], cwd);
+    } catch {
+      // Repo without any commit yet: fall back to index diff.
+      tracked = git(['diff', '--no-color', '--no-ext-diff'], cwd);
+    }
+  }
+  // Untracked files are absent from every `git diff` variant above regardless of
+  // --base (the base only moves the old side; untracked files have no old side
+  // in either the index or any commit), so append them unconditionally.
+  const untracked = runUntrackedDiff(cwd);
+  if (!untracked) return tracked;
+  return tracked && !tracked.endsWith('\n') ? `${tracked}\n${untracked}` : tracked + untracked;
 }
 
 // A raw hex sha is the only shape we ever pass to git for a commit lookup. The
