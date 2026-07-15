@@ -183,6 +183,10 @@ export function loadSettings(file: string): ReviewSettings {
       typeof raw.readOnlyMode === 'boolean'
         ? raw.readOnlyMode
         : DEFAULT_SETTINGS.readOnlyMode,
+    viewedAutoReset:
+      typeof raw.viewedAutoReset === 'boolean'
+        ? raw.viewedAutoReset
+        : DEFAULT_SETTINGS.viewedAutoReset,
   };
 }
 
