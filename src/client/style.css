@@ -240,8 +240,10 @@ body {
 }
 .pin-btn.active:hover { background: var(--accent); }
 
-/* Collapse toggle (independent of 確認済み): chevron at the far left of the
-   file header. Shares the collapse mechanics of .viewed below. */
+/* Collapse toggle: chevron at the far left of the file header. Collapses the
+   file body independently of 確認済み. Viewed files also use this mechanism
+   (setCollapsed adds/removes 'collapsed') so the chevron can reopen them while
+   keeping the 'viewed' state. */
 .collapse-btn {
   flex: 0 0 auto;
   padding: 2px 6px;
@@ -251,9 +253,8 @@ body {
 }
 .file.collapsed > *:not(.file-header) { display: none; }
 
-/* Viewed file: keep the sticky header, collapse everything else (diff table,
-   empty-diff note, and any inline comment thread-rows inside the table). */
-.file.viewed > *:not(.file-header) { display: none; }
+/* Viewed file: dim the sticky header. Body is hidden via 'collapsed' (added by
+   setCollapsed), so the chevron can reopen the file while keeping 確認済み on. */
 .file.viewed .file-header { opacity: 0.75; }
 .file.viewed .file-header:hover { opacity: 1; }
 
