@@ -187,10 +187,11 @@ export async function bakeHighlight(
 }
 
 // Bake highlighting for a standalone diff page (/commit, /snapshot) whose files
-// come straight from a patch and carry no embedded full-file content. Without
-// old/new sources every cell falls back to single-line highlighting, so these
-// pages get the same Shiki (github-dark) coloring as the main review page
-// (minus cross-line context, which they don't render anyway — no expansion).
+// come straight from a patch. New-side context comes from `newLines` when the
+// route embedded it (embedNewSideFromTree — also feeds context expansion);
+// there is no old-side source, so old-side cells use single-line highlighting.
+// Either way these pages get the same Shiki (github-dark) coloring as the main
+// review page.
 export async function bakeDiffHighlight(files: FileDiff[]): Promise<void> {
   await bakeHighlight(files, { oldByPath: new Map() });
 }

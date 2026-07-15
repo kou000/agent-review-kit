@@ -330,9 +330,10 @@ body {
   overflow: auto;
   padding: 0;
 }
-/* Display-only number cells: no pointer affordance. */
-.pin-panel td.num.static { cursor: default; }
-.pin-panel td.num.static:hover { color: var(--muted); font-weight: 400; }
+/* Display-only number cells (pin panels and the read-only /commit and
+   /snapshot pages): no pointer affordance. */
+td.num.static { cursor: default; }
+td.num.static:hover { color: var(--muted); font-weight: 400; }
 
 /* Reserve room for the panel so main content never sits under it. */
 body.has-pin .layout {

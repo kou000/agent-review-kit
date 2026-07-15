@@ -134,6 +134,29 @@ export function runGitCommitDiff(sha: string, cwd: string): string {
   );
 }
 
+// Files larger than this get no expansion content, keeping the page bounded
+// (same cap as generate's working-tree embedding).
+const MAX_EMBED_BYTES = 1024 * 1024;
+
+// Embed each file's full new-side content from a git tree-ish (commit sha or
+// tree object sha) so the standalone diff pages (/commit, /snapshot) can expand
+// context around hunks like the main review page does from the working tree.
+export function embedNewSideFromTree(files: FileDiff[], treeish: string, cwd: string): void {
+  if (!SHA_RE.test(treeish)) return;
+  for (const f of files) {
+    if (f.status === 'deleted' || f.status === 'binary') continue;
+    try {
+      const size = parseInt(git(['cat-file', '-s', `${treeish}:${f.path}`], cwd).trim(), 10);
+      if (!Number.isFinite(size) || size > MAX_EMBED_BYTES) continue;
+      const lines = git(['show', `${treeish}:${f.path}`], cwd).split('\n');
+      if (lines.length && lines[lines.length - 1] === '') lines.pop();
+      f.newLines = lines;
+    } catch {
+      // Path missing from the tree (e.g. hand-edited patch): skip expansion.
+    }
+  }
+}
+
 // Old-side (pre-image) content of a file, one entry per line, or null when it
 // can't be read (added file, binary, or the ref/path doesn't resolve). Used to
 // give Shiki full-file language context when highlighting deleted/context lines.
