@@ -190,11 +190,16 @@
   }
 
   // Apply the (async-loaded) viewed state to the already-built diff DOM: collapse
-  // viewed file boxes, sync their toggle buttons, and re-split the sidebar tree.
+  // viewed file boxes via the shared 'collapsed' class, sync their toggle
+  // buttons, and re-split the sidebar tree.
   function applyViewedState() {
     (DIFF.files || []).forEach(function (f, fi) {
       const box = document.getElementById('file-' + fi);
-      if (box) box.classList.toggle('viewed', isViewed(f.path));
+      if (box) {
+        const v = isViewed(f.path);
+        box.classList.toggle('viewed', v);
+        setCollapsed(box, v);
+      }
     });
     document.querySelectorAll('.viewed-btn[data-file]').forEach(function (btn) {
       updateViewedButton(btn, isViewed(btn.dataset.file));
@@ -222,6 +227,37 @@
   }
 
   /* ---------- diff rendering ---------- */
+
+  // Sync the 'collapsed' class on a file box and update its collapse-btn visuals.
+  // Called by the chevron click handler and by viewed-state toggling so both
+  // code paths stay in sync without duplicating the button update logic.
+  function setCollapsed(box, on) {
+    box.classList.toggle('collapsed', on);
+    const btn = box.querySelector('.collapse-btn');
+    if (!btn) return;
+    btn.textContent = on ? '▸' : '▾';
+    btn.title = on ? '展開する' : '折りたたむ';
+    btn.setAttribute('aria-expanded', on ? 'false' : 'true');
+  }
+
+  // Create a collapse-toggle chevron button, wire its click handler, insert it
+  // at the front of `header`, and return it. Shared by renderDiff (interactive
+  // boxes) and renderReadOnlyFiles (read-only boxes) so they get identical
+  // collapse affordances.
+  function appendCollapseToggle(header, box) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'collapse-btn';
+    btn.textContent = '▾';
+    btn.title = '折りたたむ';
+    btn.setAttribute('aria-label', 'このファイルの表示を折りたたむ');
+    btn.setAttribute('aria-expanded', 'true');
+    btn.addEventListener('click', function () {
+      setCollapsed(box, !box.classList.contains('collapsed'));
+    });
+    header.insertBefore(btn, header.firstChild);
+    return btn;
+  }
 
   function statusLabel(st) {
     return { modified: 'modified', added: 'added', deleted: 'deleted', renamed: 'renamed', binary: 'binary' }[st] || st;
@@ -283,26 +319,13 @@
 
       // Collapse toggle (chevron at the far left of the header): hides/shows the
       // file body only. Independent of 確認済み (viewed) and not persisted.
-      const collapseBtn = document.createElement('button');
-      collapseBtn.type = 'button';
-      collapseBtn.className = 'collapse-btn';
-      collapseBtn.textContent = '▾';
-      collapseBtn.title = '折りたたむ';
-      collapseBtn.setAttribute('aria-label', 'このファイルの表示を折りたたむ');
-      collapseBtn.setAttribute('aria-expanded', 'true');
-      collapseBtn.addEventListener('click', function () {
-        const on = !box.classList.contains('collapsed');
-        box.classList.toggle('collapsed', on);
-        collapseBtn.textContent = on ? '▸' : '▾';
-        collapseBtn.title = on ? '展開する' : '折りたたむ';
-        collapseBtn.setAttribute('aria-expanded', on ? 'false' : 'true');
-      });
-      header.insertBefore(collapseBtn, header.firstChild);
+      appendCollapseToggle(header, box);
 
       header.appendChild(copyPathButton(file.path));
 
-      // 確認済み (Viewed) toggle: collapses this file's body and moves it to the
-      // "確認済み" section of the tree. Placed to the left of 📌. Checkbox-like.
+      // 確認済み (Viewed) toggle: collapses this file's body (via the shared
+      // 'collapsed' class) and moves it to the "確認済み" section of the tree.
+      // Placed to the left of 📌. Checkbox-like.
       const viewBtn = document.createElement('button');
       viewBtn.type = 'button';
       viewBtn.className = 'viewed-btn';
@@ -315,6 +338,7 @@
         const on = !isViewed(file.path);
         setFileViewed(file.path, on);
         box.classList.toggle('viewed', on);
+        setCollapsed(box, on);
         updateViewedButton(viewBtn, on);
         renderSidebarTree();
       });
@@ -333,7 +357,12 @@
       header.appendChild(pinBtn);
 
       // Apply persisted viewed state (collapse + button visuals) up front.
-      if (isViewed(file.path)) box.classList.add('viewed');
+      // At initial build time `viewed` is always empty (loaded async below),
+      // so these are effectively no-ops; kept for consistency.
+      if (isViewed(file.path)) {
+        box.classList.add('viewed');
+        setCollapsed(box, true);
+      }
       updateViewedButton(viewBtn, isViewed(file.path));
 
       box.appendChild(header);
@@ -364,8 +393,8 @@
 
   // Shared by the standalone /commit and /snapshot pages: same file boxes and
   // diff tables as renderDiff (tree-traversal order, matching the sidebar
-  // tree), but with none of the interactive chrome — no collapse/viewed/pin
-  // buttons and no comment wiring. Context expanders still appear when the
+  // tree). Collapse chevrons are included (same as the main diff); viewed/pin
+  // buttons and comment wiring are not. Context expanders still appear when the
   // server embedded new-side content (newLines) for the page.
   function renderReadOnlyFiles(frag, emptyText) {
     if (!DIFF.files.length) {
@@ -390,6 +419,7 @@
       }
       header.innerHTML = '<span class="file-status ' + esc(file.status) + '">' +
         esc(statusLabel(file.status)) + '</span><span class="file-name">' + title + '</span>';
+      appendCollapseToggle(header, box);
       header.appendChild(copyPathButton(file.path));
       box.appendChild(header);
 
