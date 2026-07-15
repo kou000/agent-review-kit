@@ -157,6 +157,10 @@ export interface SnapshotMeta {
   createdAt: string;
   // File name relative to the snapshots directory.
   patchFile: string;
+  // Git tree object of the post-fix state (the patch's new side), when known.
+  // Lets the /snapshot page embed full-file content for context expansion.
+  // Absent for patches imported via --patch-file and for older snapshots.
+  tree?: string;
 }
 
 export interface SnapshotIndex {

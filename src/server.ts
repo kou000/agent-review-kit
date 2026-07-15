@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as http from 'http';
 import * as path from 'path';
-import { getCommitMeta, parseUnifiedDiff, runGitCommitDiff, runGitCommitLog } from './gitDiff';
+import { embedNewSideFromTree, getCommitMeta, parseUnifiedDiff, runGitCommitDiff, runGitCommitLog } from './gitDiff';
 import { bakeDiffHighlight } from './highlight';
 import { documentHtmlPath, findDocument } from './htmlDocument';
 import { ReviewPaths, reviewPaths } from './paths';
@@ -266,6 +266,9 @@ async function handle(
     try {
       const meta = getCommitMeta(sha, projectDir);
       const files = parseUnifiedDiff(runGitCommitDiff(sha, projectDir));
+      // New-side content comes from the commit itself, enabling GitHub-style
+      // context expansion around hunks on this page too.
+      embedNewSideFromTree(files, sha, projectDir);
       // Bake syntax highlighting like the main review page (generate) does, so
       // the standalone commit diff isn't rendered as plain uncolored text.
       await bakeDiffHighlight(files);
@@ -301,6 +304,10 @@ async function handle(
     }
     try {
       const files = parseUnifiedDiff(readSnapshotPatch(paths, meta));
+      // Snapshots record the post-fix tree at create time; reading new-side
+      // content from it enables context expansion. Older snapshots (no tree)
+      // simply render without expanders.
+      if (meta.tree) embedNewSideFromTree(files, meta.tree, path.dirname(paths.dir));
       // Bake syntax highlighting like the main review page (generate) does, so
       // the fix-snapshot diff isn't rendered as plain uncolored text.
       await bakeDiffHighlight(files);

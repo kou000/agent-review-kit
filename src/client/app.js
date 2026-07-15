@@ -363,8 +363,10 @@
   }
 
   // Shared by the standalone /commit and /snapshot pages: same file boxes and
-  // diff tables as renderDiff, but with none of the interactive chrome — no
-  // collapse/viewed/pin buttons, no comment wiring, no sidebar.
+  // diff tables as renderDiff (tree-traversal order, matching the sidebar
+  // tree), but with none of the interactive chrome — no collapse/viewed/pin
+  // buttons and no comment wiring. Context expanders still appear when the
+  // server embedded new-side content (newLines) for the page.
   function renderReadOnlyFiles(frag, emptyText) {
     if (!DIFF.files.length) {
       const empty = document.createElement('div');
@@ -373,7 +375,8 @@
       frag.appendChild(empty);
     }
 
-    DIFF.files.forEach(function (file, fi) {
+    treeOrder(DIFF.files).forEach(function (fi) {
+      const file = DIFF.files[fi];
       const box = document.createElement('div');
       box.className = 'file';
       box.id = 'file-' + fi;
@@ -424,6 +427,7 @@
 
     app.innerHTML = '';
     app.appendChild(frag);
+    buildReadOnlySidebar();
   }
 
   // Read-only render for the /snapshot/<id> page (window.__SNAPSHOT__ set):
@@ -459,6 +463,7 @@
 
     app.innerHTML = '';
     app.appendChild(frag);
+    buildReadOnlySidebar();
   }
 
   /* ---------- context expansion (GitHub-style) ---------- */
@@ -965,10 +970,14 @@
     });
   }
 
-  function buildSidebar() {
-    if (sidebarBuilt || !DIFF.files.length) return;
+  // Create the .layout flex wrapper holding the (empty) tree sidebar, its drag
+  // resizer, and #app. Shared by the main review page and the standalone
+  // read-only pages. Returns the sidebar element, or null when already built /
+  // nothing to show.
+  function buildSidebarShell() {
+    if (sidebarBuilt || !DIFF.files.length) return null;
     const parent = app.parentNode;
-    if (!parent) return;
+    if (!parent) return null;
 
     const layout = document.createElement('div');
     layout.className = 'layout';
@@ -977,6 +986,46 @@
     const sidebar = document.createElement('aside');
     sidebar.id = 'file-tree';
     sidebar.className = 'sidebar';
+
+    // Vertical drag handle between the sidebar and #app.
+    const resizer = document.createElement('div');
+    resizer.className = 'sidebar-resizer';
+    resizer.setAttribute('role', 'separator');
+    resizer.setAttribute('aria-orientation', 'vertical');
+    resizer.title = 'ドラッグでサイドバー幅を調整';
+    attachSidebarResize(resizer, sidebar);
+
+    layout.appendChild(sidebar);
+    layout.appendChild(resizer);
+    layout.appendChild(app); // move #app into the flex layout
+    sidebarBuilt = true;
+    return sidebar;
+  }
+
+  // File-tree-only sidebar for the standalone /commit and /snapshot pages:
+  // jump navigation over the read-only file boxes. No viewed split, comment
+  // list, or commits section — none of those apply there.
+  function buildReadOnlySidebar() {
+    const sidebar = buildSidebarShell();
+    if (!sidebar) return;
+
+    const heading = document.createElement('div');
+    heading.className = 'sidebar-title';
+    heading.textContent = 'ファイル (' + DIFF.files.length + ')';
+    sidebar.appendChild(heading);
+
+    const treeWrap = document.createElement('div');
+    treeWrap.className = 'tree';
+    renderTreeNode(buildTree(DIFF.files), treeWrap, 0);
+    sidebar.appendChild(treeWrap);
+    // No comments here: hide the (empty) per-file count badges the tree
+    // renderer always creates.
+    updateTreeCounts();
+  }
+
+  function buildSidebar() {
+    const sidebar = buildSidebarShell();
+    if (!sidebar) return;
     const heading = document.createElement('div');
     heading.className = 'sidebar-title';
     heading.id = 'file-tree-title';
@@ -1015,19 +1064,6 @@
     sidebar.appendChild(commitHeading);
     sidebar.appendChild(commitList);
     loadCommitList(commitHeading, commitList);
-
-    // Vertical drag handle between the sidebar and #app.
-    const resizer = document.createElement('div');
-    resizer.className = 'sidebar-resizer';
-    resizer.setAttribute('role', 'separator');
-    resizer.setAttribute('aria-orientation', 'vertical');
-    resizer.title = 'ドラッグでサイドバー幅を調整';
-    attachSidebarResize(resizer, sidebar);
-
-    layout.appendChild(sidebar);
-    layout.appendChild(resizer);
-    layout.appendChild(app); // move #app into the flex layout
-    sidebarBuilt = true;
 
     // Populate the tree/確認済み sections now that the sidebar is in the DOM
     // (renderSidebarTree looks its containers up by id/selector).
@@ -3034,10 +3070,11 @@
   }
 
   // Standalone views: /commit/<sha> (window.__COMMIT__) and /snapshot/<id>
-  // (window.__SNAPSHOT__). Both reuse the diff renderer read-only and skip all
-  // review chrome — no sidebar, comments, forms, polling or reloads. Bail out
-  // before any of that is wired.
+  // (window.__SNAPSHOT__). Both reuse the diff renderer read-only with the
+  // file-tree sidebar, and skip the interactive review chrome — no comments,
+  // forms, polling or reloads. Bail out before any of that is wired.
   if (window.__COMMIT__ || window.__SNAPSHOT__) {
+    restorePersistedWidths();
     if (window.__COMMIT__) renderCommitPage();
     else renderSnapshotPage();
     setupScrollTop();

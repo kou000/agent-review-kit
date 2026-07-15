@@ -98,20 +98,26 @@ export interface CreateSnapshotOptions {
   patchFile?: string;
 }
 
-// Produce the patch text for a new snapshot. --binary --full-index makes the
+// Produce the patch text for a new snapshot, plus the git tree of its new side
+// (null when unknown, i.e. --patch-file). --binary --full-index makes the
 // patch replayable with `git apply` even for binary changes.
-function buildPatch(paths: ReviewPaths, cwd: string, opts: CreateSnapshotOptions): string {
+function buildPatch(
+  paths: ReviewPaths,
+  cwd: string,
+  opts: CreateSnapshotOptions
+): { patch: string; tree: string | null } {
   if (opts.commit) {
     if (!SHA_RE.test(opts.commit)) throw new Error(`invalid commit sha: ${opts.commit}`);
     // A commit made by a subagent in a worktree resolves here too: worktrees
     // share the repository's object database.
-    return git(
+    const patch = git(
       ['show', '--no-color', '--no-ext-diff', '--first-parent', '--binary', '--full-index', '--format=', `${opts.commit}^{commit}`],
       cwd
     );
+    return { patch, tree: git(['rev-parse', `${opts.commit}^{tree}`], cwd).trim() };
   }
   if (opts.patchFile) {
-    return fs.readFileSync(opts.patchFile, 'utf8');
+    return { patch: fs.readFileSync(opts.patchFile, 'utf8'), tree: null };
   }
   const pending = loadPending(paths);
   if (!pending) {
@@ -120,10 +126,11 @@ function buildPatch(paths: ReviewPaths, cwd: string, opts: CreateSnapshotOptions
     );
   }
   const after = captureWorkingTree(paths, cwd);
-  return git(
+  const patch = git(
     ['diff-tree', '-p', '--no-color', '--binary', '--full-index', pending.tree, after],
     cwd
   );
+  return { patch, tree: after };
 }
 
 export function createSnapshot(
@@ -136,7 +143,7 @@ export function createSnapshot(
   const comment = loadComments(paths.comments).find((c) => c.id === opts.commentId);
   if (!comment) throw new Error(`comment not found: ${opts.commentId}`);
 
-  const patch = buildPatch(paths, cwd, opts);
+  const { patch, tree } = buildPatch(paths, cwd, opts);
   if (!patch.trim()) {
     throw new Error(
       '差分が空です（snapshot begin 以降に変更がないか、パッチが空です）。スナップショットは作成しません'
@@ -157,6 +164,7 @@ export function createSnapshot(
       patchFile: patchFileName,
     };
     if (opts.title) m.title = opts.title;
+    if (tree) m.tree = tree;
     fs.writeFileSync(path.join(paths.snapshotsDir, patchFileName), patch);
     index.snapshots.push(m);
     saveSnapshotIndex(paths.snapshotsIndex, index);
