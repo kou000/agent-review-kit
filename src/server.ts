@@ -417,6 +417,7 @@ async function handle(
     const settings = mutateSettings(paths.settings, (s) => {
       if (typeof body.snapshotsEnabled === 'boolean') s.snapshotsEnabled = body.snapshotsEnabled;
       if (typeof body.readOnlyMode === 'boolean') s.readOnlyMode = body.readOnlyMode;
+      if (typeof body.viewedAutoReset === 'boolean') s.viewedAutoReset = body.viewedAutoReset;
     });
     json(res, 200, { settings });
     return;
@@ -454,7 +455,12 @@ async function handle(
       json(res, 400, { error: 'hashes must be an object of string hashes' });
       return;
     }
-    const viewed = mutateViewed(paths.viewed, (saved) => reconcileViewed(saved, hashes));
+    // When viewedAutoReset is disabled, skip pruning and return the stored map
+    // as-is so marks survive diff changes until the user clears them manually.
+    const { viewedAutoReset } = loadSettings(paths.settings);
+    const viewed = mutateViewed(paths.viewed, (saved) =>
+      viewedAutoReset ? reconcileViewed(saved, hashes) : saved
+    );
     json(res, 200, { viewed });
     return;
   }

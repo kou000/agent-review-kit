@@ -2098,7 +2098,10 @@
       '<span class="settings-hint">修正ごとに差分ページを作る（コミットは作らない）</span></span></label>' +
       '<label class="settings-row"><input type="checkbox" data-key="readOnlyMode">' +
       '<span>読み取り専用モード' +
-      '<span class="settings-hint">エージェントはコードを修正せず、コメントへの回答のみ行う</span></span></label>';
+      '<span class="settings-hint">エージェントはコードを修正せず、コメントへの回答のみ行う</span></span></label>' +
+      '<label class="settings-row"><input type="checkbox" data-key="viewedAutoReset">' +
+      '<span>差分が変わったファイルの確認済みを自動解除' +
+      '<span class="settings-hint">OFFにすると、修正で差分が変わっても確認済みを維持する（手動解除は可能）</span></span></label>';
     document.body.appendChild(panel);
     settingsPanel = panel;
 

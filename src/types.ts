@@ -138,11 +138,15 @@ export interface ReviewSettings {
   // Review-only mode for someone else's MR: the agent answers comments but
   // must not modify code. Enforced by the skill; surfaced as a badge in the UI.
   readOnlyMode: boolean;
+  // When false, the viewed-state reconcile keeps marks even after a file's
+  // diff changes; only manual toggles clear them.
+  viewedAutoReset: boolean;
 }
 
 export const DEFAULT_SETTINGS: ReviewSettings = {
   snapshotsEnabled: true,
   readOnlyMode: false,
+  viewedAutoReset: true,
 };
 
 // One captured fix: a git-format patch stored under .agent-review/snapshots/.
