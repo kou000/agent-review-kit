@@ -11,7 +11,7 @@ agent-review-kit を使って、ユーザーとブラウザ経由のレビュー
 
 ## 前提
 
-- `agent-review-kit` コマンドが使えること（グローバルインストール済み、または `npx agent-review-kit`）。
+- `agent-review-kit` コマンドが使えること。このスキルは agent-review-kit リポジトリに同梱されているため、基本はそのローカルクローンの CLI を使う（`node <repo>/dist/cli.js <command>`）。グローバルインストール済みなら `agent-review-kit` で直接呼べる。npm 未公開のため `npx agent-review-kit` は使えない。
 - 対象プロジェクトの作業ディレクトリ（git リポジトリ）で実行すること。`.agent-review/` がそこに作られる。
 
 ## 設定（settings）の扱い
