@@ -1218,6 +1218,13 @@
       '.comment-card[data-comment-id="' + id + '"]'
     );
     if (!card) return;
+    // A collapsed file box (chevron or 確認済み) hides everything but its
+    // header, so a card inside it has no layout and scrollIntoView is a no-op.
+    // Expand the box first; the viewed mark itself stays on.
+    const fileBox = card.closest('.file');
+    if (fileBox && fileBox.classList.contains('collapsed')) {
+      setCollapsed(fileBox, false);
+    }
     // A collapsed thread hides its cards; expand it before scrolling so the
     // jump from the sidebar always lands on something visible.
     const block = card.closest('.comment-thread-block');
