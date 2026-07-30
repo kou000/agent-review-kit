@@ -46,6 +46,23 @@ export function serve(opts: ServeOptions = {}): void {
       }, 500);
     },
   });
+  // SIGTERM/SIGINT はユーザーの中断操作（中断ボタン・セッション終了）であって
+  // 障害ではない。無ハンドラだと exit 143 の failed 通知になり、エージェントが
+  // 障害と誤読して勝手に再起動した事故があるため、明示メッセージ + exit 0 にする。
+  for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+    process.on(sig, () => {
+      console.log(
+        'agent-review-kit serve: シグナルにより停止（ユーザーの中断操作。エージェントは自動で再起動しないこと）'
+      );
+      try {
+        fs.unlinkSync(paths.serverJson);
+      } catch {
+        // Best effort: the projectDir check guards stale files anyway.
+      }
+      process.exit(0);
+    });
+  }
+
   server.on('error', (err: NodeJS.ErrnoException) => {
     if (err.code === 'EADDRINUSE') {
       // 明示指定されたポートは黙って変えない。自動選択時のみ次を試す。

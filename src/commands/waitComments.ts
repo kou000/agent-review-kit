@@ -31,6 +31,27 @@ export async function waitComments(opts: WaitOptions = {}): Promise<void> {
   const timeoutSec = opts.timeout ?? 0;
   const deadline = timeoutSec > 0 ? Date.now() + timeoutSec * 1000 : null;
 
+  // SIGTERM/SIGINT here means the user stopped the session (interrupt button,
+  // shell teardown), not a crash. Without a handler the process dies with exit
+  // 143, which agents have misread as a failure and "recovered" by restarting
+  // everything. Exit 0 with an explicit status so the intent is unambiguous.
+  for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+    process.on(sig, () => {
+      console.log(
+        JSON.stringify(
+          {
+            status: 'interrupted',
+            note: 'ユーザー操作（シグナル）による停止。エージェントは自動で再起動しないこと。',
+            comments: [],
+          },
+          null,
+          2
+        )
+      );
+      process.exit(0);
+    });
+  }
+
   for (;;) {
     // Re-resolved every poll: review data is branch-scoped, and a checkout
     // while waiting should shift the watch to the new branch's comments.

@@ -67,6 +67,8 @@ agent-review-kit を使って、ユーザーとブラウザ経由のレビュー
 
    ユーザーがブラウザの「レビュー終了」ボタンを押すと `{"status": "finished", "comments": []}` が返る。この場合はループを抜けて手順12の完了報告に進む（AI指摘の見送り処理とサーバー停止はサーバー側で完了済み。wait-comments の再起動もしない）。
 
+   `{"status": "interrupted", ...}` が返った場合（または serve が「シグナルにより停止」と出力して終了した場合）は、ユーザーが中断ボタン等で意図的に止めている。**障害ではないので、wait-comments・serve を自動で再起動しない**。ユーザーの明示指示（「再開して」等）を待つ。
+
    **最初の wait-comments を起動する前に、取りこぼしを回収する。** `agent-review-kit status` の `counts.seen` が 0 でなければ、前回セッションが受信したまま対応せずに終わったコメントが残っている（`seen` は wait-comments では二度と配達されない）。`.agent-review/comments.json` から `status: "seen"` のコメントを読み、通常の受信分と同じように手順5以降でトリアージする。
 
 5. 受け取った各コメントを読む。`file` / `side` / `startLine`〜`endLine` / `body` を確認する。
