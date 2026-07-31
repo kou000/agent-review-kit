@@ -1,0 +1,4 @@
+interface:
+  display_name: "Interactive Diff Review"
+  short_description: "ブラウザでローカル差分をレビューし、コメント対応を反復する"
+  default_prompt: "Use $my-interactive-review to review the current local changes in a browser and handle comments until the reviewer finishes."

@@ -1,12 +1,12 @@
 # agent-review-kit
 
-Claude Code のメインセッションと人間レビュアーをつなぐ、ローカル差分レビューツール。
+Codex / Claude Code のメインセッションと人間レビュアーをつなぐ、ローカル差分レビューツール。
 
 エージェントが修正後にレビュー用HTMLを生成し、ユーザーはブラウザで GitHub の PR レビューのように差分へインラインコメント（行範囲選択対応）を書く。エージェントは `wait-comments` でコメントを受け取り、**同じセッションのまま**回答・修正・resolve を繰り返す。
 
 ```
-Claude Code セッション                     ブラウザ (http://localhost:<実ポート>)
-──────────────────────                    ─────────────────────────────
+Codex / Claude Code セッション             ブラウザ (http://localhost:<実ポート>)
+──────────────────────────                ─────────────────────────────
 generate  ──► .agent-review/review.html ──►  side-by-side 差分表示
 serve     ──► ローカルサーバー起動        ◄──  行/行範囲を選択してコメント
 wait-comments ◄── comments.json ◄──────────  POST /api/comments
@@ -17,7 +17,7 @@ resolve-comment ──► 状態更新 ─────────────�
 ## 特徴
 
 - **共通ツール**: 各プロジェクトには組み込まず、どの git リポジトリでも `agent-review-kit generate` するだけで使える。データはそのリポジトリの `.agent-review/` に置かれ、**ブランチ単位**（`branches/<ブランチ名>/`）で分離される — 別ブランチのレビューのコメントが混ざらない。
-- **同一セッション処理**: コメントごとに別プロセスの Claude Code を起動しない。Skill の手順として `wait-comments` を実行し、受け取ったコメントを同じセッションが処理する。
+- **同一セッション処理**: コメントごとに別のメインエージェントを起動しない。Skill の手順として `wait-comments` をバックグラウンド実行し、受け取ったコメントを同じ Codex / Claude Code セッションが処理する。
 - **GitHub ライクな UI**: side-by-side 差分、Shiki による SSR シンタックスハイライト、行番号クリックで単一行コメント、Shift+クリックまたはドラッグで行範囲コメント、インラインのコメントスレッド表示（折りたたみ対応）、未解決数バッジ、レビュー対象コミット一覧（Commits タブ相当）、ファイルごとの **Viewed（確認済み）チェック**（サーバー側に永続化され、そのファイルの差分が変わると自動で未確認に戻る）。
 - **未追跡ファイルも対象**: 新規作成した untracked ファイルは追加ファイルの差分として自動で含まれる（`git add -N` は不要）。
 - **コミットしない修正差分**: 修正1件ごとの patch を**スナップショット**として保存し、`/snapshot/<id>` で指摘単位の差分ページを表示。git 履歴を汚さず、コミットはユーザーが指示した時だけ（patch の時系列再生でコメント単位のコミット再構成も可能）。
@@ -38,10 +38,19 @@ npm link        # グローバルに agent-review-kit コマンドを提供
 
 `npm link` の代わりに、任意のプロジェクトから `node /path/to/agent-review-kit/dist/cli.js` で直接呼んでもよい。
 
-Claude Code から使う場合は、同梱の Skill をユーザースキルとしてリンクする:
+同梱の Skill（`skills/my-interactive-review/SKILL.md`）は Codex / Claude Code 共通のレビューループを定義している。同じディレクトリを各クライアントのユーザースキルとしてリンクするため、手順が分岐・重複しない。
+
+Claude Code から使う場合:
 
 ```bash
 ln -s /path/to/agent-review-kit/skills/my-interactive-review ~/.claude/skills/my-interactive-review
+```
+
+Codex から使う場合は、Codex が探索するユーザースキルの標準ディレクトリへリンクする:
+
+```bash
+mkdir -p ~/.agents/skills
+ln -s /path/to/agent-review-kit/skills/my-interactive-review ~/.agents/skills/my-interactive-review
 ```
 
 ## Skill で使う（推奨）
@@ -57,6 +66,8 @@ Claude Code に修正させたあと、同じセッションで:
 ```
 
 （または「この修正をブラウザでレビューさせて」と依頼する。）
+
+Codex では `$my-interactive-review` を明示指定して起動する。通常はスキル変更も自動検知される。候補に出ない場合は Codex を再起動する。Codex 版は `serve` と `wait-comments` を別々の追跡可能なターミナルセッションとしてバックグラウンド実行し、コメントを受信した `wait-comments` が終了したら保持中の session id を置き換えて次の待機を1本だけ開始する。レビュー終了まで元の Codex タスクを閉じず、終了シグナル後も受信済みコメントを処理し終えてから完了する。
 
 エージェントがレビューHTMLを生成してサーバーを起動し、URL（`http://localhost:<実ポート>`）を案内してくる。ブラウザで差分にコメントを書くと、エージェントが同一セッションで回答（`answered`）または修正（`fixed` + 修正差分リンク）を返し、未解決 0 件または「レビュー終了」ボタンまでループする。修正は working tree に蓄積されるだけでコミットされず、コミットは指示した時だけ行われる（コメント単位のコミット分割も可能）。
 
@@ -100,6 +111,7 @@ agent-review-kit generate                          # 初回: working tree vs HEA
 agent-review-kit generate --base main              # main と working tree の差分
 agent-review-kit generate --base $(git merge-base main HEAD)   # ブランチ全体の変更
 agent-review-kit generate --base HEAD              # working tree vs HEAD に戻す
+agent-review-kit generate --preserve-finished      # レビュー中の更新（終了シグナルを保持）
 ```
 
 - `--base` を省略すると**前回 generate の base を引き継ぐ**（初回は working tree vs HEAD）。
@@ -116,14 +128,14 @@ agent-review-kit generate --base HEAD              # working tree vs HEAD に戻
     state.json                        # base と生成時刻
     settings.json                     # 画面の設定（スナップショット/読み取り専用）
     viewed.json                       # ファイルごとの Viewed（確認済み）状態
-    finished.json                     # レビュー終了マーカー（generate で消える）
+    finished.json                     # レビュー終了マーカー（初回用 generate で消える）
     snapshots/                        # 修正スナップショット（patch + index.json）
     documents/                        # HTMLレビューのドキュメント（後述）
 ```
 
 ブランチを切り替えると、そのブランチのコメント・スナップショットだけが見える（旧バージョンの平置きデータは初回実行時に現在ブランチへ自動移行される）。
 
-再実行するとHTMLだけが更新され、コメントは保持される。ブラウザは生成時刻の変化を検知して自動リロードする。
+再実行するとHTMLだけが更新され、コメントは保持される。進行中レビューの更新には `--preserve-finished` を付けると、同時にブラウザから届いた終了シグナルを消さない。ブラウザは生成時刻の変化を検知して自動リロードする。
 
 ### 2. サーバー起動
 
@@ -160,6 +172,8 @@ API:
 
 `POST /api/comments` は `documentId` + `htmlTarget` を送るとHTMLレビューのコメントとして登録される（後述）。返信は親から `documentId` / `htmlTarget` を継承する。`GET /api/status` の集計には `documents`（登録ドキュメント数）が追加される。
 
+レビュー終了後の `POST /api/comments` と `PATCH /api/comments/:id` による `status: open` への再送は `409` になる。終了処理と配達対象の作成は同じロックで順序付けられ、終了より先に受理された最終コメントは `wait-comments` が `finished` を返す前に配達される。
+
 既存コメントへの**返信**は `parentId`（返信元コメントの `id`）と `body` を送る。返信のアンカー（`file` / `side` / `startLine`〜`endLine` / `startDiffLine`〜`endDiffLine`）は**親コメントからコピー**され、リクエストの位置情報は無視される（返信が親からずれない）。存在しない `parentId` を指定すると 400 になる。返信への返信を送った場合、`parentId` はそのスレッドの**トップレベルの親**に正規化され、スレッドは常に1段ネストで保持される。画面上では返信が親コメントの直下にインデント表示される。
 
 ### 3. コメント待機（エージェント用）
@@ -169,6 +183,7 @@ agent-review-kit wait-comments --timeout 0     # 無期限に待つ（デフォ�
 agent-review-kit wait-comments --timeout 600   # 最大600秒待つ
 agent-review-kit wait-comments --diff-only     # HTMLドキュメント宛を除き、diffレビューのコメントだけを待つ
 agent-review-kit wait-comments --document-id auth-plan   # 特定ドキュメント宛だけを待つ
+agent-review-kit wait-comments --resume        # セッション再開時: seen の取りこぼしも回収
 ```
 
 **ユーザー名義**の `status: open` コメントが現れると、それらを `seen` に更新して stdout に返す（`add-comment` で投稿した AI 名義の指摘は配達されない — ユーザーの返信だけが届く）。受信時点の設定が毎回同乗するので、消費側は `readOnlyMode` 等を別途確認しなくてよい:
@@ -178,6 +193,10 @@ agent-review-kit wait-comments --document-id auth-plan   # 特定ドキュメン
 ```
 
 タイムアウト時は `{ "status": "timeout", "comments": [] }`。ブラウザの「レビュー終了」ボタンが押されると `{ "status": "finished", "comments": [] }` を返して終了する（終了直前に投稿されたコメントの配達が優先される）。
+
+`--resume` はエージェントセッション開始後の最初の1回だけ使う。通常の `open` に加え、前のセッションが受信して `seen` にしたまま対応を完了できなかったユーザーコメントも返す。受信後は `--resume` なしで待機し直す（繰り返し指定すると、対応中の `seen` コメントが再配達される）。
+
+同じリポジトリでは `wait-comments` を同時に1プロセスだけ実行できる。二重起動すると、後から起動した方は `another wait-comments process is already running` で終了する。クラッシュでロックが残った場合は、生存していない所有プロセスのロックだけを次回起動時に回収する。
 
 ### 4. コメントへの対応を記録（エージェント用)
 
@@ -211,6 +230,7 @@ agent-review-kit snapshot begin                       # 修正を適用する【
 agent-review-kit snapshot create --comment comment_xxx --title "対応内容"
 # → {"status":"created","snapshot":{"id":"snap_xxx","seq":1,...}}  patch を保存
 agent-review-kit snapshot list                        # スナップショット一覧
+agent-review-kit snapshot path                        # 現在ブランチの保存先
 ```
 
 - patch は `git diff` 形式（`--binary --full-index`）で `snapshots/NNNN_snap_xxx.patch` に連番保存される。`git apply` でそのまま再適用できるので、**時系列順に apply + commit すればコメント単位のコミットを後から再構成できる**（最初の `begin` 時点の状態は `index.json` の `baselineTree` に記録される）。
@@ -275,7 +295,7 @@ agent-review-kit wait-comments --document-id auth-plan --timeout 0
 
 - `--document-id` は英数字で始まる64文字以内のスラッグ（`[A-Za-z0-9._-]`）
 - `--title` 省略時: 前回のタイトル → HTML の `<title>` → ID の順で決まる
-- `publish-html` は `generate` と同様に finished マーカーをクリアする（レビュー再開）
+- `publish-html` は `generate` と同様に finished マーカーをクリアする（レビュー再開）。レビュー中の再登録には `--preserve-finished` を付けると、同時にブラウザから届いた終了シグナルを消さない
 
 ### 表示・コメントUI（ブラウザ）
 
@@ -369,14 +389,15 @@ cd my-project
 vim src/example.ts                          # 何か修正する
 
 agent-review-kit generate
-agent-review-kit serve &                    # 実ポートは .agent-review/server.json を参照
-agent-review-kit wait-comments --timeout 0  # ブラウザでコメントを書くとここが返る
+agent-review-kit serve &                    # 手動操作例。エージェントは追跡可能なbackground sessionを使う
+agent-review-kit wait-comments --timeout 0 --resume  # 初回待機。コメントを書くと返る
 # → {"status":"received","comments":[{"id":"comment_abc", ...}]}
 
 # 修正して…
 agent-review-kit resolve-comment comment_abc --status fixed --message "対応しました"
-agent-review-kit generate                   # HTMLを更新（ブラウザは自動リロード）
-agent-review-kit status                     # unresolved が 0 なら完了
+agent-review-kit generate --preserve-finished  # HTMLを更新（ブラウザは自動リロード）
+agent-review-kit status
+# ブラウザの「レビュー終了」を押す（または POST /api/finish）
 ```
 
 ## 開発
@@ -393,4 +414,4 @@ npm run build                  # dist/ にビルド（client 資産のコピー�
 - サーバーは localhost 向けのローカル開発ツールであり、認証はない（127.0.0.1 に bind）。外部公開しないこと。
 - 差分を再生成して行がずれたコメントは、画面下部の「現在の差分に位置づけできないコメント」に退避表示される。
 - レビューデータはブランチ単位。ブランチを切り替えたら `generate` を再実行してレビューHTMLも切り替える。
-- ツール本体を更新した後は `generate` を再実行する（`.agent-review/` の `app.js` / `style.css` は generate 時にコピーされるため）。
+- ツール本体を更新した後は、進行中レビューなら `generate --preserve-finished` を再実行する（`.agent-review/` の `app.js` / `style.css` は generate 時にコピーされるため）。

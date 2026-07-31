@@ -34,6 +34,9 @@ function embedNewSideContent(files: FileDiff[], cwd: string): void {
 
 export interface GenerateOptions {
   base?: string;
+  // Routine refreshes inside an active review must not erase a finish signal
+  // that may have arrived concurrently from the browser.
+  preserveFinished?: boolean;
   cwd?: string;
 }
 
@@ -63,9 +66,10 @@ export async function generate(opts: GenerateOptions = {}): Promise<void> {
   ensureDir(paths.branchDir);
   // Self-ignoring directory: keep review artifacts out of the project's git diff.
   fs.writeFileSync(path.join(paths.dir, '.gitignore'), '*\n');
-  // A regenerate starts (or resumes) a review: clear any leftover finished
-  // marker so wait-comments goes back to waiting.
-  clearFinished(paths.finished);
+  // The initial generate starts a new review. Routine refreshes in the skill
+  // opt out so a concurrent browser finish cannot be erased before the waiter
+  // observes it.
+  if (!opts.preserveFinished) clearFinished(paths.finished);
 
   // --base 省略時は前回 generate の base を引き継ぐ（修正コミット後の再生成で
   // ブランチ全体レビューが working-tree-only に化けてコメントが orphan 化する
