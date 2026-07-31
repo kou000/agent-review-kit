@@ -295,7 +295,7 @@ agent-review-kit wait-comments --document-id auth-plan --timeout 0
 
 - `--document-id` は英数字で始まる64文字以内のスラッグ（`[A-Za-z0-9._-]`）
 - `--title` 省略時: 前回のタイトル → HTML の `<title>` → ID の順で決まる
-- `publish-html` は `generate` と同様に finished マーカーをクリアする（レビュー再開）
+- `publish-html` は `generate` と同様に finished マーカーをクリアする（レビュー再開）。レビュー中の再登録には `--preserve-finished` を付けると、同時にブラウザから届いた終了シグナルを消さない
 
 ### 表示・コメントUI（ブラウザ）
 

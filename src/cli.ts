@@ -26,6 +26,7 @@ Commands:
     --input <path>         レビュー対象の HTML ファイル（必須）
     --document-id <id>     ドキュメントID。英数字で始まる 64 文字以内のスラッグ（必須）
     --title <text>         表示タイトル（省略時: 前回のタイトル → HTML の <title> → ID）
+    --preserve-finished    レビュー中の再登録用。並行して届いた終了シグナルを保持する
   wait-comments            新規（status: open）コメントが来るまで待つ
     --timeout <sec>        タイムアウト秒。0 で無期限待機（デフォルト: 0）
     --document-id <id>     指定した HTML ドキュメントへのコメントだけを待つ
@@ -185,11 +186,12 @@ async function main(): Promise<void> {
       serve({ port: flagNum(flags, 'port') });
       break;
     case 'publish-html':
-      rejectUnknownFlags(flags, ['input', 'document-id', 'title']);
+      rejectUnknownFlags(flags, ['input', 'document-id', 'title', 'preserve-finished']);
       publishHtml({
         input: flagStr(flags, 'input'),
         documentId: flagStr(flags, 'document-id'),
         title: flagStr(flags, 'title'),
+        preserveFinished: flagBool(flags, 'preserve-finished'),
       });
       break;
     case 'wait-comments': {
