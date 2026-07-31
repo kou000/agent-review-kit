@@ -13,6 +13,10 @@ export interface PublishHtmlOptions {
   input?: string;
   documentId?: string;
   title?: string;
+  // Routine re-publishes inside an active review must not erase a finish
+  // signal that may have arrived concurrently from the browser (same contract
+  // as `generate --preserve-finished`).
+  preserveFinished?: boolean;
   cwd?: string;
 }
 
@@ -68,10 +72,11 @@ export function publishHtml(opts: PublishHtmlOptions = {}): void {
   ensureDir(paths.documentsDir);
   // Same bootstrap as `generate`: publish-html may be the first command of an
   // HTML-only review, so the self-ignore and client assets must exist, and a
-  // leftover finished marker must not stop wait-comments.
+  // leftover finished marker must not stop wait-comments. Re-publishes during
+  // an active review opt out so a concurrent browser finish is not erased.
   fs.writeFileSync(path.join(paths.dir, '.gitignore'), '*\n');
   writeAssets(paths);
-  clearFinished(paths.finished);
+  if (!opts.preserveFinished) clearFinished(paths.finished);
 
   // Body first, index second: a bumped revision (what the browser reloads on)
   // must always point at the new content, never at a stale file.
