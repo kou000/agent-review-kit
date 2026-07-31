@@ -57,3 +57,7 @@ export function snapshotList(cwd: string = process.cwd()): void {
   const paths = reviewPaths(cwd);
   console.log(JSON.stringify(loadSnapshotIndex(paths.snapshotsIndex), null, 2));
 }
+
+export function snapshotPath(cwd: string = process.cwd()): void {
+  console.log(reviewPaths(cwd).snapshotsDir);
+}

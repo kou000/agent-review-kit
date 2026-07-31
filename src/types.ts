@@ -149,7 +149,8 @@ export const DEFAULT_SETTINGS: ReviewSettings = {
   viewedAutoReset: true,
 };
 
-// One captured fix: a git-format patch stored under .agent-review/snapshots/.
+// One captured fix: a git-format patch stored under the current branch's
+// .agent-review/branches/<slug>/snapshots/ directory.
 // seq is a 1-based counter that fixes the chronological replay order (the
 // patch files are also prefixed with it, e.g. 0001_snap_xxx.patch).
 export interface SnapshotMeta {
@@ -195,9 +196,10 @@ export interface HtmlDocumentIndex {
   documents: HtmlDocumentMeta[];
 }
 
-// Presence of .agent-review/finished.json means the review was ended from the
-// browser (POST /api/finish): wait-comments exits with status "finished" and
-// the server shuts down. `generate` deletes the file, starting a new review.
+// Presence of the current branch's finished.json means the review was ended
+// from the browser (POST /api/finish): wait-comments exits with status
+// "finished" and the server shuts down. `generate` deletes the file, starting
+// a new review.
 export interface FinishState {
   finishedAt: string;
 }

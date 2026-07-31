@@ -4,7 +4,7 @@ import { generate } from './commands/generate';
 import { publishHtml } from './commands/publishHtml';
 import { resolveComment } from './commands/resolveComment';
 import { serve } from './commands/serve';
-import { snapshotBegin, snapshotCreate, snapshotList } from './commands/snapshot';
+import { snapshotBegin, snapshotCreate, snapshotList, snapshotPath } from './commands/snapshot';
 import { status } from './commands/status';
 import { waitComments } from './commands/waitComments';
 
@@ -15,6 +15,7 @@ Commands:
     --base <ref>           比較元の ref を指定。省略時は前回 generate の base を
                            引き継ぐ（初回は working tree vs HEAD）。
                            working tree vs HEAD に戻すには --base HEAD を指定する
+    --preserve-finished    レビュー中の再生成用。並行して届いた終了シグナルを保持する
   serve                    レビュー画面とAPIのローカルサーバーを起動する
     --port <n>             ポート番号（省略時: 5179 から空きポートを自動選択し .agent-review/server.json に記録）
   publish-html             任意の HTML をレビュー対象ドキュメントとして登録・更新する。
@@ -31,6 +32,7 @@ Commands:
                            （省略時: diff・全ドキュメントのコメントを配達）
     --diff-only            HTMLドキュメント宛を除き、diffレビューのコメントだけを待つ
                            （--document-id と同時指定はエラー）
+    --resume               初回待機用。前のセッションが受信済みの status: seen も返す
   resolve-comment <id>     コメントの状態を更新する
     --status <status>      open|seen|fixed|answered|wontfix|resolved|dismissed（デフォルト: resolved）
     --message <text>       agentResponse として保存する返信メッセージ
@@ -56,6 +58,7 @@ Commands:
     --commit <sha>         begin との差分の代わりに、このコミットの差分を patch にする
     --patch-file <path>    begin との差分の代わりに、この patch ファイルを取り込む
   snapshot list            スナップショット一覧をJSONで出力する
+  snapshot path            現在ブランチのスナップショットディレクトリを出力する
   status                   コメント集計・設定・レビュー終了状態をJSONで出力する
 `;
 
@@ -157,18 +160,32 @@ function flagBool(flags: Flags, key: string): boolean | undefined {
   return true;
 }
 
+function rejectUnknownFlags(flags: Flags, allowed: string[]): void {
+  const unknown = Object.keys(flags).filter((key) => !allowed.includes(key));
+  if (unknown.length > 0) {
+    console.error(`error: unknown option(s): ${unknown.map((key) => `--${key}`).join(', ')}`);
+    process.exit(1);
+  }
+}
+
 async function main(): Promise<void> {
   const [command, ...rest] = process.argv.slice(2);
   const { positional, flags } = parseArgs(rest);
 
   switch (command) {
     case 'generate':
-      await generate({ base: flagStr(flags, 'base') });
+      rejectUnknownFlags(flags, ['base', 'preserve-finished']);
+      await generate({
+        base: flagStr(flags, 'base'),
+        preserveFinished: flagBool(flags, 'preserve-finished'),
+      });
       break;
     case 'serve':
+      rejectUnknownFlags(flags, ['port']);
       serve({ port: flagNum(flags, 'port') });
       break;
     case 'publish-html':
+      rejectUnknownFlags(flags, ['input', 'document-id', 'title']);
       publishHtml({
         input: flagStr(flags, 'input'),
         documentId: flagStr(flags, 'document-id'),
@@ -176,6 +193,7 @@ async function main(): Promise<void> {
       });
       break;
     case 'wait-comments': {
+      rejectUnknownFlags(flags, ['timeout', 'resume', 'document-id', 'diff-only']);
       const documentId = flagStr(flags, 'document-id');
       const diffOnly = flagBool(flags, 'diff-only');
       if (diffOnly && documentId !== undefined) {
@@ -184,12 +202,14 @@ async function main(): Promise<void> {
       }
       await waitComments({
         timeout: flagNum(flags, 'timeout'),
+        resume: flagBool(flags, 'resume'),
         documentId,
         diffOnly,
       });
       break;
     }
     case 'resolve-comment': {
+      rejectUnknownFlags(flags, ['status', 'message', 'commit', 'snapshot', 'image']);
       const id = positional[0];
       if (!id) {
         console.error('error: comment id を指定してください。例: agent-review-kit resolve-comment comment_xxx --status fixed');
@@ -206,6 +226,7 @@ async function main(): Promise<void> {
       break;
     }
     case 'add-comment':
+      rejectUnknownFlags(flags, ['body', 'file', 'line', 'start-line', 'end-line', 'side']);
       addComment({
         body: flagStr(flags, 'body'),
         file: flagStr(flags, 'file'),
@@ -218,8 +239,10 @@ async function main(): Promise<void> {
     case 'snapshot': {
       const sub = positional[0];
       if (sub === 'begin') {
+        rejectUnknownFlags(flags, []);
         snapshotBegin();
       } else if (sub === 'create') {
+        rejectUnknownFlags(flags, ['comment', 'title', 'commit', 'patch-file']);
         snapshotCreate({
           comment: flagStr(flags, 'comment'),
           title: flagStr(flags, 'title'),
@@ -227,14 +250,19 @@ async function main(): Promise<void> {
           patchFile: flagStr(flags, 'patch-file'),
         });
       } else if (sub === 'list') {
+        rejectUnknownFlags(flags, []);
         snapshotList();
+      } else if (sub === 'path') {
+        rejectUnknownFlags(flags, []);
+        snapshotPath();
       } else {
-        console.error('error: snapshot のサブコマンドは begin / create / list です');
+        console.error('error: snapshot のサブコマンドは begin / create / list / path です');
         process.exit(1);
       }
       break;
     }
     case 'status':
+      rejectUnknownFlags(flags, []);
       status();
       break;
     case undefined:
