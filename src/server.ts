@@ -496,9 +496,10 @@ async function handle(
         return;
       }
       const replyBody = body.body.trim();
-      const created = mutateComments(paths.comments, (comments) => {
+      const result = mutateComments(paths.comments, (comments) => {
+        if (loadFinished(paths.finished)) return { kind: 'finished' } as const;
         const parent = comments.find((c) => c.id === parentId);
-        if (!parent) return null;
+        if (!parent) return { kind: 'missing-parent' } as const;
         // Copy the anchor from the top-level comment of the thread.
         const topId = parent.parentId ?? parent.id;
         const anchor = comments.find((c) => c.id === topId) ?? parent;
@@ -524,13 +525,17 @@ async function handle(
           comment.htmlTarget = anchor.htmlTarget ?? null;
         }
         comments.push(comment);
-        return comment;
+        return { kind: 'created', comment } as const;
       });
-      if (!created) {
+      if (result.kind === 'finished') {
+        json(res, 409, { error: 'review is already finished' });
+        return;
+      }
+      if (result.kind === 'missing-parent') {
         json(res, 400, { error: `parent comment not found: ${String(parentId)}` });
         return;
       }
-      json(res, 201, { comment: created });
+      json(res, 201, { comment: result.comment });
       return;
     }
 
@@ -585,7 +590,15 @@ async function handle(
       createdAt: now,
       updatedAt: now,
     };
-    mutateComments(paths.comments, (comments) => comments.push(comment));
+    const accepted = mutateComments(paths.comments, (comments) => {
+      if (loadFinished(paths.finished)) return false;
+      comments.push(comment);
+      return true;
+    });
+    if (!accepted) {
+      json(res, 409, { error: 'review is already finished' });
+      return;
+    }
     json(res, 201, { comment });
     return;
   }
@@ -611,19 +624,30 @@ async function handle(
       }
       newStatus = body.status as CommentStatus;
     }
-    const updated = mutateComments(paths.comments, (comments) => {
+    const result = mutateComments(paths.comments, (comments) => {
+      // Reopening a comment makes it deliverable to wait-comments. Order that
+      // transition against /api/finish just like comment creation: either the
+      // reopen happens first and the final drain delivers it, or it is rejected
+      // after the finish marker has been stored.
+      if ((newStatus === 'open' || newStatus === 'seen') && loadFinished(paths.finished)) {
+        return { kind: 'finished' } as const;
+      }
       const comment = comments.find((c) => c.id === id);
-      if (!comment) return null;
+      if (!comment) return { kind: 'missing' } as const;
       if (newBody !== undefined) comment.body = newBody;
       if (newStatus !== undefined) comment.status = newStatus;
       comment.updatedAt = nowIso();
-      return comment;
+      return { kind: 'updated', comment } as const;
     });
-    if (!updated) {
+    if (result.kind === 'finished') {
+      json(res, 409, { error: 'review is already finished' });
+      return;
+    }
+    if (result.kind === 'missing') {
       json(res, 404, { error: `comment not found: ${id}` });
       return;
     }
-    json(res, 200, { comment: updated });
+    json(res, 200, { comment: result.comment });
     return;
   }
 
@@ -646,9 +670,12 @@ async function handle(
           n += 1;
         }
       }
+      // Store the finish marker while holding the same lock used by comment
+      // creation. A post is therefore ordered entirely before finish (and can
+      // be drained by wait-comments) or rejected entirely after it.
+      saveFinished(paths.finished);
       return n;
     });
-    saveFinished(paths.finished);
     json(res, 200, { status: 'finished', dismissed });
     hooks.onFinish?.();
     return;
