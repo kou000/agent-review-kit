@@ -180,6 +180,100 @@ test('既存 diff コメント投稿は回帰なく動作する', async () => {
   assert.equal(data.comment.file, 'a.ts');
 });
 
+test('intent は diff コメント・全体コメント・返信・ドキュメントコメントに保存される', async () => {
+  const post = async (payload: Record<string, unknown>): Promise<{ id: string; intent?: string }> => {
+    const res = await fetch(`${baseUrl}/api/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    assert.equal(res.status, 201);
+    return ((await res.json()) as { comment: { id: string; intent?: string } }).comment;
+  };
+
+  const diff = await post({
+    file: 'a.ts',
+    side: 'new',
+    startLine: 1,
+    endLine: 1,
+    startDiffLine: 1,
+    endDiffLine: 1,
+    body: 'これは何のため？',
+    intent: 'question',
+  });
+  assert.equal(diff.intent, 'question');
+
+  const overall = await post({ body: '全体への質問', intent: 'question' });
+  assert.equal(overall.intent, 'question');
+
+  const reply = await post({ parentId: overall.id, body: '追撃質問', intent: 'question' });
+  assert.equal(reply.intent, 'question');
+
+  const doc = await post({
+    documentId,
+    htmlTarget: { kind: 'element', selector: 'h1', tag: 'h1', label: 'h1' },
+    body: 'ここは？',
+    intent: 'question',
+  });
+  assert.equal(doc.intent, 'question');
+});
+
+test('intent 省略時はフィールドごと省かれ、不正な値は 400 になる', async () => {
+  const created = await fetch(`${baseUrl}/api/comments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ body: 'intent なし' }),
+  });
+  assert.equal(created.status, 201);
+  const comment = ((await created.json()) as { comment: Record<string, unknown> }).comment;
+  assert.ok(!('intent' in comment));
+
+  const bad = await fetch(`${baseUrl}/api/comments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ body: 'x', intent: 'refactor' }),
+  });
+  assert.equal(bad.status, 400);
+});
+
+test('readOnlyMode の間は intent が question に強制される', async () => {
+  const setReadOnly = async (on: boolean): Promise<void> => {
+    const res = await fetch(`${baseUrl}/api/settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ readOnlyMode: on }),
+    });
+    assert.equal(res.status, 200);
+  };
+  const post = async (payload: Record<string, unknown>): Promise<{ intent?: string }> => {
+    const res = await fetch(`${baseUrl}/api/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    assert.equal(res.status, 201);
+    return ((await res.json()) as { comment: { intent?: string } }).comment;
+  };
+
+  await setReadOnly(true);
+  try {
+    // Explicit 修正依頼 and an omitted intent both land on question: a form
+    // rendered before the toggle must not slip a fix request through.
+    assert.equal((await post({ body: '直して', intent: 'fix' })).intent, 'question');
+    assert.equal((await post({ body: 'intent なし' })).intent, 'question');
+    // Validation still runs first.
+    const bad = await fetch(`${baseUrl}/api/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body: 'x', intent: 'refactor' }),
+    });
+    assert.equal(bad.status, 400);
+  } finally {
+    await setReadOnly(false);
+  }
+  assert.equal((await post({ body: '解除後は修正依頼', intent: 'fix' })).intent, 'fix');
+});
+
 // Regression: the standalone /snapshot/<id> diff page must carry the same
 // baked Shiki highlighting as the main review page. Before the fix the snapshot
 // route built DiffData straight from the patch without calling bakeHighlight,

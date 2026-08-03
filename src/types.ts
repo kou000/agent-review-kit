@@ -29,6 +29,15 @@ export function commentAuthor(c: ReviewComment): CommentAuthor {
   return c.author ?? 'user';
 }
 
+// What the user wants done with a comment, chosen in the comment form.
+// 'fix' = the normal path (triage the body, fix what needs fixing);
+// 'question' = answer only — investigate and reply with `--status answered`,
+// never touch code. This is the per-comment analog of
+// ReviewSettings.readOnlyMode and is enforced the same way (by the skill).
+// Omitted (older comments.json, `add-comment`) = unspecified: triage by body,
+// exactly as before this field existed.
+export type CommentIntent = 'fix' | 'question';
+
 export interface AgentResponse {
   message: string;
   updatedAt: string;
@@ -89,6 +98,8 @@ export interface ReviewComment {
   status: CommentStatus;
   createdAt: string;
   updatedAt: string;
+  // See CommentIntent. Omitted = unspecified (triage by body).
+  intent?: CommentIntent;
   agentResponse?: AgentResponse;
   // HTML-review comment: the id of the published document (see
   // HtmlDocumentMeta) this comment belongs to. Diff-review comments omit it.

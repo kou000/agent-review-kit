@@ -25,6 +25,7 @@ import {
 } from './store';
 import {
   COMMENT_STATUSES,
+  CommentIntent,
   CommentStatus,
   DiffData,
   HtmlTarget,
@@ -214,6 +215,17 @@ function validateCommentInput(b: Record<string, unknown>): CommentInput | string
     endDiffLine: b.endDiffLine as number,
     body,
   };
+}
+
+/**
+ * Validate the optional `intent` of a comment post (see CommentIntent).
+ * Returns a spreadable fragment — `{}` when the field is absent — or an error
+ * message. Every comment shape (diff, reply, document) accepts it.
+ */
+function validateIntent(v: unknown): { intent?: CommentIntent } | string {
+  if (v === undefined || v === null) return {};
+  if (v !== 'fix' && v !== 'question') return 'intent must be "fix" or "question"';
+  return { intent: v };
 }
 
 export interface ServerHooks {
@@ -478,6 +490,19 @@ async function handle(
   if (method === 'POST' && p === '/api/comments') {
     const body = await readBody(req);
 
+    const validatedIntent = validateIntent(body.intent);
+    if (typeof validatedIntent === 'string') {
+      json(res, 400, { error: validatedIntent });
+      return;
+    }
+    // Read-only mode forbids code changes, so every comment posted while it is
+    // on is a question, whatever the form sent (it may have been rendered
+    // before the setting was switched on). The browser locks the selector to
+    // 質問 too; this is the authoritative side.
+    const intent: { intent?: CommentIntent } = loadSettings(paths.settings).readOnlyMode
+      ? { intent: 'question' }
+      : validatedIntent;
+
     // A reply carries a parentId. Its anchor is copied from the parent (the
     // request's position fields are ignored), and the stored parentId is
     // normalized to the top-level comment so threads stay one level deep.
@@ -516,6 +541,7 @@ async function handle(
           status: 'open',
           createdAt: now,
           updatedAt: now,
+          ...intent,
           parentId: topId,
         };
         // HTML-review threads: replies inherit the document anchor too, so a
@@ -569,6 +595,7 @@ async function handle(
         status: 'open',
         createdAt: now,
         updatedAt: now,
+        ...intent,
         documentId: body.documentId,
         htmlTarget: target,
       };
@@ -589,6 +616,7 @@ async function handle(
       status: 'open',
       createdAt: now,
       updatedAt: now,
+      ...intent,
     };
     const accepted = mutateComments(paths.comments, (comments) => {
       if (loadFinished(paths.finished)) return false;
