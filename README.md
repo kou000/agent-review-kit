@@ -22,6 +22,7 @@ resolve-comment ──► 状態更新 ─────────────�
 - **未追跡ファイルも対象**: 新規作成した untracked ファイルは追加ファイルの差分として自動で含まれる（`git add -N` は不要）。
 - **コミットしない修正差分**: 修正1件ごとの patch を**スナップショット**として保存し、`/snapshot/<id>` で指摘単位の差分ページを表示。git 履歴を汚さず、コミットはユーザーが指示した時だけ（patch の時系列再生でコメント単位のコミット再構成も可能）。
 - **AI レビューモード**: エージェントが `add-comment` で指摘を AI 名義のコメントとして投稿。ユーザーが返信（または「🔧 修正を依頼」ボタン）した指摘だけが処理され、放置した指摘はレビュー終了時に自動で見送りになる。
+- **コメント単位の「修正依頼 / 質問」**: コメント投稿時（行・範囲・全体・返信・HTMLレビューのすべて）に種別を選べる。「質問（回答のみ・修正しない）」で送ると `intent: "question"` が付き、エージェントは調査して回答するだけでコードを変更しない（読み取り専用モードのコメント単位版）。読み取り専用モード中は選択肢が「質問」に固定される。
 - **画面上の設定とレビュー終了**: 歯車メニューでスナップショット ON/OFF・読み取り専用モード（修正させない）・確認済み自動解除（OFFにすると差分変更後も確認済みを維持）を切替。「レビュー終了」ボタンでコメント待機とサーバーを停止できる。
 - **HTMLレビュー**: diffだけでなく、実装プラン・設計書・テスト結果などの任意HTMLをレンダリング済みのまま表示し、要素単位・テキスト範囲でコメントできる（後述）。
 - **依存ゼロのランタイム**: サーバーは Node.js 標準ライブラリのみで動く。
@@ -170,6 +171,8 @@ API:
 
 `POST /api/comments` は通常 `file` / `side` / `startLine`〜`endLine` / `startDiffLine`〜`endDiffLine` / `body` を送るが、`file` を省略（または `null`）して `body` だけを送ると、特定の行に紐づかない**全体コメント**（レビュー全体への指摘・質問）として登録される。この場合 `file` / `side` / 各行番号は `null` になる。画面上部の「全体コメント」セクションから投稿・閲覧できる。
 
+`POST /api/comments` は任意で `intent`（`"fix"` = 修正依頼 / `"question"` = 質問）を受け取る。全体コメント・行コメント・返信・HTMLレビューコメントのすべてで指定でき、そのままコメントに保存されて `wait-comments` の配達に含まれる。`"fix"` / `"question"` 以外の値は 400。省略時はフィールドごと省かれる（未指定＝エージェントが本文で判断する、従来の挙動）。**読み取り専用モード中の投稿は、送られた値に関わらず `intent: "question"` に強制される**（画面側も選択肢を「質問」に固定するが、設定を切り替える前に開いていたフォームからの投稿もサーバー側で揃う）。
+
 `POST /api/comments` は `documentId` + `htmlTarget` を送るとHTMLレビューのコメントとして登録される（後述）。返信は親から `documentId` / `htmlTarget` を継承する。`GET /api/status` の集計には `documents`（登録ドキュメント数）が追加される。
 
 レビュー終了後の `POST /api/comments` と `PATCH /api/comments/:id` による `status: open` への再送は `409` になる。終了処理と配達対象の作成は同じロックで順序付けられ、終了より先に受理された最終コメントは `wait-comments` が `finished` を返す前に配達される。
@@ -189,7 +192,7 @@ agent-review-kit wait-comments --resume        # セッション再開時: seen 
 **ユーザー名義**の `status: open` コメントが現れると、それらを `seen` に更新して stdout に返す（`add-comment` で投稿した AI 名義の指摘は配達されない — ユーザーの返信だけが届く）。受信時点の設定が毎回同乗するので、消費側は `readOnlyMode` 等を別途確認しなくてよい:
 
 ```json
-{ "status": "received", "settings": { "snapshotsEnabled": true, "readOnlyMode": false }, "comments": [ { "id": "comment_xxx", "file": "src/example.ts", "side": "new", "startLine": 10, "endLine": 15, "body": "..." } ] }
+{ "status": "received", "settings": { "snapshotsEnabled": true, "readOnlyMode": false }, "comments": [ { "id": "comment_xxx", "file": "src/example.ts", "side": "new", "startLine": 10, "endLine": 15, "body": "...", "intent": "fix" } ] }
 ```
 
 タイムアウト時は `{ "status": "timeout", "comments": [] }`。ブラウザの「レビュー終了」ボタンが押されると `{ "status": "finished", "comments": [] }` を返して終了する（終了直前に投稿されたコメントの配達が優先される）。
@@ -378,6 +381,7 @@ HTMLレビューのコメントは `file` / `side` / 行番号 が全て `null` 
 - `startDiffLine` / `endDiffLine`: `git diff` 出力上の行番号（差分内の位置の一意な参照）
 - **全体コメント**（レビュー全体への指摘・質問）は `file` / `side` / `startLine` / `endLine` / `startDiffLine` / `endDiffLine` がすべて `null`。`body` のみを持ち、画面上部の「全体コメント」セクションに表示される。
 - `parentId`: 返信元コメントの `id`（省略または `null` はトップレベルコメント）。返信のアンカーは親からコピーされ、`parentId` は常にトップレベルの親を指す（スレッドは1段ネスト）。返信は画面上で親コメントの直下にネスト表示される。
+- `intent`: コメント投稿時にユーザーが選んだ種別。`fix`（修正依頼）/ `question`（質問 = 回答のみで**コードを変更させない**）。省略時は未指定で、エージェントが本文から判断する（従来の挙動）。`question` は `readOnlyMode` のコメント単位版で、エージェントに修正させない強制自体はスキル側の運用ルールで行う。読み取り専用モード中の投稿は `question` に固定される。画面ではコメントカードに「質問」バッジが付く。
 - `author`: `user`（省略時のデフォルト） / `agent`（`add-comment` で投稿された AI 指摘）。`agent` のコメントは `wait-comments` に配達されない。
 - `deleted`: 論理削除フラグ。`true` のコメントは画面・集計・配達すべてから除外される（データは残る）。
 - `agentResponse.snapshot` / `agentResponse.commit`: 返信に添えられた差分ページ（`/snapshot/<id>` / `/commit/<sha>`）への参照。

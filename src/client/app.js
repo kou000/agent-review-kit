@@ -73,6 +73,60 @@
       ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
   }
 
+  /* ---------- comment intent (修正依頼 / 質問) ----------
+   * Every comment form carries the same 修正依頼 / 質問 choice, posted as
+   * `intent`. "質問" means the agent answers without changing code — the
+   * per-comment version of the read-only mode setting. Radio groups need a
+   * unique name because several forms can be open at once (overall form,
+   * a line form, one reply form per thread). */
+
+  let intentSeq = 0;
+  // Mirrors settings.readOnlyMode, refreshed by applySettings on every poll.
+  let readOnlyMode = false;
+
+  function intentFieldHtml() {
+    const name = 'ark-intent-' + ++intentSeq;
+    return '<div class="intent-field">' +
+      '<label><input type="radio" name="' + name + '" value="fix" checked>' +
+      '<span>修正依頼</span></label>' +
+      '<label><input type="radio" name="' + name + '" value="question">' +
+      '<span>質問（回答のみ・修正しない）</span></label>' +
+      '</div>';
+  }
+
+  // Read-only mode forbids code changes, so 修正依頼 has no meaning there: lock
+  // every selector to 質問. Called with a freshly built form, and with no
+  // argument on each settings load so forms already open follow the toggle. The
+  // server applies the same rule on POST, which covers a form that was
+  // rendered before the setting flipped.
+  function syncIntentFields(root) {
+    (root || document).querySelectorAll('.intent-field').forEach(function (field) {
+      const fix = field.querySelector('input[value="fix"]');
+      const question = field.querySelector('input[value="question"]');
+      if (!fix || !question) return;
+      if (readOnlyMode) question.checked = true;
+      fix.disabled = readOnlyMode;
+      question.disabled = readOnlyMode;
+      field.classList.toggle('locked', readOnlyMode);
+      let note = field.querySelector('.intent-locked-note');
+      if (readOnlyMode && !note) {
+        note = document.createElement('span');
+        note.className = 'intent-locked-note';
+        note.textContent = '読み取り専用モード中は質問のみ';
+        field.appendChild(note);
+      } else if (!readOnlyMode && note) {
+        note.remove();
+      }
+    });
+  }
+
+  // `root` is the element the form markup was inserted into.
+  function selectedIntent(root) {
+    if (readOnlyMode) return 'question';
+    const checked = root.querySelector('.intent-field input:checked');
+    return checked ? checked.value : 'fix';
+  }
+
   /* ---------- syntax highlighting ----------
    * Highlighting is baked at generate time by Shiki (github-dark) into each
    * diff cell's `html` field (see codeCell). The client only renders that
@@ -871,17 +925,20 @@
       '<div class="overall-list"></div>' +
       '<div class="overall-form comment-form">' +
       '<textarea placeholder="レビュー全体へのコメント（Ctrl+Enterで送信）"></textarea>' +
+      intentFieldHtml() +
       '<div class="buttons"><button class="primary overall-submit">コメントを追加</button></div>' +
       '</div>';
 
+    const form = sec.querySelector('.overall-form');
     const textarea = sec.querySelector('textarea');
     const btn = sec.querySelector('.overall-submit');
+    syncIntentFields(form);
 
     function submit() {
       const body = textarea.value.trim();
       if (!body) return;
       btn.disabled = true;
-      api('POST', '/api/comments', { body: body }).then(function () {
+      api('POST', '/api/comments', { body: body, intent: selectedIntent(form) }).then(function () {
         textarea.value = '';
         // Blur so a Ctrl+Enter submit (which keeps focus) doesn't leave the
         // textarea as activeElement — isEditingDraft() would otherwise defer
@@ -1468,6 +1525,7 @@
     wrap.innerHTML =
       '<div class="form-meta">' + esc(r.file) + ' / ' + sideText + ' ' + rangeText + ' にコメント</div>' +
       '<textarea placeholder="コメントを入力（Ctrl+Enterで送信）"></textarea>' +
+      intentFieldHtml() +
       '<div class="buttons">' +
       '<button class="primary submit">コメントを追加</button>' +
       '<button class="cancel">キャンセル</button>' +
@@ -1476,6 +1534,7 @@
     tr.appendChild(td);
     anchorRow.after(tr);
     openForm = tr;
+    syncIntentFields(wrap);
 
     const textarea = wrap.querySelector('textarea');
     textarea.focus();
@@ -1492,6 +1551,7 @@
         startDiffLine: r.startDiffLine,
         endDiffLine: r.endDiffLine,
         body: body,
+        intent: selectedIntent(wrap),
       }).then(function () {
         cancelForm();
         refresh();
@@ -1537,6 +1597,8 @@
       '<div class="meta">' +
       (isAgentComment(c) ? '<span class="who-pill">AI</span>' : '') +
       '<span class="status-pill status-' + esc(c.status) + '">' + esc(c.status) + '</span>' +
+      // 修正依頼 is the default, so only the answer-only choice is marked.
+      (c.intent === 'question' ? '<span class="intent-pill">質問</span>' : '') +
       '<span>' + posText + '</span>' +
       '<span>' + esc(fmtDate(c.createdAt)) + '</span>' +
       '</div>' +
@@ -1593,7 +1655,11 @@
       fixBtn.title = '返信を書かずに、この指摘の修正をエージェントに依頼する';
       fixBtn.addEventListener('click', function () {
         fixBtn.disabled = true;
-        api('POST', '/api/comments', { parentId: c.id, body: '上記の指摘の通り修正してください' })
+        api('POST', '/api/comments', {
+          parentId: c.id,
+          body: '上記の指摘の通り修正してください',
+          intent: 'fix',
+        })
           .then(refresh)
           .catch(function (err) {
             fixBtn.disabled = false;
@@ -1879,11 +1945,13 @@
       form.className = 'reply-form';
       form.innerHTML =
         '<textarea placeholder="返信を入力（Ctrl+Enterで送信）"></textarea>' +
+        intentFieldHtml() +
         '<div class="buttons">' +
         '<button class="primary reply-submit">返信する</button>' +
         '<button class="reply-cancel">キャンセル</button>' +
         '</div>';
       wrap.appendChild(form);
+      syncIntentFields(form);
       const textarea = form.querySelector('textarea');
       textarea.focus();
 
@@ -1898,6 +1966,7 @@
         api('POST', '/api/comments', {
           parentId: top.id,
           body: body,
+          intent: selectedIntent(form),
         }).then(function () {
           // Close the form (removing its textarea) before refreshing so the
           // just-submitted text no longer counts as an in-progress draft;
@@ -2087,7 +2156,7 @@
         if (c.status === 'open' || c.status === 'seen') unresolved++;
       });
       renderBadge({ unresolved: unresolved });
-      updateModeBadge(status.settings);
+      applySettings(status.settings);
       updateBranchLabel(status.branch);
       const json = JSON.stringify(cs);
       if (json !== lastCommentsJson) {
@@ -2107,9 +2176,14 @@
   let branchLabel = null;
   let settingsPanel = null;
 
-  function updateModeBadge(settings) {
-    if (!modeBadge || !settings) return;
-    modeBadge.hidden = !settings.readOnlyMode;
+  // Every place that learns the current settings (status poll, settings PUT
+  // response) routes through here, so the read-only badge and the intent
+  // selectors can never disagree with the server.
+  function applySettings(settings) {
+    if (!settings) return;
+    readOnlyMode = !!settings.readOnlyMode;
+    syncIntentFields();
+    if (modeBadge) modeBadge.hidden = !readOnlyMode;
   }
 
   function updateBranchLabel(branch) {
@@ -2149,7 +2223,7 @@
           const body = {};
           body[input.dataset.key] = input.checked;
           api('PUT', '/api/settings', body).then(function (r) {
-            updateModeBadge(r.settings);
+            applySettings(r.settings);
           }).catch(function (err) {
             input.checked = !input.checked;
             alert('設定の保存に失敗しました: ' + err);
@@ -2779,11 +2853,13 @@
     wrap.innerHTML =
       '<div class="form-meta">' + esc(docTargetPreview(target)) + '</div>' +
       '<textarea placeholder="コメントを入力（Ctrl+Enterで送信）"></textarea>' +
+      intentFieldHtml() +
       '<div class="buttons">' +
       '<button class="primary submit">コメントを追加</button>' +
       '<button class="cancel">キャンセル</button>' +
       '</div>';
     docFormSlot.appendChild(wrap);
+    syncIntentFields(wrap);
     const textarea = wrap.querySelector('textarea');
     textarea.focus();
 
@@ -2795,6 +2871,7 @@
         documentId: DOC.id,
         htmlTarget: target,
         body: body,
+        intent: selectedIntent(wrap),
       }).then(function () {
         closeDocForm();
         refresh();
@@ -3079,7 +3156,7 @@
         if (c.status === 'open' || c.status === 'seen') unresolved++;
       });
       renderBadge({ unresolved: unresolved });
-      updateModeBadge(status.settings);
+      applySettings(status.settings);
       updateBranchLabel(status.branch);
       const json = JSON.stringify(cs);
       if (json !== lastCommentsJson) {

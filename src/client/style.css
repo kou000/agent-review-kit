@@ -549,6 +549,38 @@ tr.widget-row td {
 }
 .comment-card.agent-comment { border-left: 3px solid #a371f7; }
 
+/* Marks a comment posted as 質問: the agent answers it without changing code. */
+.intent-pill {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 4px;
+  padding: 1px 5px;
+  background: rgba(56, 139, 253, 0.15);
+  color: #58a6ff;
+  border: 1px solid rgba(56, 139, 253, 0.4);
+}
+
+/* 修正依頼 / 質問 selector, present in every comment form. */
+.intent-field {
+  margin-top: 6px;
+  display: flex;
+  gap: 14px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.intent-field label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+.intent-field input { margin: 0; cursor: pointer; }
+/* Read-only mode: the choice is fixed to 質問, so the radios are inert. */
+.intent-field.locked label { opacity: 0.55; cursor: default; }
+.intent-field.locked input { cursor: default; }
+.intent-locked-note { color: #d29922; }
+
 .comment-form textarea {
   width: 100%;
   max-width: 800px;
