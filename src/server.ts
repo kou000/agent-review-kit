@@ -744,8 +744,24 @@ async function handle(
     const updated = mutateComments(paths.comments, (comments) => {
       const comment = comments.find((c) => c.id === id);
       if (!comment) return null;
+      const now = nowIso();
       comment.status = 'resolved';
-      comment.updatedAt = nowIso();
+      comment.updatedAt = now;
+      // Resolving a top-level comment settles the whole thread: live replies
+      // still open/seen go with it (mirrors delete's cascade). Replies that
+      // already reached a settled status keep it.
+      if (!comment.parentId) {
+        for (const reply of comments) {
+          if (
+            reply.parentId === id &&
+            !reply.deleted &&
+            (reply.status === 'open' || reply.status === 'seen')
+          ) {
+            reply.status = 'resolved';
+            reply.updatedAt = now;
+          }
+        }
+      }
       return comment;
     });
     if (!updated) {

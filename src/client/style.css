@@ -24,6 +24,8 @@
   /* Combined width of all pinned panels; kept in sync by JS so the main content
      margin-right always matches the total right-side gutter. */
   --pin-total-width: 0px;
+  /* Comment-panel width on the /doc/<id> page (draggable, persisted). */
+  --doc-panel-width: 400px;
 }
 
 /* While dragging a resizer, suppress text selection everywhere and force the
@@ -782,7 +784,21 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 }
 
 /* ---------- viewed (確認済み) tree section ---------- */
-.viewed-title { margin-top: 12px; }
+.viewed-title {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+/* Bulk "確認済みをすべて解除" button in the section title. */
+.viewed-clear-btn {
+  flex: 0 0 auto;
+  font-size: 11px;
+  padding: 1px 8px;
+  color: var(--muted);
+}
+.viewed-clear-btn:hover { color: var(--fg); }
 .viewed-list { margin-top: 6px; }
 /* Flat list of viewed files: dimmed slightly and showing the full path. */
 .viewed-file { opacity: 0.75; }
@@ -1005,13 +1021,30 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   border: 0;
 }
 .doc-comments {
-  flex: 0 0 400px;
-  max-width: 46vw;
+  flex: 0 0 var(--doc-panel-width);
+  width: var(--doc-panel-width);
+  max-width: 85vw;
   border-left: 1px solid var(--border);
   background: var(--bg);
   overflow-y: auto;
   padding: 10px 12px 40px;
 }
+/* Vertical drag handle between the iframe and the comment panel. Overlays the
+   iframe's right edge (negative margin + z-index) so the two panes keep
+   gap: 0; as a flex item it stacks above the frame, catching the pointer. */
+.doc-resizer {
+  flex: 0 0 6px;
+  align-self: stretch;
+  margin-left: -6px;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.12s ease;
+  touch-action: none;
+  z-index: 5;
+}
+.doc-resizer:hover, .doc-resizer.dragging { background: var(--accent); }
+/* While dragging, the iframe must not swallow the pointermove stream. */
+body.resizing #doc-frame { pointer-events: none; }
 .doc-toolbar {
   display: flex;
   flex-wrap: wrap;

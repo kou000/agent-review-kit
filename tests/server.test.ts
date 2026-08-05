@@ -6,6 +6,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { after, before, test } from 'node:test';
 import { publishHtml } from '../src/commands/publishHtml';
+import { resolveComment } from '../src/commands/resolveComment';
 import { reviewPaths } from '../src/paths';
 import { createServer } from '../src/server';
 import { createSnapshot } from '../src/snapshot';
@@ -159,6 +160,81 @@ test('documentId コメントへの返信は documentId/htmlTarget を継承す�
   assert.equal(reply.documentId, documentId);
   assert.equal(reply.htmlTarget?.selector, 'h1');
   assert.equal(reply.parentId, parent.id);
+});
+
+test('POST /api/comments/<id>/resolve は大元のコメントの未解決の返信もまとめて resolve する', async () => {
+  const post = async (payload: Record<string, unknown>): Promise<{ id: string }> => {
+    const res = await fetch(`${baseUrl}/api/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    assert.equal(res.status, 201);
+    return ((await res.json()) as { comment: { id: string } }).comment;
+  };
+  const parent = await post({ body: 'カスケード親' });
+  const reply1 = await post({ parentId: parent.id, body: '返信1' });
+  const reply2 = await post({ parentId: parent.id, body: '返信2' });
+
+  const res = await fetch(
+    `${baseUrl}/api/comments/${parent.id}/resolve`,
+    { method: 'POST' }
+  );
+  assert.equal(res.status, 200);
+
+  const all = ((await (await fetch(`${baseUrl}/api/comments`)).json()) as {
+    comments: { id: string; status: string }[];
+  }).comments;
+  const byId = new Map(all.map((c) => [c.id, c.status]));
+  assert.equal(byId.get(parent.id), 'resolved');
+  assert.equal(byId.get(reply1.id), 'resolved');
+  assert.equal(byId.get(reply2.id), 'resolved');
+});
+
+test('resolve-comment CLI でも大元を settled にすると未解決の返信が resolve される', async () => {
+  const post = async (payload: Record<string, unknown>): Promise<{ id: string }> => {
+    const res = await fetch(`${baseUrl}/api/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    assert.equal(res.status, 201);
+    return ((await res.json()) as { comment: { id: string } }).comment;
+  };
+  const parent = await post({ body: 'CLI カスケード親' });
+  const reply = await post({ parentId: parent.id, body: 'CLI 返信' });
+
+  silence(() => resolveComment({ id: parent.id, status: 'fixed', message: '直しました', cwd: tmp }));
+
+  const all = ((await (await fetch(`${baseUrl}/api/comments`)).json()) as {
+    comments: { id: string; status: string }[];
+  }).comments;
+  const byId = new Map(all.map((c) => [c.id, c.status]));
+  assert.equal(byId.get(parent.id), 'fixed');
+  assert.equal(byId.get(reply.id), 'resolved');
+});
+
+test('resolve-comment CLI で --status seen のときは返信へカスケードしない', async () => {
+  const post = async (payload: Record<string, unknown>): Promise<{ id: string }> => {
+    const res = await fetch(`${baseUrl}/api/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    assert.equal(res.status, 201);
+    return ((await res.json()) as { comment: { id: string } }).comment;
+  };
+  const parent = await post({ body: 'seen 親' });
+  const reply = await post({ parentId: parent.id, body: 'seen 返信' });
+
+  silence(() => resolveComment({ id: parent.id, status: 'seen', cwd: tmp }));
+
+  const all = ((await (await fetch(`${baseUrl}/api/comments`)).json()) as {
+    comments: { id: string; status: string }[];
+  }).comments;
+  const byId = new Map(all.map((c) => [c.id, c.status]));
+  assert.equal(byId.get(parent.id), 'seen');
+  assert.equal(byId.get(reply.id), 'open');
 });
 
 test('既存 diff コメント投稿は回帰なく動作する', async () => {
