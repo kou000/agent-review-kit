@@ -1232,6 +1232,21 @@
       const h = document.createElement('div');
       h.className = 'sidebar-title viewed-title';
       h.textContent = '確認済み (' + viewedEntries.length + ')';
+
+      // Bulk revert: clears every mark and re-expands the file boxes, so a
+      // full re-review never needs a per-file un-toggle.
+      const clearBtn = document.createElement('button');
+      clearBtn.className = 'viewed-clear-btn';
+      clearBtn.type = 'button';
+      clearBtn.textContent = 'すべて解除';
+      clearBtn.title = 'すべてのファイルの確認済みを解除する';
+      clearBtn.addEventListener('click', function () {
+        if (!confirm('すべてのファイルの確認済みを解除しますか？')) return;
+        viewed = {};
+        saveViewed();
+        applyViewedState();
+      });
+      h.appendChild(clearBtn);
       viewedWrap.appendChild(h);
 
       const list = document.createElement('div');
@@ -1671,6 +1686,11 @@
     if (c.status !== 'resolved') {
       const btn = document.createElement('button');
       btn.textContent = 'Resolve';
+      // A top-level resolve settles the whole thread server-side (replies
+      // still open/seen are resolved too), so say so in the tooltip.
+      btn.title = isReply
+        ? 'この返信を解決する'
+        : 'このコメントを解決する（未解決の返信もまとめて解決）';
       btn.addEventListener('click', function () {
         api('POST', '/api/comments/' + encodeURIComponent(c.id) + '/resolve', {})
           .then(refresh)
@@ -2429,6 +2449,44 @@
     // restore globally (the last-used width is read via savedPinDefault).
   }
 
+  // Comment-panel width (px) on the /doc/<id> page, same CSS-variable +
+  // localStorage pattern as the sidebar. The max is relative to the viewport
+  // so the document iframe always keeps a usable sliver.
+  const DOC_PANEL_MIN = 260;
+  const DOC_PANEL_KEY = 'ark-doc-panel-width';
+
+  function setDocPanelWidth(px) {
+    const vw = window.innerWidth || document.documentElement.clientWidth || 1;
+    const max = Math.max(DOC_PANEL_MIN, Math.round(vw * 0.85));
+    const w = Math.max(DOC_PANEL_MIN, Math.min(max, Math.round(px)));
+    document.documentElement.style.setProperty('--doc-panel-width', w + 'px');
+    return w;
+  }
+
+  // Wire the /doc page's drag handle. The panel's right edge is pinned to the
+  // viewport, so its width is (rightEdge - pointerX). While dragging, CSS
+  // disables pointer events on the iframe (body.resizing) so the frame never
+  // swallows the pointermove stream.
+  function attachDocPanelResize(handle, panel) {
+    handle.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+    handle.addEventListener('pointerdown', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      const right = panel.getBoundingClientRect().right;
+      startDrag(handle, function (clientX) {
+        const w = setDocPanelWidth(right - clientX);
+        try { localStorage.setItem(DOC_PANEL_KEY, String(w)); } catch (e2) { /* ignore */ }
+      });
+    });
+  }
+
+  function restoreDocPanelWidth() {
+    try {
+      const w = parseFloat(localStorage.getItem(DOC_PANEL_KEY));
+      if (!isNaN(w)) setDocPanelWidth(w);
+    } catch (e) { /* ignore */ }
+  }
+
   /* ---------- HTML document review (window.__DOC__) ---------- */
 
   // The published document renders inside an iframe whose response carries a
@@ -3086,6 +3144,16 @@
 
     const panel = document.createElement('aside');
     panel.className = 'doc-comments';
+
+    // Vertical drag handle between the document iframe and the comment panel.
+    const resizer = document.createElement('div');
+    resizer.className = 'doc-resizer';
+    resizer.setAttribute('role', 'separator');
+    resizer.setAttribute('aria-orientation', 'vertical');
+    resizer.title = 'ドラッグでコメント欄の幅を調整';
+    attachDocPanelResize(resizer, panel);
+    layout.appendChild(resizer);
+    restoreDocPanelWidth();
 
     const toolbar = document.createElement('div');
     toolbar.className = 'doc-toolbar';
