@@ -89,15 +89,20 @@ export function resolveComment(opts: ResolveOptions): void {
       if (imageDataUris) comment.agentResponse.images = imageDataUris;
     }
     // Settling a top-level comment (any status but open/seen) settles its
-    // whole thread: live replies still open/seen become resolved, so the user
-    // never has to resolve each reply of a long thread by hand. Replies that
-    // already reached a settled status keep it.
+    // whole thread: replies still open/seen, plus replies only answered/fixed
+    // (handled but not signed off), become resolved, so the user never has to
+    // resolve each reply of a long thread by hand. Replies deliberately parked
+    // as wontfix/dismissed — and replies already resolved — keep their status
+    // so the record of what was skipped or rejected survives.
     if (!comment.parentId && status !== 'open' && status !== 'seen') {
       for (const reply of comments) {
         if (
           reply.parentId === comment.id &&
           !reply.deleted &&
-          (reply.status === 'open' || reply.status === 'seen')
+          (reply.status === 'open' ||
+            reply.status === 'seen' ||
+            reply.status === 'answered' ||
+            reply.status === 'fixed')
         ) {
           reply.status = 'resolved';
           reply.updatedAt = now;
