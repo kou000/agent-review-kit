@@ -747,15 +747,21 @@ async function handle(
       const now = nowIso();
       comment.status = 'resolved';
       comment.updatedAt = now;
-      // Resolving a top-level comment settles the whole thread: live replies
-      // still open/seen go with it (mirrors delete's cascade). Replies that
-      // already reached a settled status keep it.
+      // Resolving a top-level comment settles the whole thread (mirrors
+      // delete's cascade): replies still open/seen, plus replies only
+      // answered/fixed (handled but not signed off), go with it. Replies
+      // deliberately parked as wontfix/dismissed — and replies already
+      // resolved — keep their status so the record of what was skipped or
+      // rejected survives.
       if (!comment.parentId) {
         for (const reply of comments) {
           if (
             reply.parentId === id &&
             !reply.deleted &&
-            (reply.status === 'open' || reply.status === 'seen')
+            (reply.status === 'open' ||
+              reply.status === 'seen' ||
+              reply.status === 'answered' ||
+              reply.status === 'fixed')
           ) {
             reply.status = 'resolved';
             reply.updatedAt = now;
