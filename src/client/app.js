@@ -1258,16 +1258,28 @@
     updateTreeCounts();
   }
 
+  // Tree badges answer "what is still on my plate in this file?": they count
+  // threads (not individual comments, so a long back-and-forth stays 1), drop
+  // settled ones entirely, and take their colour from 要確認 — the state where
+  // the ball is in the user's court. 未解決 waits on the agent, so it gets the
+  // quieter blue.
   function updateTreeCounts() {
-    const counts = {};
-    comments.forEach(function (c) {
-      if (c.file === null || c.file === undefined) return;
-      counts[c.file] = (counts[c.file] || 0) + 1;
+    const counts = {}; // path -> { check, open }
+    const s = threadStructure(comments);
+    s.tops.forEach(function (top) {
+      if (top.file === null || top.file === undefined) return;
+      const state = threadState(top, s.repliesByParent[top.id] || []);
+      if (state === 'settled') return;
+      const entry = counts[top.file] || (counts[top.file] = { check: 0, open: 0 });
+      entry[state] += 1;
     });
     document.querySelectorAll('.tree-count[data-file]').forEach(function (el) {
-      const n = counts[el.dataset.file] || 0;
+      const entry = counts[el.dataset.file];
+      const n = entry ? entry.check + entry.open : 0;
       el.textContent = n ? String(n) : '';
       el.style.display = n ? '' : 'none';
+      el.className = 'tree-count' + (n && !entry.check ? ' tree-count-open' : '');
+      el.title = n ? '要確認 ' + entry.check + ' / 未解決 ' + entry.open : '';
     });
   }
 
@@ -1313,24 +1325,46 @@
     setTimeout(function () { card.classList.remove('comment-flash'); }, 1500);
   }
 
-  function commentListItem(c, isReply) {
+  // Rolls a whole thread up into one of three states, so the sidebar can say
+  // whose turn it is at a glance:
+  //   open    — something is still on the agent (open/seen anywhere)
+  //   check   — the agent answered/fixed and the user has yet to settle it
+  //   settled — every comment is resolved/wontfix/dismissed
+  function threadState(top, replies) {
+    const all = [top].concat(replies);
+    let needsCheck = false;
+    for (let i = 0; i < all.length; i++) {
+      const st = all[i].status;
+      if (st === 'open' || st === 'seen') return 'open';
+      if (!SETTLED_STATUSES[st]) needsCheck = true;
+    }
+    return needsCheck ? 'check' : 'settled';
+  }
+
+  const THREAD_STATE_LABEL = { open: '未解決', check: '要確認', settled: '解決済み' };
+
+  // One sidebar row per thread. Replies get no row of their own — their
+  // statuses are already folded into `state` — so a thread reads as a single
+  // unresolved/settled unit; only the reply count is shown.
+  function threadListItem(top, replies, state) {
     const item = document.createElement('div');
-    item.className = 'comment-item' + (isReply ? ' comment-item-reply' : '');
-    item.title = commentLocShort(c) + ' — ' + c.body;
+    item.className = 'comment-item comment-item-' + state;
+    item.title = commentLocShort(top) + ' — ' + top.body +
+      (replies.length ? '\n（返信 ' + replies.length + '）' : '');
 
     const pill = document.createElement('span');
-    pill.className = 'status-pill status-' + c.status;
-    pill.textContent = c.status;
+    pill.className = 'status-pill thread-state-' + state;
+    pill.textContent = THREAD_STATE_LABEL[state];
 
     const loc = document.createElement('span');
     loc.className = 'comment-item-loc';
-    loc.textContent = isReply ? '↳ 返信' : commentLocShort(c);
+    loc.textContent = commentLocShort(top);
 
     const body = document.createElement('span');
     body.className = 'comment-item-body';
-    body.textContent = bodySnippet(c.body);
+    body.textContent = bodySnippet(top.body);
 
-    if (isAgentComment(c)) {
+    if (isAgentComment(top)) {
       const who = document.createElement('span');
       who.className = 'who-pill';
       who.textContent = 'AI';
@@ -1339,27 +1373,72 @@
     item.appendChild(pill);
     item.appendChild(loc);
     item.appendChild(body);
-    item.addEventListener('click', function () { focusComment(c.id); });
+    if (replies.length) {
+      const count = document.createElement('span');
+      count.className = 'comment-item-replies';
+      count.textContent = '↳' + replies.length;
+      item.appendChild(count);
+    }
+    item.addEventListener('click', function () { focusComment(top.id); });
     return item;
   }
 
+  // Settled threads live in a collapsed section at the bottom of the list, the
+  // same idea as the 確認済み file section. In-memory only: the list re-renders
+  // on every refresh, and defaulting back to collapsed is the useful default.
+  let resolvedListOpen = false;
+
   // Re-render the sidebar comment list. Called on the same cadence as
-  // updateTreeCounts (from renderComments) so it tracks every refresh. Replies
-  // are nested (indented) directly under their top-level parent.
+  // updateTreeCounts (from renderComments) so it tracks every refresh. Threads
+  // are ordered 要確認 → 未解決 → 解決済み — 要確認 first because that is the
+  // only group the user can act on. Within a group, createdAt asc
+  // (threadStructure already sorts the top-level comments).
   function renderCommentList() {
     const list = document.querySelector('.sidebar .comment-list');
     if (!list) return;
-    const title = document.getElementById('sidebar-comments-title');
-    if (title) title.textContent = 'コメント (' + comments.length + ')';
     list.innerHTML = '';
 
     const s = threadStructure(comments);
+    const groups = { open: [], check: [], settled: [] };
     s.tops.forEach(function (top) {
-      list.appendChild(commentListItem(top, false));
-      (s.repliesByParent[top.id] || []).forEach(function (r) {
-        list.appendChild(commentListItem(r, true));
-      });
+      const replies = s.repliesByParent[top.id] || [];
+      groups[threadState(top, replies)].push({ top: top, replies: replies });
     });
+
+    const title = document.getElementById('sidebar-comments-title');
+    if (title) {
+      let text = 'コメント (';
+      if (groups.check.length) text += '要確認 ' + groups.check.length + ' / ';
+      title.textContent = text + '未解決 ' + groups.open.length +
+        ' / 全 ' + s.tops.length + ')';
+    }
+
+    function append(target, entries, state) {
+      entries.forEach(function (e) {
+        target.appendChild(threadListItem(e.top, e.replies, state));
+      });
+    }
+    append(list, groups.check, 'check');
+    append(list, groups.open, 'open');
+    if (!groups.settled.length) return;
+
+    const heading = document.createElement('div');
+    heading.className = 'comment-resolved-title';
+    heading.title = 'クリックで開閉';
+    const holder = document.createElement('div');
+    append(holder, groups.settled, 'settled');
+    function syncHeading() {
+      heading.textContent = (resolvedListOpen ? '▾' : '▸') +
+        ' 解決済み (' + groups.settled.length + ')';
+      holder.style.display = resolvedListOpen ? '' : 'none';
+    }
+    heading.addEventListener('click', function () {
+      resolvedListOpen = !resolvedListOpen;
+      syncHeading();
+    });
+    syncHeading();
+    list.appendChild(heading);
+    list.appendChild(holder);
   }
 
   function numCell(file, side, cell, interactive) {

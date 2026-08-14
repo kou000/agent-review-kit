@@ -772,6 +772,9 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 .tree-status-deleted { color: var(--danger); }
 .tree-status-renamed { color: var(--attention); }
 .tree-status-modified { color: var(--accent); }
+/* Unsettled threads in this file. Default (filled red) means 要確認 is among
+   them: the user has something to check. With only 未解決 left the file is
+   waiting on the agent, so the badge steps back to a quiet blue. */
 .tree-count {
   margin-left: auto;
   flex: 0 0 auto;
@@ -781,6 +784,10 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   padding: 0 6px;
   font-size: 11px;
   font-weight: 600;
+}
+.tree-count-open {
+  background: rgba(56, 139, 253, 0.25);
+  color: var(--accent);
 }
 
 /* ---------- viewed (確認済み) tree section ---------- */
@@ -837,9 +844,30 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   overflow: hidden;
 }
 .comment-item:hover { background: var(--header-bg); }
-/* Replies indented under their parent in the sidebar list. */
-.comment-item-reply { padding-left: 16px; }
 .comment-item .status-pill { flex: 0 0 auto; }
+/* Thread rollup pill: whose turn it is, not one comment's raw status. 要確認 is
+   the only state the user can act on, so it gets the loud filled treatment;
+   未解決 waits on the agent and stays informational. */
+.thread-state-check { background: var(--danger); color: #fff; }
+.thread-state-open { background: rgba(56, 139, 253, 0.2); color: #58a6ff; }
+.thread-state-settled { background: rgba(139, 148, 158, 0.2); color: #8b949e; }
+.comment-item-settled { opacity: 0.75; }
+.comment-item-settled:hover { opacity: 1; }
+/* Reply count standing in for the reply rows the list no longer renders. */
+.comment-item-replies {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+.comment-resolved-title {
+  margin-top: 8px;
+  padding: 2px 4px;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.comment-resolved-title:hover { color: var(--fg); }
 .comment-item-loc {
   flex: 0 0 auto;
   max-width: 96px;
