@@ -1327,15 +1327,22 @@
 
   // Rolls a whole thread up into one of three states, so the sidebar can say
   // whose turn it is at a glance:
-  //   open    — something is still on the agent (open/seen anywhere)
-  //   check   — the agent answered/fixed and the user has yet to settle it
+  //   open    — something is still on the agent (an open/seen user comment)
+  //   check   — the ball is in the user's court: the agent answered/fixed, or
+  //             an AI review finding (open/seen agent comment) awaits a reply
   //   settled — every comment is resolved/wontfix/dismissed
   function threadState(top, replies) {
     const all = [top].concat(replies);
     let needsCheck = false;
     for (let i = 0; i < all.length; i++) {
       const st = all[i].status;
-      if (st === 'open' || st === 'seen') return 'open';
+      if (st === 'open' || st === 'seen') {
+        // An open agent comment is an AI finding waiting on the user, not on
+        // the agent (wait-comments never delivers agent comments), so it must
+        // not push the thread into 未解決.
+        if (isAgentComment(all[i])) { needsCheck = true; continue; }
+        return 'open';
+      }
       if (!SETTLED_STATUSES[st]) needsCheck = true;
     }
     return needsCheck ? 'check' : 'settled';
