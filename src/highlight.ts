@@ -48,6 +48,7 @@ const LANG_MAP: Record<string, string> = {
   py: 'python',
   tf: 'terraform',
   tfvars: 'terraform',
+  toml: 'toml',
   sql: 'sql',
   java: 'java',
   xml: 'xml',
