@@ -49,6 +49,8 @@ const LANG_MAP: Record<string, string> = {
   tf: 'terraform',
   tfvars: 'terraform',
   sql: 'sql',
+  java: 'java',
+  xml: 'xml',
 };
 
 // Every language we may need to load. Passed to createHighlighter up front so
