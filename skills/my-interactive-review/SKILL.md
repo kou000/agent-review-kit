@@ -31,6 +31,7 @@ Codex では `serve` と `wait-comments` をそれぞれ長時間実行できる
 
 - `settings.readOnlyMode: true` — **読み取り専用モード**。他人の MR を閲覧するだけのレビューなど、コードを変更してはいけないモード。修正指摘が来ても**コードを変更せず**、調査結果・修正案を `--status answered` で回答するだけにする。サブエージェント委譲もしない。**received の settings を見ずに修正へ進むことを禁止する。**
 - `settings.snapshotsEnabled: false` — 修正スナップショット（後述）を保存しない設定。`snapshot create` は `{"status":"skipped"}` を返すので、コマンド手順は変えなくてよい（`resolve-comment` に `--snapshot` を付けないだけ）。
+- `settings.deliveryNoteEnabled` / `settings.deliveryNoteText` — `wait-comments` の `received` 出力に `note` フィールドを同乗させる設定。`deliveryNoteEnabled: true`（既定）で「修正はサブエージェントに委譲する」という定型指示が入り、`deliveryNoteText` が非空ならその自由記述テキストも入る（readOnlyMode 中は定型指示のみ抑止される）。**`note` が付いていたら、そのバッチの処理でその指示に従うこと。**
 
 ## コメント種別（intent）の扱い
 
@@ -90,7 +91,7 @@ Codex では `serve` と `wait-comments` をそれぞれ長時間実行できる
    agent-review-kit wait-comments --timeout 0 --resume
    ```
 
-   Codex ではこのコマンドを追跡可能なターミナルセッションとして起動し、`wait-comments` 用の `session_id` を保持する。出力を回収するときは、そのセッションへ空入力の `write_stdin` を送る。受信すると `{"status": "received", "settings": {...}, "comments": [...]}` が stdout に返り、該当する `open` コメントは `seen` になる。`settings` は受信時点の設定で、**このバッチの処理方針はここに従う**（「設定（settings）の扱い」参照）。
+   Codex ではこのコマンドを追跡可能なターミナルセッションとして起動し、`wait-comments` 用の `session_id` を保持する。出力を回収するときは、そのセッションへ空入力の `write_stdin` を送る。受信すると `{"status": "received", "note": "...", "settings": {...}, "comments": [...]}` が stdout に返り、該当する `open` コメントは `seen` になる。`settings` は受信時点の設定で、**このバッチの処理方針はここに従う**（「設定（settings）の扱い」参照）。`note` は設定に応じて同乗する処理指示（無いこともある）。**付いていたら必ず従う**。
 
    受信した waiter の終了結果を回収して `activeWaitSessionId` をクリアし、コメントを処理キューへ追加する。その後、`--resume` を外した新しい waiter を**1本だけ**開始し、その新しい session id を保存する:
 

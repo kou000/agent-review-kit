@@ -430,6 +430,10 @@ async function handle(
       if (typeof body.snapshotsEnabled === 'boolean') s.snapshotsEnabled = body.snapshotsEnabled;
       if (typeof body.readOnlyMode === 'boolean') s.readOnlyMode = body.readOnlyMode;
       if (typeof body.viewedAutoReset === 'boolean') s.viewedAutoReset = body.viewedAutoReset;
+      if (typeof body.deliveryNoteEnabled === 'boolean')
+        s.deliveryNoteEnabled = body.deliveryNoteEnabled;
+      if (typeof body.deliveryNoteText === 'string')
+        s.deliveryNoteText = body.deliveryNoteText.slice(0, MAX_TARGET_FIELD);
     });
     json(res, 200, { settings });
     return;

@@ -152,12 +152,24 @@ export interface ReviewSettings {
   // When false, the viewed-state reconcile keeps marks even after a file's
   // diff changes; only manual toggles clear them.
   viewedAutoReset: boolean;
+  // When true, every wait-comments "received" delivery carries a `note` field
+  // instructing the agent to delegate fixes to subagents. Skill-file
+  // instructions decay with context distance; a note riding along with the
+  // comments sits right next to the data it applies to. Suppressed while
+  // readOnlyMode is on (fixing itself is forbidden there).
+  deliveryNoteEnabled: boolean;
+  // User-written free text appended to the delivered `note` on every
+  // delivery (or forming it alone when deliveryNoteEnabled is false).
+  // Empty means none.
+  deliveryNoteText: string;
 }
 
 export const DEFAULT_SETTINGS: ReviewSettings = {
   snapshotsEnabled: true,
   readOnlyMode: false,
   viewedAutoReset: true,
+  deliveryNoteEnabled: true,
+  deliveryNoteText: '',
 };
 
 // One captured fix: a git-format patch stored under the current branch's
