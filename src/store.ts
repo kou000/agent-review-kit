@@ -187,6 +187,14 @@ export function loadSettings(file: string): ReviewSettings {
       typeof raw.viewedAutoReset === 'boolean'
         ? raw.viewedAutoReset
         : DEFAULT_SETTINGS.viewedAutoReset,
+    deliveryNoteEnabled:
+      typeof raw.deliveryNoteEnabled === 'boolean'
+        ? raw.deliveryNoteEnabled
+        : DEFAULT_SETTINGS.deliveryNoteEnabled,
+    deliveryNoteText:
+      typeof raw.deliveryNoteText === 'string'
+        ? raw.deliveryNoteText
+        : DEFAULT_SETTINGS.deliveryNoteText,
   };
 }
 

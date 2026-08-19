@@ -2318,7 +2318,14 @@
       '<span class="settings-hint">エージェントはコードを修正せず、コメントへの回答のみ行う</span></span></label>' +
       '<label class="settings-row"><input type="checkbox" data-key="viewedAutoReset">' +
       '<span>差分が変わったファイルの確認済みを自動解除' +
-      '<span class="settings-hint">OFFにすると、修正で差分が変わっても確認済みを維持する（手動解除は可能）</span></span></label>';
+      '<span class="settings-hint">OFFにすると、修正で差分が変わっても確認済みを維持する（手動解除は可能）</span></span></label>' +
+      '<label class="settings-row"><input type="checkbox" data-key="deliveryNoteEnabled">' +
+      '<span>コメント配信時に委譲指示を同梱' +
+      '<span class="settings-hint">受信のたびに「修正はサブエージェントに委譲する」指示をエージェントに渡す（読み取り専用モード中は送られない）</span></span></label>' +
+      '<label class="settings-row settings-row-text"><span>毎回注入する追加テキスト' +
+      '<span class="settings-hint">コメント配信のたびにエージェントへそのまま渡す自由記述の指示（空なら送らない）</span>' +
+      '<textarea data-text-key="deliveryNoteText" rows="3" ' +
+      'placeholder="例: 修正後は必ず npm test を実行すること"></textarea></span></label>';
     document.body.appendChild(panel);
     settingsPanel = panel;
 
@@ -2332,6 +2339,20 @@
             applySettings(r.settings);
           }).catch(function (err) {
             input.checked = !input.checked;
+            alert('設定の保存に失敗しました: ' + err);
+          });
+        });
+      });
+      panel.querySelectorAll('textarea[data-text-key]').forEach(function (area) {
+        const saved = (data.settings && data.settings[area.dataset.textKey]) || '';
+        area.value = saved;
+        // Saved on change (= blur after an edit), not per keystroke.
+        area.addEventListener('change', function () {
+          const body = {};
+          body[area.dataset.textKey] = area.value;
+          api('PUT', '/api/settings', body).then(function (r) {
+            applySettings(r.settings);
+          }).catch(function (err) {
             alert('設定の保存に失敗しました: ' + err);
           });
         });

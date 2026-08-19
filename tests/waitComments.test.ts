@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import { test } from 'node:test';
 import { waitComments } from '../src/commands/waitComments';
 import { reviewPaths } from '../src/paths';
-import { loadComments, saveComments } from '../src/store';
+import { loadComments, loadSettings, mutateSettings, saveComments } from '../src/store';
 import { ReviewComment } from '../src/types';
 
 function git(args: string[], cwd: string): void {
@@ -140,6 +140,80 @@ test('diffOnly 指定時は diff コメントだけ received で届き、doc コ
     const after2 = after.find((c) => c.id === 'c7');
     assert.equal(after1?.status, 'open');
     assert.equal(after2?.status, 'seen');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('既定設定では received に委譲指示の note が同乗する', async () => {
+  const tmp = makeTmpRepo();
+  try {
+    const paths = reviewPaths(tmp);
+    saveComments(paths.comments, [diffComment('n1')]);
+
+    const lines = await captureLog(() => waitComments({ timeout: 2, cwd: tmp }));
+    const result = JSON.parse(lines[0]) as { status: string; note?: string };
+    assert.equal(result.status, 'received');
+    assert.ok(result.note);
+    assert.match(result.note!, /サブエージェントに委譲/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('deliveryNoteEnabled: false かつ deliveryNoteText 空なら note が付かない', async () => {
+  const tmp = makeTmpRepo();
+  try {
+    const paths = reviewPaths(tmp);
+    mutateSettings(paths.settings, (s) => {
+      s.deliveryNoteEnabled = false;
+    });
+    saveComments(paths.comments, [diffComment('n2')]);
+
+    const lines = await captureLog(() => waitComments({ timeout: 2, cwd: tmp }));
+    const result = JSON.parse(lines[0]) as { status: string; note?: string };
+    assert.equal(result.status, 'received');
+    assert.equal(result.note, undefined);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('deliveryNoteText は note に入り、定型指示OFFなら自由記述だけになる', async () => {
+  const tmp = makeTmpRepo();
+  try {
+    const paths = reviewPaths(tmp);
+    mutateSettings(paths.settings, (s) => {
+      s.deliveryNoteEnabled = false;
+      s.deliveryNoteText = '修正後は必ず npm test を実行すること';
+    });
+    saveComments(paths.comments, [diffComment('n3')]);
+
+    const lines = await captureLog(() => waitComments({ timeout: 2, cwd: tmp }));
+    const result = JSON.parse(lines[0]) as { status: string; note?: string };
+    assert.equal(result.status, 'received');
+    assert.equal(result.note, '修正後は必ず npm test を実行すること');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('readOnlyMode 中は定型の委譲指示を抑止し、自由記述テキストだけが残る', async () => {
+  const tmp = makeTmpRepo();
+  try {
+    const paths = reviewPaths(tmp);
+    mutateSettings(paths.settings, (s) => {
+      s.readOnlyMode = true;
+      s.deliveryNoteText = '回答は敬体で書くこと';
+    });
+    // 前提を明示: deliveryNoteEnabled は既定で true のまま
+    assert.equal(loadSettings(paths.settings).deliveryNoteEnabled, true);
+    saveComments(paths.comments, [diffComment('n4')]);
+
+    const lines = await captureLog(() => waitComments({ timeout: 2, cwd: tmp }));
+    const result = JSON.parse(lines[0]) as { status: string; note?: string };
+    assert.equal(result.status, 'received');
+    assert.equal(result.note, '回答は敬体で書くこと');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

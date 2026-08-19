@@ -4,7 +4,7 @@ import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
 import { ensureDir, reviewPaths } from '../paths';
 import { loadComments, loadFinished, loadSettings, mutateComments, nowIso } from '../store';
-import { ReviewComment, commentAuthor } from '../types';
+import { ReviewComment, ReviewSettings, commentAuthor } from '../types';
 
 export interface WaitOptions {
   timeout?: number; // seconds, 0 = wait forever
@@ -544,6 +544,25 @@ function acquireWaitLock(cwd: string): WaitLock {
   }
 }
 
+// Standing instruction delivered alongside every received batch (settings
+// deliveryNoteEnabled / deliveryNoteText). Skill-file instructions decay with
+// context distance by the time comments arrive; a note riding along with the
+// batch sits right next to the data it applies to.
+const DELEGATION_NOTE =
+  '修正を伴うコメントは、メインセッションで直接コードを編集せず、Agent ツールでサブエージェントに委譲すること（1件だけでも委譲する）。' +
+  '複数件ある場合は1つのメッセージで並行起動し、完了を待たずに次のコメントの委譲へ進む。' +
+  'メインセッションは委譲・回答・resolve のオーケストレーションに徹する。';
+
+function buildDeliveryNote(settings: ReviewSettings): string | undefined {
+  const parts: string[] = [];
+  // The built-in note instructs how to fix; in read-only mode fixing itself
+  // is forbidden, so including it would only contradict the mode.
+  if (settings.deliveryNoteEnabled && !settings.readOnlyMode) parts.push(DELEGATION_NOTE);
+  const custom = settings.deliveryNoteText.trim();
+  if (custom) parts.push(custom);
+  return parts.length > 0 ? parts.join('\n') : undefined;
+}
+
 // Normally only the user's live open comments are deliverable. Resume mode also
 // returns seen user comments left behind by an interrupted agent session.
 // Agent-authored findings stay open until the user replies or the review ends;
@@ -626,7 +645,14 @@ export async function waitComments(opts: WaitOptions = {}): Promise<void> {
           // The current settings ride along with every delivery so the consumer
           // (the agent) always has readOnlyMode etc. in front of it at triage.
           const settings = loadSettings(paths.settings);
-          console.log(JSON.stringify({ status: 'received', settings, comments: received }, null, 2));
+          const note = buildDeliveryNote(settings);
+          console.log(
+            JSON.stringify(
+              { status: 'received', ...(note !== undefined && { note }), settings, comments: received },
+              null,
+              2
+            )
+          );
           return;
         }
       }
@@ -640,8 +666,18 @@ export async function waitComments(opts: WaitOptions = {}): Promise<void> {
         const finalReceived = takeDeliverable(paths.comments, opts);
         if (finalReceived.length > 0) {
           const settings = loadSettings(paths.settings);
+          const note = buildDeliveryNote(settings);
           console.log(
-            JSON.stringify({ status: 'received', settings, comments: finalReceived }, null, 2)
+            JSON.stringify(
+              {
+                status: 'received',
+                ...(note !== undefined && { note }),
+                settings,
+                comments: finalReceived,
+              },
+              null,
+              2
+            )
           );
           return;
         }
