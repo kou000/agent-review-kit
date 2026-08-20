@@ -33,7 +33,7 @@ Codex では `serve` と `wait-comments` をそれぞれ長時間実行できる
 - `settings.snapshotsEnabled: false` — 修正スナップショット（後述）を保存しない設定。`snapshot create` は `{"status":"skipped"}` を返すので、コマンド手順は変えなくてよい（`resolve-comment` に `--snapshot` を付けないだけ）。
 - `settings.deliveryNoteEnabled` / `settings.deliveryNoteText` — `wait-comments` の `received` 出力に `note` フィールドを同乗させる設定。`deliveryNoteEnabled: true`（既定）のとき `deliveryNoteText` がそのまま `note` になる（既定のテキストは「修正はサブエージェントに委譲する」という指示で、ユーザーが自由に書き換えられる。空なら note なし）。**`note` が付いていたら、そのバッチの処理でその指示に従うこと。** ただし `readOnlyMode: true` のときは修正禁止が常に優先で、note に修正系の指示があっても修正しない。
 
-各設定の初期値は、ユーザーが `.agent-review/.env` に `ARK_*` 形式で定義していることがある（README「設定のデフォルト（.env）」参照）。エージェント側の挙動は変わらない — 従うべき値は常に `received` の `settings`（および `status` 出力）に解決済みで入ってくる。
+各設定の初期値は、ユーザーが `~/.agent-review/.env` に `ARK_*` 形式で定義していることがある（README「設定のデフォルト（.env）」参照）。エージェント側の挙動は変わらない — 従うべき値は常に `received` の `settings`（および `status` 出力）に解決済みで入ってくる。
 
 ## コメント種別（intent）の扱い
 

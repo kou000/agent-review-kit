@@ -1,5 +1,6 @@
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 
 export interface ReviewPaths {
@@ -8,8 +9,8 @@ export interface ReviewPaths {
   html: string;
   serverJson: string;
   // Optional per-user env file overriding DEFAULT_SETTINGS (see envDefaults.ts).
-  // Repo-level, not per-branch: it holds the person's preferred defaults, which
-  // every new branch review starts from.
+  // Global (~/.agent-review/.env), not per-repo: it holds the person's
+  // preferred defaults, which every review in every repository starts from.
   envFile: string;
   appJs: string;
   styleCss: string;
@@ -95,7 +96,7 @@ export function reviewPaths(cwd: string = process.cwd()): ReviewPaths {
     dir,
     html: path.join(dir, 'review.html'),
     serverJson: path.join(dir, 'server.json'),
-    envFile: path.join(dir, '.env'),
+    envFile: path.join(os.homedir(), '.agent-review', '.env'),
     appJs: path.join(dir, 'app.js'),
     styleCss: path.join(dir, 'style.css'),
     branch,

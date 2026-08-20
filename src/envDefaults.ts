@@ -46,7 +46,7 @@ function envBool(v: string | undefined): boolean | undefined {
 
 /**
  * Per-user default settings: DEFAULT_SETTINGS overridden by any valid ARK_*
- * entries in .agent-review/.env. These act as the fallback layer under
+ * entries in ~/.agent-review/.env. These act as the fallback layer under
  * settings.json, so an explicit value written from the browser always wins;
  * they only take effect for keys the user has not (yet) touched in the UI.
  */

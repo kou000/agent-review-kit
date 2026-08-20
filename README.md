@@ -278,10 +278,10 @@ agent-review-kit status
 
 ### 8. 設定のデフォルト（.env）
 
-画面の設定（歯車メニュー）の初期値は、`.agent-review/.env` を置くと人ごとに変えられる。リポジトリ直下の [`.env.sample`](.env.sample) をコピーして必要な行だけ残すのが早い（`cp .env.sample .agent-review/.env`）。書式は `KEY=VALUE`（`#` 行コメント、値のクォート任意、`"..."` 内の `\n` は改行になる）:
+画面の設定（歯車メニュー）の初期値は、ホームディレクトリの `~/.agent-review/.env` を置くと人ごとに変えられる。リポジトリを問わず全レビューに共通で効く。リポジトリ直下の [`.env.sample`](.env.sample) をコピーして必要な行だけ残すのが早い（`mkdir -p ~/.agent-review && cp .env.sample ~/.agent-review/.env`）。書式は `KEY=VALUE`（`#` 行コメント、値のクォート任意、`"..."` 内の `\n` は改行になる）:
 
 ```bash
-# .agent-review/.env
+# ~/.agent-review/.env
 ARK_SNAPSHOTS_ENABLED=false        # 修正スナップショットを保存しない
 ARK_READ_ONLY_MODE=false           # 読み取り専用モード
 ARK_VIEWED_AUTO_RESET=true         # 差分変更時に Viewed を自動解除
@@ -291,7 +291,7 @@ ARK_DELIVERY_NOTE_TEXT="修正時はテストも更新すること"  # note の�
 
 優先順位は **settings.json の明示値 > `.env` > 組み込みデフォルト**。`.env` はあくまで「初期値」で、ブラウザの歯車メニューで一度設定を変更すると全キーが `settings.json` に確定するため、以降そのブランチには `.env` の変更は反映されない（新しいブランチのレビューには反映される）。bool は `true/false/1/0` のみ有効で、それ以外の値は無視して組み込みデフォルトに落ちる。
 
-`.env` は人ごとのファイルなのでコミットしない（レビュー対象リポジトリでは `.agent-review/` ごと gitignore しておくことを推奨。ディレクトリを ignore していれば `.env` も一緒に除外される）。
+`.env` はホームディレクトリ配下の人ごとのファイルなので、リポジトリには置かない（コミットの心配も不要）。
 
 ## HTMLレビュー
 
