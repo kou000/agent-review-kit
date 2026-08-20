@@ -2320,12 +2320,15 @@
       '<span>差分が変わったファイルの確認済みを自動解除' +
       '<span class="settings-hint">OFFにすると、修正で差分が変わっても確認済みを維持する（手動解除は可能）</span></span></label>' +
       '<label class="settings-row"><input type="checkbox" data-key="deliveryNoteEnabled">' +
-      '<span>コメント配信時に委譲指示を同梱' +
-      '<span class="settings-hint">受信のたびに「修正はサブエージェントに委譲する」指示をエージェントに渡す（読み取り専用モード中は送られない）</span></span></label>' +
-      '<label class="settings-row settings-row-text"><span>毎回注入する追加テキスト' +
-      '<span class="settings-hint">コメント配信のたびにエージェントへそのまま渡す自由記述の指示（空なら送らない）</span>' +
+      '<span>コメント配信時に指示（note）を同梱' +
+      '<span class="settings-hint">受信のたびに下のテキストを処理指示としてエージェントに渡す</span></span></label>' +
+      '<label class="settings-row settings-row-text"><span>同梱する指示テキスト' +
+      '<span class="settings-hint">既定は「修正はサブエージェントに委譲する」指示。自由に書き換えられる（空なら送らない）</span>' +
       '<textarea data-text-key="deliveryNoteText" rows="3" ' +
-      'placeholder="例: 修正後は必ず npm test を実行すること"></textarea></span></label>';
+      'placeholder="例: 修正後は必ず npm test を実行すること"></textarea></span></label>' +
+      '<div class="settings-footnote">ここでの変更は現在のブランチにだけ保存されます。' +
+      '自分の定番の初期値（指示テキスト等）は <code>.agent-review/.env</code> に ' +
+      '<code>ARK_*</code> で定義でき、全ブランチに効きます（書式は README「設定のデフォルト（.env）」参照）。</div>';
     document.body.appendChild(panel);
     settingsPanel = panel;
 

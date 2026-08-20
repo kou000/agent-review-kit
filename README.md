@@ -124,6 +124,7 @@ agent-review-kit generate --preserve-finished      # レビュー中の更新（
 .agent-review/
   review.html, app.js, style.css      # 今表示中のレビュー（リポジトリ共通）
   server.json                         # サーバー情報（リポジトリで1つ）
+  .env                                # 設定のデフォルト（任意・手書き。後述「設定のデフォルト」）
   branches/<ブランチ名>/
     comments.json                     # コメント（既存があれば保持）
     state.json                        # base と生成時刻
@@ -274,6 +275,23 @@ agent-review-kit status
 ```
 
 `unresolved` は `open + seen` の件数（論理削除済みは全集計から除外）。`finished` はレビュー終了ボタンが押された時刻（`generate` でリセット）。
+
+### 8. 設定のデフォルト（.env）
+
+画面の設定（歯車メニュー）の初期値は、`.agent-review/.env` を置くと人ごとに変えられる。リポジトリ直下の [`.env.sample`](.env.sample) をコピーして必要な行だけ残すのが早い（`cp .env.sample .agent-review/.env`）。書式は `KEY=VALUE`（`#` 行コメント、値のクォート任意、`"..."` 内の `\n` は改行になる）:
+
+```bash
+# .agent-review/.env
+ARK_SNAPSHOTS_ENABLED=false        # 修正スナップショットを保存しない
+ARK_READ_ONLY_MODE=false           # 読み取り専用モード
+ARK_VIEWED_AUTO_RESET=true         # 差分変更時に Viewed を自動解除
+ARK_DELIVERY_NOTE_ENABLED=true     # wait-comments 受信出力に処理指示の note を同乗
+ARK_DELIVERY_NOTE_TEXT="修正時はテストも更新すること"  # note の本文（既定は委譲指示。空文字なら note なし）
+```
+
+優先順位は **settings.json の明示値 > `.env` > 組み込みデフォルト**。`.env` はあくまで「初期値」で、ブラウザの歯車メニューで一度設定を変更すると全キーが `settings.json` に確定するため、以降そのブランチには `.env` の変更は反映されない（新しいブランチのレビューには反映される）。bool は `true/false/1/0` のみ有効で、それ以外の値は無視して組み込みデフォルトに落ちる。
+
+`.env` は人ごとのファイルなのでコミットしない（レビュー対象リポジトリでは `.agent-review/` ごと gitignore しておくことを推奨。ディレクトリを ignore していれば `.env` も一緒に除外される）。
 
 ## HTMLレビュー
 

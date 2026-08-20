@@ -7,6 +7,10 @@ export interface ReviewPaths {
   dir: string;
   html: string;
   serverJson: string;
+  // Optional per-user env file overriding DEFAULT_SETTINGS (see envDefaults.ts).
+  // Repo-level, not per-branch: it holds the person's preferred defaults, which
+  // every new branch review starts from.
+  envFile: string;
   appJs: string;
   styleCss: string;
   // Review data is scoped per git branch (branches/<slug>/...), so comments,
@@ -91,6 +95,7 @@ export function reviewPaths(cwd: string = process.cwd()): ReviewPaths {
     dir,
     html: path.join(dir, 'review.html'),
     serverJson: path.join(dir, 'server.json'),
+    envFile: path.join(dir, '.env'),
     appJs: path.join(dir, 'app.js'),
     styleCss: path.join(dir, 'style.css'),
     branch,

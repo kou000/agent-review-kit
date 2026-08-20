@@ -101,7 +101,7 @@ export function buildStatus(paths: ReviewPaths): Record<string, unknown> {
     counts,
     base: state?.base ?? null,
     generatedAt: state?.generatedAt ?? null,
-    settings: loadSettings(paths.settings),
+    settings: loadSettings(paths.settings, paths.envFile),
     finished: finished?.finishedAt ?? null,
     snapshots: loadSnapshotIndex(paths.snapshotsIndex).snapshots.length,
     documents: loadDocumentIndex(paths.documentsIndex).documents.length,
@@ -418,7 +418,7 @@ async function handle(
   }
 
   if (method === 'GET' && p === '/api/settings') {
-    json(res, 200, { settings: loadSettings(paths.settings) });
+    json(res, 200, { settings: loadSettings(paths.settings, paths.envFile) });
     return;
   }
 
@@ -434,7 +434,7 @@ async function handle(
         s.deliveryNoteEnabled = body.deliveryNoteEnabled;
       if (typeof body.deliveryNoteText === 'string')
         s.deliveryNoteText = body.deliveryNoteText.slice(0, MAX_TARGET_FIELD);
-    });
+    }, paths.envFile);
     json(res, 200, { settings });
     return;
   }
@@ -473,7 +473,7 @@ async function handle(
     }
     // When viewedAutoReset is disabled, skip pruning and return the stored map
     // as-is so marks survive diff changes until the user clears them manually.
-    const { viewedAutoReset } = loadSettings(paths.settings);
+    const { viewedAutoReset } = loadSettings(paths.settings, paths.envFile);
     const viewed = mutateViewed(paths.viewed, (saved) =>
       viewedAutoReset ? reconcileViewed(saved, hashes) : saved
     );
@@ -503,7 +503,8 @@ async function handle(
     // on is a question, whatever the form sent (it may have been rendered
     // before the setting was switched on). The browser locks the selector to
     // 質問 too; this is the authoritative side.
-    const intent: { intent?: CommentIntent } = loadSettings(paths.settings).readOnlyMode
+    const intent: { intent?: CommentIntent } = loadSettings(paths.settings, paths.envFile)
+      .readOnlyMode
       ? { intent: 'question' }
       : validatedIntent;
 

@@ -161,13 +161,15 @@ test('既定設定では received に委譲指示の note が同乗する', asyn
   }
 });
 
-test('deliveryNoteEnabled: false かつ deliveryNoteText 空なら note が付かない', async () => {
+test('deliveryNoteEnabled: false ならテキストがあっても note が付かない', async () => {
   const tmp = makeTmpRepo();
   try {
     const paths = reviewPaths(tmp);
     mutateSettings(paths.settings, (s) => {
       s.deliveryNoteEnabled = false;
     });
+    // 前提を明示: テキストは既定の委譲指示のまま非空
+    assert.notEqual(loadSettings(paths.settings).deliveryNoteText, '');
     saveComments(paths.comments, [diffComment('n2')]);
 
     const lines = await captureLog(() => waitComments({ timeout: 2, cwd: tmp }));
@@ -179,12 +181,11 @@ test('deliveryNoteEnabled: false かつ deliveryNoteText 空なら note が付�
   }
 });
 
-test('deliveryNoteText は note に入り、定型指示OFFなら自由記述だけになる', async () => {
+test('deliveryNoteText を書き換えると note がその内容になる', async () => {
   const tmp = makeTmpRepo();
   try {
     const paths = reviewPaths(tmp);
     mutateSettings(paths.settings, (s) => {
-      s.deliveryNoteEnabled = false;
       s.deliveryNoteText = '修正後は必ず npm test を実行すること';
     });
     saveComments(paths.comments, [diffComment('n3')]);
@@ -198,13 +199,12 @@ test('deliveryNoteText は note に入り、定型指示OFFなら自由記述だ
   }
 });
 
-test('readOnlyMode 中は定型の委譲指示を抑止し、自由記述テキストだけが残る', async () => {
+test('readOnlyMode は note に影響しない（既定の委譲指示がそのまま届く）', async () => {
   const tmp = makeTmpRepo();
   try {
     const paths = reviewPaths(tmp);
     mutateSettings(paths.settings, (s) => {
       s.readOnlyMode = true;
-      s.deliveryNoteText = '回答は敬体で書くこと';
     });
     // 前提を明示: deliveryNoteEnabled は既定で true のまま
     assert.equal(loadSettings(paths.settings).deliveryNoteEnabled, true);
@@ -213,7 +213,25 @@ test('readOnlyMode 中は定型の委譲指示を抑止し、自由記述テキ�
     const lines = await captureLog(() => waitComments({ timeout: 2, cwd: tmp }));
     const result = JSON.parse(lines[0]) as { status: string; note?: string };
     assert.equal(result.status, 'received');
-    assert.equal(result.note, '回答は敬体で書くこと');
+    assert.match(result.note ?? '', /サブエージェントに委譲/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('deliveryNoteText を空にすると enabled でも note が付かない', async () => {
+  const tmp = makeTmpRepo();
+  try {
+    const paths = reviewPaths(tmp);
+    mutateSettings(paths.settings, (s) => {
+      s.deliveryNoteText = '';
+    });
+    saveComments(paths.comments, [diffComment('n5')]);
+
+    const lines = await captureLog(() => waitComments({ timeout: 2, cwd: tmp }));
+    const result = JSON.parse(lines[0]) as { status: string; note?: string };
+    assert.equal(result.status, 'received');
+    assert.equal(result.note, undefined);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

@@ -544,23 +544,16 @@ function acquireWaitLock(cwd: string): WaitLock {
   }
 }
 
-// Standing instruction delivered alongside every received batch (settings
-// deliveryNoteEnabled / deliveryNoteText). Skill-file instructions decay with
-// context distance by the time comments arrive; a note riding along with the
-// batch sits right next to the data it applies to.
-const DELEGATION_NOTE =
-  '修正を伴うコメントは、メインセッションで直接コードを編集せず、Agent ツールでサブエージェントに委譲すること（1件だけでも委譲する）。' +
-  '複数件ある場合は1つのメッセージで並行起動し、完了を待たずに次のコメントの委譲へ進む。' +
-  'メインセッションは委譲・回答・resolve のオーケストレーションに徹する。';
-
+// The note delivered alongside every received batch is deliveryNoteText as-is
+// (default: the delegate-to-subagents instruction — see DEFAULT_SETTINGS).
+// Skill-file instructions decay with context distance by the time comments
+// arrive; a note riding along with the batch sits right next to the data it
+// applies to. Deliberately independent of readOnlyMode: the mode governs
+// whether fixes happen at all, not what the note says.
 function buildDeliveryNote(settings: ReviewSettings): string | undefined {
-  const parts: string[] = [];
-  // The built-in note instructs how to fix; in read-only mode fixing itself
-  // is forbidden, so including it would only contradict the mode.
-  if (settings.deliveryNoteEnabled && !settings.readOnlyMode) parts.push(DELEGATION_NOTE);
-  const custom = settings.deliveryNoteText.trim();
-  if (custom) parts.push(custom);
-  return parts.length > 0 ? parts.join('\n') : undefined;
+  if (!settings.deliveryNoteEnabled) return undefined;
+  const text = settings.deliveryNoteText.trim();
+  return text ? text : undefined;
 }
 
 // Normally only the user's live open comments are deliverable. Resume mode also
@@ -644,7 +637,7 @@ export async function waitComments(opts: WaitOptions = {}): Promise<void> {
         if (received.length > 0) {
           // The current settings ride along with every delivery so the consumer
           // (the agent) always has readOnlyMode etc. in front of it at triage.
-          const settings = loadSettings(paths.settings);
+          const settings = loadSettings(paths.settings, paths.envFile);
           const note = buildDeliveryNote(settings);
           console.log(
             JSON.stringify(
@@ -665,7 +658,7 @@ export async function waitComments(opts: WaitOptions = {}): Promise<void> {
         waitLock.heartbeat();
         const finalReceived = takeDeliverable(paths.comments, opts);
         if (finalReceived.length > 0) {
-          const settings = loadSettings(paths.settings);
+          const settings = loadSettings(paths.settings, paths.envFile);
           const note = buildDeliveryNote(settings);
           console.log(
             JSON.stringify(

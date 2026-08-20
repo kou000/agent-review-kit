@@ -34,7 +34,7 @@ export function snapshotCreate(opts: SnapshotCreateOptions): void {
 
   // Snapshots switched off in the review settings: succeed as a no-op so the
   // skill can run the same command sequence regardless of the setting.
-  if (!loadSettings(paths.settings).snapshotsEnabled) {
+  if (!loadSettings(paths.settings, paths.envFile).snapshotsEnabled) {
     console.log(JSON.stringify({ status: 'skipped', reason: 'snapshots disabled in settings' }, null, 2));
     return;
   }
