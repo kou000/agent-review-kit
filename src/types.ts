@@ -140,8 +140,9 @@ export interface ReviewState {
 }
 
 // Persisted to .agent-review/settings.json, edited from the browser via
-// GET/PUT /api/settings. Missing file or missing keys fall back to defaults,
-// so the file only ever needs to hold what the user changed.
+// GET/PUT /api/settings. Missing file or missing keys fall back to defaults
+// (DEFAULT_SETTINGS, per-user overridable via .agent-review/.env — see
+// envDefaults.ts), so the file only ever needs to hold what the user changed.
 export interface ReviewSettings {
   // When false, `snapshot create` becomes a no-op (exits with
   // {"status":"skipped"}), so no per-fix diff pages are produced.
@@ -153,14 +154,12 @@ export interface ReviewSettings {
   // diff changes; only manual toggles clear them.
   viewedAutoReset: boolean;
   // When true, every wait-comments "received" delivery carries a `note` field
-  // instructing the agent to delegate fixes to subagents. Skill-file
-  // instructions decay with context distance; a note riding along with the
-  // comments sits right next to the data it applies to. Suppressed while
-  // readOnlyMode is on (fixing itself is forbidden there).
+  // holding deliveryNoteText. Skill-file instructions decay with context
+  // distance; a note riding along with the comments sits right next to the
+  // data it applies to.
   deliveryNoteEnabled: boolean;
-  // User-written free text appended to the delivered `note` on every
-  // delivery (or forming it alone when deliveryNoteEnabled is false).
-  // Empty means none.
+  // The `note` text itself, freely editable. Defaults to the delegate-to-
+  // subagents instruction below; empty means no note even while enabled.
   deliveryNoteText: string;
 }
 
@@ -169,7 +168,10 @@ export const DEFAULT_SETTINGS: ReviewSettings = {
   readOnlyMode: false,
   viewedAutoReset: true,
   deliveryNoteEnabled: true,
-  deliveryNoteText: '',
+  deliveryNoteText:
+    '修正を伴うコメントは、メインセッションで直接コードを編集せず、Agent ツールでサブエージェントに委譲すること（1件だけでも委譲する）。' +
+    '複数件ある場合は1つのメッセージで並行起動し、完了を待たずに次のコメントの委譲へ進む。' +
+    'メインセッションは委譲・回答・対応記録（resolve-comment）のオーケストレーションに徹する。',
 };
 
 // One captured fix: a git-format patch stored under the current branch's

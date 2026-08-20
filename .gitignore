@@ -1,6 +1,8 @@
 node_modules/
 dist/
 .agent-review/
+# 設定デフォルトの実ファイルは人ごと（.env.sample はコミットする）
+.env
 *.log
 .claude/worktrees/
 

@@ -31,7 +31,9 @@ Codex では `serve` と `wait-comments` をそれぞれ長時間実行できる
 
 - `settings.readOnlyMode: true` — **読み取り専用モード**。他人の MR を閲覧するだけのレビューなど、コードを変更してはいけないモード。修正指摘が来ても**コードを変更せず**、調査結果・修正案を `--status answered` で回答するだけにする。サブエージェント委譲もしない。**received の settings を見ずに修正へ進むことを禁止する。**
 - `settings.snapshotsEnabled: false` — 修正スナップショット（後述）を保存しない設定。`snapshot create` は `{"status":"skipped"}` を返すので、コマンド手順は変えなくてよい（`resolve-comment` に `--snapshot` を付けないだけ）。
-- `settings.deliveryNoteEnabled` / `settings.deliveryNoteText` — `wait-comments` の `received` 出力に `note` フィールドを同乗させる設定。`deliveryNoteEnabled: true`（既定）で「修正はサブエージェントに委譲する」という定型指示が入り、`deliveryNoteText` が非空ならその自由記述テキストも入る（readOnlyMode 中は定型指示のみ抑止される）。**`note` が付いていたら、そのバッチの処理でその指示に従うこと。**
+- `settings.deliveryNoteEnabled` / `settings.deliveryNoteText` — `wait-comments` の `received` 出力に `note` フィールドを同乗させる設定。`deliveryNoteEnabled: true`（既定）のとき `deliveryNoteText` がそのまま `note` になる（既定のテキストは「修正はサブエージェントに委譲する」という指示で、ユーザーが自由に書き換えられる。空なら note なし）。**`note` が付いていたら、そのバッチの処理でその指示に従うこと。** ただし `readOnlyMode: true` のときは修正禁止が常に優先で、note に修正系の指示があっても修正しない。
+
+各設定の初期値は、ユーザーが `.agent-review/.env` に `ARK_*` 形式で定義していることがある（README「設定のデフォルト（.env）」参照）。エージェント側の挙動は変わらない — 従うべき値は常に `received` の `settings`（および `status` 出力）に解決済みで入ってくる。
 
 ## コメント種別（intent）の扱い
 

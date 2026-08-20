@@ -167,6 +167,21 @@ body {
   font-family: inherit;
   resize: vertical;
 }
+#settings-panel .settings-footnote {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+#settings-panel .settings-footnote code {
+  font-size: 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 3px;
+}
 
 #app {
   margin: 16px auto 80px;

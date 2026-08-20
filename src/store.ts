@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { resolveDefaultSettings } from './envDefaults';
 import {
   CommentsFile,
   DEFAULT_SETTINGS,
@@ -169,32 +170,35 @@ export function saveState(file: string, state: ReviewState): void {
   writeJsonAtomic(file, state);
 }
 
-export function loadSettings(file: string): ReviewSettings {
+export function loadSettings(file: string, envFile?: string): ReviewSettings {
   // Merge over the defaults key by key so a settings.json written by an older
   // version (or edited by hand) never yields undefined for a known setting,
-  // and unknown keys are dropped.
+  // and unknown keys are dropped. When envFile is given, the fallback layer is
+  // DEFAULT_SETTINGS overridden by .agent-review/.env (per-user defaults); an
+  // explicit value in settings.json still wins.
+  const defaults = envFile ? resolveDefaultSettings(envFile) : DEFAULT_SETTINGS;
   const raw = readJson<Partial<ReviewSettings>>(file, {});
   return {
     snapshotsEnabled:
       typeof raw.snapshotsEnabled === 'boolean'
         ? raw.snapshotsEnabled
-        : DEFAULT_SETTINGS.snapshotsEnabled,
+        : defaults.snapshotsEnabled,
     readOnlyMode:
       typeof raw.readOnlyMode === 'boolean'
         ? raw.readOnlyMode
-        : DEFAULT_SETTINGS.readOnlyMode,
+        : defaults.readOnlyMode,
     viewedAutoReset:
       typeof raw.viewedAutoReset === 'boolean'
         ? raw.viewedAutoReset
-        : DEFAULT_SETTINGS.viewedAutoReset,
+        : defaults.viewedAutoReset,
     deliveryNoteEnabled:
       typeof raw.deliveryNoteEnabled === 'boolean'
         ? raw.deliveryNoteEnabled
-        : DEFAULT_SETTINGS.deliveryNoteEnabled,
+        : defaults.deliveryNoteEnabled,
     deliveryNoteText:
       typeof raw.deliveryNoteText === 'string'
         ? raw.deliveryNoteText
-        : DEFAULT_SETTINGS.deliveryNoteText,
+        : defaults.deliveryNoteText,
   };
 }
 
@@ -208,11 +212,12 @@ export function saveSettings(file: string, settings: ReviewSettings): void {
  */
 export function mutateSettings(
   settingsFile: string,
-  fn: (settings: ReviewSettings) => void
+  fn: (settings: ReviewSettings) => void,
+  envFile?: string
 ): ReviewSettings {
   fs.mkdirSync(path.dirname(settingsFile), { recursive: true });
   return withFileLock(path.dirname(settingsFile), () => {
-    const settings = loadSettings(settingsFile);
+    const settings = loadSettings(settingsFile, envFile);
     fn(settings);
     saveSettings(settingsFile, settings);
     return settings;
