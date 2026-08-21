@@ -752,3 +752,53 @@ test('POST /api/documents/:id/edit は未知の id なら 404、readOnlyMode 中
     });
   }
 });
+
+/* ---------- リポジトリファイルビューア (GET /api/repo-files, /api/file, /file/:path) ---------- */
+
+test('GET /api/repo-files は git 追跡ファイルの一覧を返す', async () => {
+  const res = await fetch(`${baseUrl}/api/repo-files`);
+  assert.equal(res.status, 200);
+  const data = (await res.json()) as { files: string[] };
+  assert.ok(data.files.includes('README.md'));
+});
+
+test('GET /api/file は追跡ファイルの行とハイライトを返す', async () => {
+  // snap.ts は既存テストがコミット済み（TypeScript なのでハイライトも付く）。
+  const res = await fetch(`${baseUrl}/api/file?path=${encodeURIComponent('snap.ts')}`);
+  assert.equal(res.status, 200);
+  const data = (await res.json()) as {
+    file: { path: string; lines: string[]; html: string[] | null };
+  };
+  assert.equal(data.file.path, 'snap.ts');
+  assert.equal(data.file.lines[0], 'export const answer: number = 42;');
+  assert.ok(Array.isArray(data.file.html));
+  assert.match(data.file.html![0], /color:#[0-9a-fA-F]{6}/);
+});
+
+test('GET /api/file は未追跡ファイル・プロジェクト外パスを 404 で拒否する', async () => {
+  // 未追跡ファイル（.env のような秘密情報を配信しないことの検証）。
+  fs.writeFileSync(path.join(tmp, 'untracked-secret.env'), 'TOKEN=xyz\n');
+  const untracked = await fetch(
+    `${baseUrl}/api/file?path=${encodeURIComponent('untracked-secret.env')}`
+  );
+  assert.equal(untracked.status, 404);
+
+  const outside = await fetch(`${baseUrl}/api/file?path=${encodeURIComponent('../outside.txt')}`);
+  assert.equal(outside.status, 404);
+
+  const reviewDir = await fetch(
+    `${baseUrl}/api/file?path=${encodeURIComponent('.agent-review/review.html')}`
+  );
+  assert.equal(reviewDir.status, 404);
+});
+
+test('GET /file/<path> は読み取り専用ページを返し、未追跡は 404 になる', async () => {
+  const res = await fetch(`${baseUrl}/file/${encodeURIComponent('README.md')}`);
+  assert.equal(res.status, 200);
+  const body = await res.text();
+  assert.ok(body.includes('window.__FILE__'));
+  assert.ok(body.includes('README.md'));
+
+  const missing = await fetch(`${baseUrl}/file/${encodeURIComponent('untracked-secret.env')}`);
+  assert.equal(missing.status, 404);
+});

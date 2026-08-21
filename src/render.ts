@@ -119,6 +119,47 @@ export function renderSnapshotHtml(data: DiffData, info: SnapshotPageInfo): stri
 `;
 }
 
+// One tracked repository file for the standalone /file/<path> page, opened
+// from a repo-file pin panel's「新しいタブで開く」. Content mirrors the
+// /api/file response shape.
+export interface RepoFilePage {
+  path: string;
+  binary?: boolean;
+  tooLarge?: boolean;
+  lines?: string[];
+  html?: string[] | null;
+}
+
+// Standalone read-only page for one repository file. Mirrors renderCommitHtml:
+// same client bundle, app.js switches to the file view when window.__FILE__
+// is set.
+export function renderFileHtml(info: RepoFilePage): string {
+  const payload = escapeForScript(JSON.stringify(info));
+  return `<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(info.path)}</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<script>window.__FILE__ = ${payload};</script>
+<header id="topbar">
+  <div class="topbar-inner">
+    <span class="brand">agent-review-kit</span>
+    <span id="diff-meta"></span>
+    <span id="unresolved-badge" class="badge" hidden>-</span>
+    <span id="conn-state" class="conn"></span>
+  </div>
+</header>
+<main id="app"></main>
+<script src="/app.js"></script>
+</body>
+</html>
+`;
+}
+
 // Review page for one published HTML document (/doc/<id>). Mirrors the other
 // standalone pages: same client bundle, app.js switches to the HTML-review
 // view when window.__DOC__ is set. The document body itself is NOT embedded

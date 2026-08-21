@@ -128,6 +128,35 @@ function highlightSingle(
   return res && res.length ? res[0] : null;
 }
 
+// Highlighter cached for the life of the process, used by the per-request
+// repo-file viewer (GET /api/file, GET /file/<path>). generate-time baking
+// keeps its own short-lived instance (bakeHighlight below); serve would pay
+// the full Shiki init on every file open without this cache.
+let fileHlPromise: Promise<Highlighter> | null = null;
+
+function fileHighlighter(): Promise<Highlighter> {
+  if (!fileHlPromise) {
+    fileHlPromise = importShiki().then(({ createHighlighter }) =>
+      createHighlighter({ themes: [THEME], langs: ALL_LANGS })
+    );
+  }
+  return fileHlPromise;
+}
+
+// Highlight a full standalone file for the repo-file viewer. Returns per-line
+// inner HTML (index 0 = line 1), or null when the language is unknown or
+// Shiki fails — callers fall back to escaped plain text.
+export async function highlightFile(
+  filePath: string,
+  lines: string[]
+): Promise<string[] | null> {
+  const lang = langForPath(filePath);
+  if (!lang) return null;
+  const hl = await fileHighlighter();
+  const out = highlightLines(hl, lines, lang);
+  return out && out.length === lines.length ? out : null;
+}
+
 export interface HighlightSources {
   // Full old-side content per file path (b-side path key), when readable.
   oldByPath: Map<string, string[] | null>;

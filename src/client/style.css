@@ -1166,3 +1166,29 @@ body.resizing #doc-frame { pointer-events: none; }
   cursor: pointer;
 }
 #doc-float-btn:hover { background: var(--btn-hover-bg); }
+
+/* ---------- repository file viewer (support feature) ---------- */
+
+.repo-tree-title { cursor: pointer; user-select: none; }
+.repo-tree { margin-bottom: 8px; }
+.repo-tree .tree-dir { cursor: pointer; user-select: none; }
+.repo-tree .tree-dir:hover { color: var(--accent); }
+/* Files already in the diff: their content is on the main page, so dim them. */
+.repo-tree .tree-file.in-diff .tree-name { opacity: 0.45; }
+/* Files whose pin panel is currently open. */
+.repo-tree .tree-file.active .tree-name { color: var(--accent); font-weight: 600; }
+
+/* Full-file table (repo-file pin panel and the /file/<path> page): the num
+   column is display-only and the code column keeps original line layout. */
+table.diff.file-view td.num { cursor: default; }
+table.diff.file-view td.num:hover { color: var(--muted); font-weight: 400; }
+
+/* 「新しいタブで開く」 link in a repo-file pin panel header. */
+.pin-panel-open {
+  text-decoration: none;
+  color: var(--muted);
+  padding: 0 4px;
+  font-size: 13px;
+  flex: none;
+}
+.pin-panel-open:hover { color: var(--accent); }
