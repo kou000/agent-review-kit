@@ -632,6 +632,17 @@ tr.widget-row td {
 }
 .comment-form .form-meta { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
 .comment-form .buttons { margin-top: 6px; display: flex; gap: 8px; }
+/* Manual edit mode: code goes in verbatim, so monospace and no wrapping. */
+.comment-form textarea.code-edit {
+  max-width: none;
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+  overflow-x: auto;
+  tab-size: 4;
+}
+.comment-form .edit-hint { font-size: 11px; color: var(--muted); align-self: center; }
 
 button {
   font-size: 12px;

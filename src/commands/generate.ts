@@ -38,6 +38,9 @@ export interface GenerateOptions {
   // that may have arrived concurrently from the browser.
   preserveFinished?: boolean;
   cwd?: string;
+  // Suppress the JSON status line on stdout. Set by server-internal
+  // regenerations (POST /api/edit), whose stdout belongs to `serve`.
+  quiet?: boolean;
 }
 
 // Read the old-side (pre-image) content of every file so Shiki can highlight
@@ -105,6 +108,7 @@ export async function generate(opts: GenerateOptions = {}): Promise<void> {
     generatedAt: data.generatedAt,
   });
 
+  if (opts.quiet) return;
   console.log(
     JSON.stringify(
       {

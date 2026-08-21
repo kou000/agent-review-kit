@@ -260,3 +260,25 @@ test('該当するコメントがなければ timeout する', async () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('manualEdit コメント（手動修正の記録）も received で配達され seen になる', async () => {
+  const tmp = makeTmpRepo();
+  try {
+    const paths = reviewPaths(tmp);
+    const manual: ReviewComment = { ...diffComment('m1'), manualEdit: true, body: '【手動修正】…' };
+    saveComments(paths.comments, [manual]);
+
+    const lines = await captureLog(() => waitComments({ timeout: 2, cwd: tmp }));
+    const result = JSON.parse(lines[0]) as { status: string; comments: ReviewComment[] };
+    assert.equal(result.status, 'received');
+    assert.equal(result.comments.length, 1);
+    assert.equal(result.comments[0].id, 'm1');
+    // 配達ペイロードにマーカーがそのまま乗る（エージェントは manualEdit で判別できる）。
+    assert.equal(result.comments[0].manualEdit, true);
+
+    const after = loadComments(paths.comments);
+    assert.equal(after.find((c) => c.id === 'm1')?.status, 'seen');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
