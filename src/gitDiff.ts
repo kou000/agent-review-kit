@@ -28,6 +28,16 @@ function gitAllowDiffExit(args: string[], cwd: string): string {
   }
 }
 
+// Tracked files of the repository, for the repo-file viewer. -z avoids git's
+// path quoting so non-ASCII names come through verbatim. Deliberately tracked
+// files ONLY: the list doubles as the serving allowlist (no traversal, no
+// .agent-review internals, no untracked secrets like .env).
+export function runGitLsFiles(cwd: string): string[] {
+  return git(['ls-files', '-z'], cwd)
+    .split('\0')
+    .filter((p) => p.length > 0);
+}
+
 // Synthesize an "added file" diff for every untracked (but not ignored) file, so
 // brand-new files/directories that haven't been `git add`-ed yet still show up in
 // the review. Ignored files are excluded via --exclude-standard (honors

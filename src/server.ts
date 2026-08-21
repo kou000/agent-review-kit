@@ -2,11 +2,24 @@ import * as fs from 'fs';
 import * as http from 'http';
 import * as path from 'path';
 import { generate } from './commands/generate';
-import { embedNewSideFromTree, getCommitMeta, parseUnifiedDiff, runGitCommitDiff, runGitCommitLog } from './gitDiff';
-import { bakeDiffHighlight } from './highlight';
+import {
+  embedNewSideFromTree,
+  getCommitMeta,
+  parseUnifiedDiff,
+  runGitCommitDiff,
+  runGitCommitLog,
+  runGitLsFiles,
+} from './gitDiff';
+import { bakeDiffHighlight, highlightFile } from './highlight';
 import { documentHtmlPath, findDocument } from './htmlDocument';
 import { ReviewPaths, reviewPaths } from './paths';
-import { renderCommitHtml, renderDocumentHtml, renderSnapshotHtml } from './render';
+import {
+  renderCommitHtml,
+  renderDocumentHtml,
+  renderFileHtml,
+  renderSnapshotHtml,
+  RepoFilePage,
+} from './render';
 import { findSnapshot, readSnapshotPatch, SNAPSHOT_ID_RE } from './snapshot';
 import {
   loadComments,
@@ -252,6 +265,40 @@ function validateIntent(v: unknown): { intent?: CommentIntent } | string {
   return { intent: v };
 }
 
+// Cap on a repo-file viewer payload (GET /api/file, GET /file/<path>),
+// matching generate's newLines embed cap.
+const MAX_FILE_VIEW_BYTES = 1024 * 1024;
+
+// Read one tracked repository file for the repo-file viewer. Only files
+// listed by `git ls-files` are served — the list is both the path validation
+// (no traversal, no .agent-review internals) and a guard against exposing
+// untracked secrets (.env etc.). Returns the /api/file payload shape shared
+// with the standalone /file/<path> page, or null for anything not servable.
+async function readRepoFile(projectDir: string, relPath: string): Promise<RepoFilePage | null> {
+  if (!relPath) return null;
+  try {
+    if (!runGitLsFiles(projectDir).includes(relPath)) return null;
+  } catch {
+    return null; // not a git repo
+  }
+  const abs = path.join(projectDir, relPath);
+  let stat: fs.Stats;
+  try {
+    stat = fs.lstatSync(abs);
+  } catch {
+    return null;
+  }
+  // Tracked symlinks are rejected too: following one could read outside the
+  // project.
+  if (!stat.isFile()) return null;
+  if (stat.size > MAX_FILE_VIEW_BYTES) return { path: relPath, tooLarge: true };
+  const buf = fs.readFileSync(abs);
+  if (buf.subarray(0, 8000).includes(0)) return { path: relPath, binary: true };
+  const lines = buf.toString('utf8').split('\n');
+  if (lines.length && lines[lines.length - 1] === '') lines.pop();
+  return { path: relPath, lines, html: await highlightFile(relPath, lines) };
+}
+
 export interface ServerHooks {
   // Called after POST /api/finish has been fully processed and answered.
   // serve() uses this to shut the process down gracefully.
@@ -358,6 +405,26 @@ async function handle(
       res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
       res.end(`snapshot patch not readable: ${id}`);
     }
+    return;
+  }
+
+  // Standalone read-only page for one tracked repository file, opened from a
+  // repo-file pin panel's「新しいタブで開く」. Same guard as /api/file: only
+  // git-tracked regular files are served.
+  const fileMatch = /^\/file\/(.+)$/.exec(p);
+  if (method === 'GET' && fileMatch) {
+    const rel = decodeURIComponent(fileMatch[1]);
+    const info = await readRepoFile(path.dirname(paths.dir), rel);
+    if (!info) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end(`file not found (tracked files only): ${rel}`);
+      return;
+    }
+    res.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+    });
+    res.end(renderFileHtml(info));
     return;
   }
 
@@ -610,6 +677,30 @@ async function handle(
       viewedAutoReset ? reconcileViewed(saved, hashes) : saved
     );
     json(res, 200, { viewed });
+    return;
+  }
+
+  // Every tracked file of the repository, for the sidebar's repo-file tree
+  // (support feature: view unchanged files next to the diff).
+  if (method === 'GET' && p === '/api/repo-files') {
+    try {
+      json(res, 200, { files: runGitLsFiles(path.dirname(paths.dir)) });
+    } catch {
+      json(res, 200, { files: [] }); // not a git repo
+    }
+    return;
+  }
+
+  // Content of one tracked file (repo-file viewer pin panel). Highlighted
+  // per request with the same Shiki setup as generate.
+  if (method === 'GET' && p === '/api/file') {
+    const rel = url.searchParams.get('path') ?? '';
+    const info = await readRepoFile(path.dirname(paths.dir), rel);
+    if (!info) {
+      json(res, 404, { error: `file not found (tracked files only): ${rel}` });
+      return;
+    }
+    json(res, 200, { file: info });
     return;
   }
 
