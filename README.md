@@ -285,7 +285,7 @@ agent-review-kit status
 ARK_SNAPSHOTS_ENABLED=false        # 修正スナップショットを保存しない
 ARK_READ_ONLY_MODE=false           # 読み取り専用モード
 ARK_VIEWED_AUTO_RESET=true         # 差分変更時に Viewed を自動解除
-ARK_DELIVERY_NOTE_ENABLED=true     # wait-comments 受信出力に処理指示の note を同乗
+ARK_DELIVERY_NOTE_ENABLED=true     # wait-comments 受信出力に処理指示の note を同乗（組み込み既定は false）
 ARK_DELIVERY_NOTE_TEXT="修正時はテストも更新すること"  # note の本文（既定は委譲指示。空文字なら note なし）
 ```
 
