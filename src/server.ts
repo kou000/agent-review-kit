@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as http from 'http';
 import * as path from 'path';
+import { generate } from './commands/generate';
 import { embedNewSideFromTree, getCommitMeta, parseUnifiedDiff, runGitCommitDiff, runGitCommitLog } from './gitDiff';
 import { bakeDiffHighlight } from './highlight';
 import { documentHtmlPath, findDocument } from './htmlDocument';
@@ -16,6 +17,7 @@ import {
   loadState,
   loadViewed,
   mutateComments,
+  mutateDocumentIndex,
   mutateSettings,
   mutateViewed,
   newCommentId,
@@ -77,8 +79,9 @@ function serveFile(res: http.ServerResponse, file: string, type: string): void {
 
 export function buildStatus(paths: ReviewPaths): Record<string, unknown> {
   // Soft-deleted comments are invisible everywhere: counts, totals and the
-  // unresolved badge all ignore them.
-  const comments = loadComments(paths.comments).filter((c) => !c.deleted);
+  // unresolved badge all ignore them. Manual-edit records are notifications,
+  // not review feedback, so they stay out of every count too.
+  const comments = loadComments(paths.comments).filter((c) => !c.deleted && !c.manualEdit);
   const counts: Record<CommentStatus, number> = {
     open: 0,
     seen: 0,
@@ -111,6 +114,27 @@ export function buildStatus(paths: ReviewPaths): Record<string, unknown> {
 // Cap on every free-text field inside an htmlTarget, so a crafted request
 // can't balloon comments.json. Real selectors/snippets are far below this.
 const MAX_TARGET_FIELD = 2000;
+
+// Cap on the text fields of a manual edit (POST /api/edit). Matches the order
+// of MAX_EMBED_BYTES in generate: anything bigger has no business going
+// through a browser textarea.
+const MAX_EDIT_TEXT = 1024 * 1024;
+
+// How much of the hand-edited code is quoted inside the auto-recorded
+// 【手動修正】comment before it is truncated.
+const MAX_EDIT_QUOTE = 3000;
+
+// Cap on a manually edited document body (POST /api/documents/:id/edit),
+// matching publish-html's MAX_HTML_BYTES.
+const MAX_DOC_EDIT_BYTES = 5 * 1024 * 1024;
+
+// Appended to every auto-recorded 【手動修正】 comment body. The comment is a
+// notification, not user feedback, and it never renders in the browser — so
+// the body itself must tell the agent that a reply is pointless (skill-file
+// instructions decay with context distance; text riding with the comment
+// does not).
+const MANUAL_EDIT_NOTE =
+  'このコメントは自動記録の通知でブラウザには表示されないため、返信は不要（内容を確認したら resolve のみ行うこと）。';
 
 function targetStr(v: unknown, required: boolean): string | null | 'bad' {
   if (v === undefined || v === null) return required ? 'bad' : null;
@@ -407,6 +431,114 @@ async function handle(
     return;
   }
 
+  // Manual edit of a published HTML document — the document analog of
+  // POST /api/edit. The browser rewrites one element in a detached parse of
+  // the pristine stored body (the live iframe DOM carries synthetic comment
+  // marks and must never be serialized) and sends the whole re-serialized
+  // document here. `expectedRevision` is the revision that parse was based
+  // on; a mismatch (re-published or edited meanwhile) is refused as stale.
+  // Records a manualEdit comment so the agent learns the stored document
+  // changed — and that a re-publish would overwrite the hand edit.
+  const docEditMatch = /^\/api\/documents\/([^/]+)\/edit$/.exec(p);
+  if (method === 'POST' && docEditMatch) {
+    const id = decodeURIComponent(docEditMatch[1]);
+    if (loadSettings(paths.settings, paths.envFile).readOnlyMode) {
+      json(res, 403, { error: '読み取り専用モードのため手動修正はできません' });
+      return;
+    }
+    if (loadFinished(paths.finished)) {
+      json(res, 409, { error: 'review is already finished' });
+      return;
+    }
+    const meta = findDocument(paths, id);
+    if (!meta) {
+      json(res, 404, { error: `document not found: ${id}` });
+      return;
+    }
+    const body = await readBody(req);
+    if (typeof body.html !== 'string' || !body.html.trim()) {
+      json(res, 400, { error: 'html is required' });
+      return;
+    }
+    if (Buffer.byteLength(body.html, 'utf8') > MAX_DOC_EDIT_BYTES) {
+      json(res, 400, { error: `html too large (max ${MAX_DOC_EDIT_BYTES} bytes)` });
+      return;
+    }
+    if (typeof body.expectedRevision !== 'number' || !Number.isInteger(body.expectedRevision)) {
+      json(res, 400, { error: 'expectedRevision must be an integer' });
+      return;
+    }
+    const expectedRevision = body.expectedRevision;
+    const target = validateHtmlTarget(body.htmlTarget);
+    if (typeof target === 'string') {
+      json(res, 400, { error: target });
+      return;
+    }
+    // The edited element's HTML as the user typed it, quoted in the record
+    // comment (the full document would be far too much). Empty = 要素を削除.
+    const newHtml = typeof body.newHtml === 'string' ? body.newHtml.trim() : '';
+
+    // Revision check, body write and bump all under the documents lock, so a
+    // concurrent publish/edit can never leave the revision pointing at the
+    // wrong content or silently lose a bump.
+    const result = mutateDocumentIndex(paths.documentsIndex, (index) => {
+      const doc = index.documents.find((d) => d.id === id);
+      if (!doc) return { kind: 'missing' } as const;
+      if (doc.revision !== expectedRevision) return { kind: 'stale' } as const;
+      // Body first, revision second (publish-html's order): a bumped revision
+      // must always point at the new content.
+      fs.writeFileSync(documentHtmlPath(paths, id), body.html as string);
+      doc.revision += 1;
+      doc.updatedAt = nowIso();
+      return { kind: 'updated', revision: doc.revision } as const;
+    });
+    if (result.kind === 'missing') {
+      json(res, 404, { error: `document not found: ${id}` });
+      return;
+    }
+    if (result.kind === 'stale') {
+      json(res, 409, {
+        error: 'stale: 文書が更新されています。ページを再読み込みしてください。',
+      });
+      return;
+    }
+
+    const quoted =
+      newHtml.length > MAX_EDIT_QUOTE ? `${newHtml.slice(0, MAX_EDIT_QUOTE)}\n…（省略）` : newHtml;
+    const where = target ? target.label : '文書全体';
+    const docPath = path.relative(path.dirname(paths.dir), documentHtmlPath(paths, id));
+    const commentBody =
+      `【手動修正】ユーザーがブラウザ上で文書「${meta.title}」の ${where} を直接編集しました` +
+      `（保存済み・対応不要）。この文書を publish-html で再公開すると手動編集が上書きされるため、` +
+      `以後この文書を更新する場合は保存済みの現在の内容（${docPath}）を基にすること。` +
+      MANUAL_EDIT_NOTE +
+      (newHtml ? `\n修正後のHTML:\n\`\`\`\n${quoted}\n\`\`\`` : '\n（対象要素を削除）');
+    const now = nowIso();
+    const comment: ReviewComment = {
+      id: newCommentId(),
+      file: null,
+      side: null,
+      startLine: null,
+      endLine: null,
+      startDiffLine: null,
+      endDiffLine: null,
+      body: commentBody,
+      status: 'open',
+      createdAt: now,
+      updatedAt: now,
+      documentId: id,
+      htmlTarget: target,
+      manualEdit: true,
+    };
+    mutateComments(paths.comments, (comments) => {
+      // A finish that raced the write above: skip the record comment so no
+      // undeliverable open comment is left behind (the edit itself stands).
+      if (!loadFinished(paths.finished)) comments.push(comment);
+    });
+    json(res, 200, { status: 'applied', revision: result.revision, comment });
+    return;
+  }
+
   if (method === 'GET' && p === '/api/comments') {
     json(res, 200, { comments: loadComments(paths.comments) });
     return;
@@ -488,6 +620,144 @@ async function handle(
     const base = state?.base ?? null;
     const projectDir = path.dirname(paths.dir);
     json(res, 200, { commits: base ? runGitCommitLog(base, projectDir) : [] });
+    return;
+  }
+
+  // Manual edit from the browser: replace the new-side lines
+  // startLine..endLine of `file` with `newText` in the working tree, record
+  // the edit as a manualEdit comment (hidden from the UI, but delivered by
+  // wait-comments — the agent's picture of the file is stale after a hand
+  // edit), then regenerate the review so every open page reloads onto the
+  // fresh diff. `expectedText` is what the browser was displaying for the
+  // range; the edit is refused as stale when the file on disk no longer
+  // matches it (e.g. the agent changed the file after the last generate).
+  if (method === 'POST' && p === '/api/edit') {
+    if (loadSettings(paths.settings, paths.envFile).readOnlyMode) {
+      json(res, 403, { error: '読み取り専用モードのため手動修正はできません' });
+      return;
+    }
+    if (loadFinished(paths.finished)) {
+      json(res, 409, { error: 'review is already finished' });
+      return;
+    }
+    const body = await readBody(req);
+    if (typeof body.file !== 'string' || !body.file) {
+      json(res, 400, { error: 'file is required' });
+      return;
+    }
+    for (const k of ['startLine', 'endLine', 'startDiffLine', 'endDiffLine'] as const) {
+      if (typeof body[k] !== 'number' || !Number.isInteger(body[k] as number)) {
+        json(res, 400, { error: `${k} must be an integer` });
+        return;
+      }
+    }
+    const startLine = body.startLine as number;
+    const endLine = body.endLine as number;
+    if (startLine < 1 || endLine < startLine) {
+      json(res, 400, { error: 'invalid line range' });
+      return;
+    }
+    if (typeof body.expectedText !== 'string' || typeof body.newText !== 'string') {
+      json(res, 400, { error: 'expectedText and newText must be strings' });
+      return;
+    }
+    if (body.expectedText.length > MAX_EDIT_TEXT || body.newText.length > MAX_EDIT_TEXT) {
+      json(res, 400, { error: 'text too large' });
+      return;
+    }
+
+    // The target must resolve inside the project and outside .agent-review.
+    // Symlinks are rejected so a write can never follow a link out of the tree.
+    const projectDir = path.dirname(paths.dir);
+    const abs = path.resolve(projectDir, body.file);
+    const rel = path.relative(projectDir, abs);
+    if (
+      !rel ||
+      rel.startsWith('..') ||
+      path.isAbsolute(rel) ||
+      abs === paths.dir ||
+      abs.startsWith(paths.dir + path.sep)
+    ) {
+      json(res, 400, { error: `file is outside the project: ${body.file}` });
+      return;
+    }
+    let stat: fs.Stats;
+    try {
+      stat = fs.lstatSync(abs);
+    } catch {
+      json(res, 404, { error: `file not found: ${body.file}` });
+      return;
+    }
+    if (!stat.isFile()) {
+      json(res, 400, { error: `not a regular file: ${body.file}` });
+      return;
+    }
+
+    // Split by either EOL so a CRLF file compares cleanly against the
+    // browser-side text (which strips \r); the dominant EOL and the presence
+    // of a trailing newline are preserved on write.
+    const raw = fs.readFileSync(abs, 'utf8');
+    const eol = raw.includes('\r\n') ? '\r\n' : '\n';
+    const hadTrailingNewline = raw.endsWith('\n');
+    const lines = raw === '' ? [] : raw.split(/\r\n|\n/);
+    if (hadTrailingNewline) lines.pop();
+    const normalize = (s: string): string => s.replace(/\r\n/g, '\n');
+    if (
+      endLine > lines.length ||
+      lines.slice(startLine - 1, endLine).join('\n') !== normalize(body.expectedText)
+    ) {
+      json(res, 409, {
+        error: 'stale: ファイルの内容が表示中の差分と一致しません。ページを再読み込みしてください。',
+      });
+      return;
+    }
+
+    // An emptied textarea deletes the range. concat instead of splice(...):
+    // a spread of one array element per line would hit the argument limit on
+    // large pastes.
+    const replacement = body.newText === '' ? [] : normalize(body.newText).split('\n');
+    const merged = lines.slice(0, startLine - 1).concat(replacement, lines.slice(endLine));
+    const out = merged.join(eol);
+    fs.writeFileSync(abs, out && hadTrailingNewline ? out + eol : out);
+
+    // Anchor the record comment to the post-edit range (the regenerated diff
+    // is what the comment will render against).
+    const quoted =
+      body.newText.length > MAX_EDIT_QUOTE
+        ? `${body.newText.slice(0, MAX_EDIT_QUOTE)}\n…（省略）`
+        : body.newText;
+    const commentBody =
+      replacement.length === 0
+        ? `【手動修正】ユーザーがブラウザ上で L${startLine}-L${endLine} を削除しました（ファイルに適用済み・コード対応は不要）。${MANUAL_EDIT_NOTE}`
+        : `【手動修正】ユーザーがブラウザ上でこの範囲を直接修正しました（ファイルに適用済み・コード対応は不要）。${MANUAL_EDIT_NOTE}\n修正後の内容:\n\`\`\`\n${quoted}\n\`\`\``;
+    const now = nowIso();
+    const comment: ReviewComment = {
+      id: newCommentId(),
+      file: body.file,
+      side: 'new',
+      startLine,
+      endLine: replacement.length ? startLine + replacement.length - 1 : startLine,
+      startDiffLine: body.startDiffLine as number,
+      endDiffLine: body.endDiffLine as number,
+      body: commentBody,
+      status: 'open',
+      createdAt: now,
+      updatedAt: now,
+      manualEdit: true,
+    };
+    mutateComments(paths.comments, (comments) => {
+      // A finish that raced the file write above: skip the record comment so
+      // no undeliverable open comment is left behind (the edit itself stands).
+      if (!loadFinished(paths.finished)) comments.push(comment);
+    });
+
+    try {
+      await generate({ cwd: projectDir, preserveFinished: true, quiet: true });
+    } catch (e) {
+      json(res, 500, { error: `編集は適用されましたが差分の再生成に失敗しました: ${String(e)}` });
+      return;
+    }
+    json(res, 200, { status: 'applied', comment });
     return;
   }
 

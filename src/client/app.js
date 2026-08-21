@@ -1584,6 +1584,36 @@
 
   /* ---------- comment form ---------- */
 
+  // The exact text the review is showing for new-side lines start..end of a
+  // file, reconstructed from the embedded diff data (full newLines when
+  // present, hunk rows otherwise). Returns null when any line is not part of
+  // the rendered diff — manual edit is only offered on content the user can
+  // actually see. \r is stripped so a CRLF file compares cleanly server-side.
+  function newSideText(filePath, startLine, endLine) {
+    var f = null;
+    for (var i = 0; i < DIFF.files.length; i++) {
+      if (DIFF.files[i].path === filePath) { f = DIFF.files[i]; break; }
+    }
+    if (!f || f.status === 'deleted' || f.status === 'binary') return null;
+    var out = [];
+    if (f.newLines) {
+      if (endLine > f.newLines.length) return null;
+      for (var l = startLine; l <= endLine; l++) out.push(f.newLines[l - 1]);
+    } else {
+      var byLine = {};
+      f.hunks.forEach(function (h) {
+        h.rows.forEach(function (row) {
+          if (row.right) byLine[row.right.line] = row.right.text;
+        });
+      });
+      for (var l2 = startLine; l2 <= endLine; l2++) {
+        if (!(l2 in byLine)) return null;
+        out.push(byLine[l2]);
+      }
+    }
+    return out.map(function (s) { return String(s).replace(/\r$/, ''); }).join('\n');
+  }
+
   function findRowFor(file, side, line) {
     const tds = document.querySelectorAll(
       'td.num[data-file][data-side="' + side + '"][data-line="' + line + '"]'
@@ -1621,6 +1651,13 @@
       : 'L' + r.startLine + '-L' + r.endLine;
     const sideText = r.side === 'new' ? '変更後' : '変更前';
 
+    // Manual edit needs the on-screen text of the range: only offered on the
+    // new side (the old side is the base), outside read-only mode, and when
+    // every selected line is part of the rendered diff.
+    const editableText = r.side === 'new' && !readOnlyMode
+      ? newSideText(r.file, r.startLine, r.endLine)
+      : null;
+
     const wrap = document.createElement('div');
     wrap.className = 'comment-form';
     wrap.innerHTML =
@@ -1629,6 +1666,9 @@
       intentFieldHtml() +
       '<div class="buttons">' +
       '<button class="primary submit">コメントを追加</button>' +
+      (editableText !== null
+        ? '<button class="manual-edit" title="選択範囲のコードをその場で書き換えてファイルに直接適用する">✏️ 手動修正</button>'
+        : '') +
       '<button class="cancel">キャンセル</button>' +
       '</div>';
     td.appendChild(wrap);
@@ -1662,8 +1702,61 @@
       });
     }
 
+    // Swap the form into manual-edit mode: a code textarea prefilled with
+    // exactly what the diff shows for the range. Saving applies the change to
+    // the file via POST /api/edit; the server regenerates the review before
+    // answering, so a plain reload lands on the fresh diff.
+    function showManualEdit() {
+      wrap.innerHTML =
+        '<div class="form-meta">' + esc(r.file) + ' / 変更後 ' + rangeText +
+        ' を手動修正（保存でファイルへ直接適用）</div>' +
+        '<textarea class="code-edit" spellcheck="false"></textarea>' +
+        '<div class="buttons">' +
+        '<button class="primary save">保存してファイルに適用</button>' +
+        '<button class="cancel">キャンセル</button>' +
+        '<span class="edit-hint">Ctrl+Enter で保存 / 空にして保存すると行を削除</span>' +
+        '</div>';
+      const ta = wrap.querySelector('textarea');
+      ta.value = editableText;
+      ta.rows = Math.min(30, Math.max(3, editableText.split('\n').length + 1));
+      ta.focus();
+
+      function save() {
+        const saveBtn = wrap.querySelector('.save');
+        saveBtn.disabled = true;
+        api('POST', '/api/edit', {
+          file: r.file,
+          startLine: r.startLine,
+          endLine: r.endLine,
+          startDiffLine: r.startDiffLine,
+          endDiffLine: r.endDiffLine,
+          expectedText: editableText,
+          newText: ta.value,
+        }).then(function () {
+          cancelForm();
+          location.reload();
+        }).catch(function (err) {
+          const msg = String((err && err.message) || err);
+          if (msg.indexOf('409') === 0 && msg.indexOf('stale') !== -1) {
+            alert('ファイルの内容が表示中の差分と一致しません（差分が古くなっています）。ページを再読み込みします。');
+            location.reload();
+            return;
+          }
+          alert('手動修正の適用に失敗しました: ' + msg);
+          saveBtn.disabled = false;
+        });
+      }
+      wrap.querySelector('.save').addEventListener('click', save);
+      wrap.querySelector('.cancel').addEventListener('click', cancelForm);
+      ta.addEventListener('keydown', function (e) {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') save();
+      });
+    }
+
     wrap.querySelector('.submit').addEventListener('click', submit);
     wrap.querySelector('.cancel').addEventListener('click', cancelForm);
+    const editBtn = wrap.querySelector('.manual-edit');
+    if (editBtn) editBtn.addEventListener('click', showManualEdit);
     textarea.addEventListener('keydown', function (e) {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') submit();
     });
@@ -2237,11 +2330,12 @@
     ]).then(function (results) {
       // Soft-deleted comments never render, and HTML-document comments
       // (documentId set, file null) belong to their /doc/<id> page — without
-      // this filter they would leak into the overall section here. Filtering
-      // at the single entry point covers every consumer: threads, sidebar
-      // list and tree counts.
+      // this filter they would leak into the overall section here. Manual-edit
+      // records (manualEdit) are agent-facing notifications, never shown.
+      // Filtering at the single entry point covers every consumer: threads,
+      // sidebar list and tree counts.
       const cs = (results[0].comments || []).filter(function (c) {
-        return !c.deleted && !c.documentId;
+        return !c.deleted && !c.documentId && !c.manualEdit;
       });
       const status = results[1];
       // Never yank the DOM out from under an in-progress draft. Leave
@@ -3016,6 +3110,10 @@
     if (!docFormSlot) return;
     closeDocForm();
     hideDocFloatBtn();
+    // Manual edit rewrites the target element (for a text selection, the
+    // element containing it), located by the stored selector. Offered only
+    // outside read-only mode and when there is a concrete anchor.
+    const canEdit = !readOnlyMode && target && target.selector;
     const wrap = document.createElement('div');
     wrap.className = 'comment-form doc-comment-form';
     wrap.innerHTML =
@@ -3024,6 +3122,9 @@
       intentFieldHtml() +
       '<div class="buttons">' +
       '<button class="primary submit">コメントを追加</button>' +
+      (canEdit
+        ? '<button class="manual-edit" title="この要素のHTMLをその場で書き換えて文書に直接適用する">✏️ 手動修正</button>'
+        : '') +
       '<button class="cancel">キャンセル</button>' +
       '</div>';
     docFormSlot.appendChild(wrap);
@@ -3050,8 +3151,100 @@
     }
     wrap.querySelector('.submit').addEventListener('click', submit);
     wrap.querySelector('.cancel').addEventListener('click', closeDocForm);
+    const editBtn = wrap.querySelector('.manual-edit');
+    if (editBtn) {
+      editBtn.addEventListener('click', function () {
+        docManualEdit(wrap, target);
+      });
+    }
     textarea.addEventListener('keydown', function (e) {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') submit();
+    });
+  }
+
+  // Manual edit of the published document. The live iframe DOM carries
+  // synthetic comment marks and pick-mode classes, so it is never serialized:
+  // instead the pristine stored body is fetched and parsed detached, the
+  // target element is located there by its selector, the user rewrites that
+  // element's outerHTML, and the whole re-serialized document is saved via
+  // POST /api/documents/<id>/edit. The server bumps the revision, which every
+  // open page reloads on; expectedRevision makes a concurrent re-publish fail
+  // as stale instead of being overwritten.
+  function docManualEdit(wrap, target) {
+    Promise.all([
+      fetch('/doc/' + encodeURIComponent(DOC.id) + '/content').then(function (r) {
+        if (!r.ok) throw new Error('文書本文を取得できません: ' + r.status);
+        return r.text();
+      }),
+      api('GET', '/api/documents/' + encodeURIComponent(DOC.id)),
+    ]).then(function (results) {
+      const source = results[0];
+      const revision = (results[1].document || {}).revision;
+      const parsed = new DOMParser().parseFromString(source, 'text/html');
+      const el = parsed.querySelector(target.selector);
+      if (!el) {
+        alert('対象要素を保存済みの文書内で特定できないため手動修正できません（文書が更新された可能性があります）。');
+        return;
+      }
+      wrap.innerHTML =
+        '<div class="form-meta">' + esc(target.label || target.tag) +
+        ' のHTMLを手動修正（保存で文書に直接適用）</div>' +
+        '<textarea class="code-edit" spellcheck="false"></textarea>' +
+        '<div class="buttons">' +
+        '<button class="primary save">保存して文書に適用</button>' +
+        '<button class="cancel">キャンセル</button>' +
+        '<span class="edit-hint">Ctrl+Enter で保存 / 空にして保存すると要素を削除</span>' +
+        '</div>';
+      const ta = wrap.querySelector('textarea');
+      ta.value = el.outerHTML;
+      ta.rows = Math.min(30, Math.max(3, el.outerHTML.split('\n').length + 1));
+      ta.focus();
+
+      function save() {
+        const saveBtn = wrap.querySelector('.save');
+        saveBtn.disabled = true;
+        // Re-parse from the pristine source on every attempt: assigning
+        // outerHTML detaches the located element, so reusing one parse would
+        // make a retry after a failure silently drop the latest textarea text.
+        const doc2 = new DOMParser().parseFromString(source, 'text/html');
+        const el2 = doc2.querySelector(target.selector);
+        if (!el2) {
+          alert('対象要素を特定できなくなりました。ページを再読み込みしてください。');
+          saveBtn.disabled = false;
+          return;
+        }
+        if (ta.value.trim() === '') {
+          el2.remove();
+        } else {
+          el2.outerHTML = ta.value;
+        }
+        const doctype = doc2.doctype ? '<!DOCTYPE ' + doc2.doctype.name + '>\n' : '';
+        api('POST', '/api/documents/' + encodeURIComponent(DOC.id) + '/edit', {
+          html: doctype + doc2.documentElement.outerHTML + '\n',
+          expectedRevision: revision,
+          htmlTarget: target,
+          newHtml: ta.value,
+        }).then(function () {
+          closeDocForm();
+          location.reload();
+        }).catch(function (err) {
+          const msg = String((err && err.message) || err);
+          if (msg.indexOf('409') === 0 && msg.indexOf('stale') !== -1) {
+            alert('文書が更新されています。ページを再読み込みします。');
+            location.reload();
+            return;
+          }
+          alert('手動修正の適用に失敗しました: ' + msg);
+          saveBtn.disabled = false;
+        });
+      }
+      wrap.querySelector('.save').addEventListener('click', save);
+      wrap.querySelector('.cancel').addEventListener('click', closeDocForm);
+      ta.addEventListener('keydown', function (e) {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') save();
+      });
+    }).catch(function (err) {
+      alert('手動修正の準備に失敗しました: ' + err);
     });
   }
 
@@ -3312,9 +3505,10 @@
       api('GET', '/api/documents/' + encodeURIComponent(DOC.id)),
     ]).then(function (results) {
       // Only this document's live comments; everything else (diff comments,
-      // other documents) belongs to other pages.
+      // other documents) belongs to other pages. Manual-edit records
+      // (manualEdit) are agent-facing notifications, never shown.
       const cs = (results[0].comments || []).filter(function (c) {
-        return !c.deleted && c.documentId === DOC.id;
+        return !c.deleted && c.documentId === DOC.id && !c.manualEdit;
       });
       const status = results[1];
       const meta = results[2].document || {};

@@ -118,6 +118,11 @@ export interface ReviewComment {
   // hand-editing) but are hidden from the UI, excluded from status counts and
   // never delivered by wait-comments. Omitted/false = live.
   deleted?: boolean;
+  // Auto-recorded notification of a manual edit (POST /api/edit): the user
+  // hand-changed the file from the browser. Hidden from the UI and excluded
+  // from status counts (it is a notification, not review feedback), but still
+  // delivered by wait-comments so the agent learns the file changed on disk.
+  manualEdit?: boolean;
 }
 
 export interface CommentsFile {

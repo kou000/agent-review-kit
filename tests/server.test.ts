@@ -501,3 +501,254 @@ test('PUT /api/viewed に不正な形（配列や非文字列値）を渡すと 
   });
   assert.equal(nonString.status, 400);
 });
+
+/* ---------- 手動修正 (POST /api/edit) ---------- */
+
+function postEdit(payload: Record<string, unknown>): Promise<Response> {
+  return fetch(`${baseUrl}/api/edit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      startLine: 1,
+      endLine: 1,
+      startDiffLine: 1,
+      endDiffLine: 1,
+      ...payload,
+    }),
+  });
+}
+
+test('POST /api/edit は行範囲を書き換え、記録コメントを作り、review.html を再生成する', async () => {
+  const target = path.join(tmp, 'edit-target.txt');
+  fs.writeFileSync(target, 'line1\nline2\nline3\n');
+  git(['add', 'edit-target.txt'], tmp);
+  git(['commit', '-m', 'add edit-target'], tmp);
+  fs.writeFileSync(target, 'line1\nline2 modified\nline3\n');
+
+  const statusBefore = (await (await fetch(`${baseUrl}/api/status`)).json()) as {
+    total: number;
+    unresolved: number;
+  };
+
+  const res = await postEdit({
+    file: 'edit-target.txt',
+    startLine: 2,
+    endLine: 2,
+    expectedText: 'line2 modified',
+    newText: 'line2 hand-fixed\nline2b added',
+  });
+  assert.equal(res.status, 200);
+  const data = (await res.json()) as {
+    status: string;
+    comment: { file: string; side: string; startLine: number; endLine: number; status: string; body: string; author?: string; manualEdit?: boolean };
+  };
+  assert.equal(data.status, 'applied');
+  assert.equal(
+    fs.readFileSync(target, 'utf8'),
+    'line1\nline2 hand-fixed\nline2b added\nline3\n'
+  );
+  // 記録コメント: 修正後の範囲にアンカーされ、user 作として open（wait-comments で配達可能）。
+  assert.equal(data.comment.status, 'open');
+  assert.equal(data.comment.side, 'new');
+  assert.equal(data.comment.startLine, 2);
+  assert.equal(data.comment.endLine, 3);
+  assert.ok(data.comment.body.includes('手動修正'));
+  assert.ok(data.comment.body.includes('返信は不要'));
+  assert.ok(data.comment.body.includes('line2 hand-fixed'));
+  assert.notEqual(data.comment.author, 'agent');
+  // 通知専用の属性: UI 非表示・集計除外の対象マーカー。
+  assert.equal(data.comment.manualEdit, true);
+  // 再生成: review.html が書かれ、state.json に generatedAt が入る。
+  const paths = reviewPaths(tmp);
+  assert.ok(fs.existsSync(paths.html));
+  const status = (await (await fetch(`${baseUrl}/api/status`)).json()) as {
+    generatedAt: string | null;
+    total: number;
+    unresolved: number;
+  };
+  assert.ok(status.generatedAt);
+  // 記録コメントは open だが、total / unresolved のどちらにも数えられない。
+  assert.equal(status.total, statusBefore.total);
+  assert.equal(status.unresolved, statusBefore.unresolved);
+});
+
+test('POST /api/edit は内容不一致（stale）なら 409 でファイルを変更しない', async () => {
+  const target = path.join(tmp, 'edit-target.txt');
+  const before = fs.readFileSync(target, 'utf8');
+  const res = await postEdit({
+    file: 'edit-target.txt',
+    startLine: 1,
+    endLine: 1,
+    expectedText: 'そんな行はない',
+    newText: 'x',
+  });
+  assert.equal(res.status, 409);
+  const err = (await res.json()) as { error: string };
+  assert.ok(err.error.includes('stale'));
+  assert.equal(fs.readFileSync(target, 'utf8'), before);
+});
+
+test('POST /api/edit は範囲がファイル末尾を超えるときも 409（stale）になる', async () => {
+  const res = await postEdit({
+    file: 'edit-target.txt',
+    startLine: 100,
+    endLine: 200,
+    expectedText: 'x',
+    newText: 'y',
+  });
+  assert.equal(res.status, 409);
+});
+
+test('POST /api/edit はプロジェクト外・.agent-review 配下・symlink を拒否する', async () => {
+  const outside = await postEdit({ file: '../outside.txt', expectedText: 'a', newText: 'b' });
+  assert.equal(outside.status, 400);
+
+  const reviewDir = await postEdit({
+    file: '.agent-review/review.html',
+    expectedText: 'a',
+    newText: 'b',
+  });
+  assert.equal(reviewDir.status, 400);
+
+  fs.symlinkSync(path.join(tmp, 'edit-target.txt'), path.join(tmp, 'edit-link.txt'));
+  const link = await postEdit({ file: 'edit-link.txt', expectedText: 'line1', newText: 'x' });
+  assert.equal(link.status, 400);
+});
+
+test('readOnlyMode 中の POST /api/edit は 403 でファイルを変更しない', async () => {
+  const target = path.join(tmp, 'edit-target.txt');
+  const before = fs.readFileSync(target, 'utf8');
+  const set = await fetch(`${baseUrl}/api/settings`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ readOnlyMode: true }),
+  });
+  assert.equal(set.status, 200);
+  try {
+    const res = await postEdit({
+      file: 'edit-target.txt',
+      startLine: 1,
+      endLine: 1,
+      expectedText: 'line1',
+      newText: 'x',
+    });
+    assert.equal(res.status, 403);
+    assert.equal(fs.readFileSync(target, 'utf8'), before);
+  } finally {
+    await fetch(`${baseUrl}/api/settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ readOnlyMode: false }),
+    });
+  }
+});
+
+test('POST /api/edit で空文字を保存すると行が削除される', async () => {
+  const target = path.join(tmp, 'edit-target.txt');
+  // 現在の内容: line1 / line2 hand-fixed / line2b added / line3
+  const res = await postEdit({
+    file: 'edit-target.txt',
+    startLine: 3,
+    endLine: 3,
+    expectedText: 'line2b added',
+    newText: '',
+  });
+  assert.equal(res.status, 200);
+  assert.equal(fs.readFileSync(target, 'utf8'), 'line1\nline2 hand-fixed\nline3\n');
+  const data = (await res.json()) as { comment: { body: string } };
+  assert.ok(data.comment.body.includes('削除'));
+});
+
+/* ---------- 手動修正（HTMLドキュメント: POST /api/documents/:id/edit） ---------- */
+
+function postDocEdit(id: string, payload: Record<string, unknown>): Promise<Response> {
+  return fetch(`${baseUrl}/api/documents/${encodeURIComponent(id)}/edit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+async function docRevision(id: string): Promise<number> {
+  const res = await fetch(`${baseUrl}/api/documents/${encodeURIComponent(id)}`);
+  return ((await res.json()) as { document: { revision: number } }).document.revision;
+}
+
+test('POST /api/documents/:id/edit は本文を差し替え revision を上げ manualEdit コメントを記録する', async () => {
+  const revision = await docRevision(documentId);
+  const statusBefore = (await (await fetch(`${baseUrl}/api/status`)).json()) as {
+    total: number;
+    unresolved: number;
+  };
+
+  const newBody =
+    '<html><head><title>Server Test Doc</title></head><body><h1>Heading edited</h1></body></html>';
+  const res = await postDocEdit(documentId, {
+    html: newBody,
+    expectedRevision: revision,
+    htmlTarget: { kind: 'element', selector: 'h1', tag: 'h1', label: 'h1 「Heading」' },
+    newHtml: '<h1>Heading edited</h1>',
+  });
+  assert.equal(res.status, 200);
+  const data = (await res.json()) as {
+    status: string;
+    revision: number;
+    comment: { documentId?: string | null; manualEdit?: boolean; status: string; body: string };
+  };
+  assert.equal(data.status, 'applied');
+  assert.equal(data.revision, revision + 1);
+  // 保存済み本文が差し替わり、配信もその内容になる。
+  const served = await (await fetch(`${baseUrl}/doc/${documentId}/content`)).text();
+  assert.ok(served.includes('<h1>Heading edited</h1>'));
+  // 記録コメント: 文書に紐づく manualEdit 通知（open で wait-comments 配達対象）。
+  assert.equal(data.comment.documentId, documentId);
+  assert.equal(data.comment.manualEdit, true);
+  assert.equal(data.comment.status, 'open');
+  assert.ok(data.comment.body.includes('手動修正'));
+  assert.ok(data.comment.body.includes('上書き'));
+  assert.ok(data.comment.body.includes('返信は不要'));
+  // 集計には数えられない。
+  const statusAfter = (await (await fetch(`${baseUrl}/api/status`)).json()) as {
+    total: number;
+    unresolved: number;
+  };
+  assert.equal(statusAfter.total, statusBefore.total);
+  assert.equal(statusAfter.unresolved, statusBefore.unresolved);
+});
+
+test('POST /api/documents/:id/edit は revision 不一致なら 409 で本文を変更しない', async () => {
+  const revision = await docRevision(documentId);
+  const before = await (await fetch(`${baseUrl}/doc/${documentId}/content`)).text();
+  const res = await postDocEdit(documentId, {
+    html: '<html><body><p>should not land</p></body></html>',
+    expectedRevision: revision - 1,
+  });
+  assert.equal(res.status, 409);
+  const err = (await res.json()) as { error: string };
+  assert.ok(err.error.includes('stale'));
+  assert.equal(await (await fetch(`${baseUrl}/doc/${documentId}/content`)).text(), before);
+  assert.equal(await docRevision(documentId), revision);
+});
+
+test('POST /api/documents/:id/edit は未知の id なら 404、readOnlyMode 中なら 403 になる', async () => {
+  const unknown = await postDocEdit('no-such-doc', { html: '<p>x</p>', expectedRevision: 1 });
+  assert.equal(unknown.status, 404);
+
+  const set = await fetch(`${baseUrl}/api/settings`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ readOnlyMode: true }),
+  });
+  assert.equal(set.status, 200);
+  try {
+    const revision = await docRevision(documentId);
+    const res = await postDocEdit(documentId, { html: '<p>x</p>', expectedRevision: revision });
+    assert.equal(res.status, 403);
+  } finally {
+    await fetch(`${baseUrl}/api/settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ readOnlyMode: false }),
+    });
+  }
+});
