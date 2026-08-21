@@ -167,7 +167,7 @@ export const DEFAULT_SETTINGS: ReviewSettings = {
   snapshotsEnabled: true,
   readOnlyMode: false,
   viewedAutoReset: true,
-  deliveryNoteEnabled: true,
+  deliveryNoteEnabled: false,
   deliveryNoteText:
     '修正を伴うコメントは、メインセッションで直接コードを編集せず、Agent ツールでサブエージェントに委譲すること（1件だけでも委譲する）。' +
     '複数件ある場合は1つのメッセージで並行起動し、完了を待たずに次のコメントの委譲へ進む。' +

@@ -17,6 +17,11 @@ let server: http.Server;
 let baseUrl: string;
 let documentId: string;
 
+// The developer's real ~/.agent-review/.env must not leak into the tests
+// (reviewPaths resolves envFile from the home directory); point HOME at an
+// empty temp dir so every test starts from the built-in defaults.
+process.env.HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'ark-home-'));
+
 function git(args: string[], cwd: string): void {
   execFileSync('git', args, { cwd, stdio: 'ignore' });
 }

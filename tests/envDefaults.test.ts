@@ -34,7 +34,7 @@ test('.env の ARK_* がデフォルトを上書きする（settings.json 無し
         '# per-user defaults',
         'ARK_SNAPSHOTS_ENABLED=false',
         'export ARK_READ_ONLY_MODE=true',
-        'ARK_DELIVERY_NOTE_ENABLED=0 # trailing comment',
+        'ARK_DELIVERY_NOTE_ENABLED=1 # trailing comment',
         'ARK_DELIVERY_NOTE_TEXT="line1\\nline2"',
         '',
       ].join('\n')
@@ -43,7 +43,7 @@ test('.env の ARK_* がデフォルトを上書きする（settings.json 無し
     assert.equal(settings.snapshotsEnabled, false);
     assert.equal(settings.readOnlyMode, true);
     assert.equal(settings.viewedAutoReset, true); // 未指定キーはコード内デフォルト
-    assert.equal(settings.deliveryNoteEnabled, false);
+    assert.equal(settings.deliveryNoteEnabled, true);
     assert.equal(settings.deliveryNoteText, 'line1\nline2');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
