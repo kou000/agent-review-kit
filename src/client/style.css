@@ -25,7 +25,7 @@
      margin-right always matches the total right-side gutter. */
   --pin-total-width: 0px;
   /* Comment-panel width on the /doc/<id> page (draggable, persisted). */
-  --doc-panel-width: 400px;
+  --doc-panel-width: 800px;
 }
 
 /* While dragging a resizer, suppress text selection everywhere and force the
