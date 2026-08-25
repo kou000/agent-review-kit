@@ -67,7 +67,7 @@
   function fmtDate(iso) {
     if (!iso) return '';
     const d = new Date(iso);
-    if (isNaN(d)) return iso;
+    if (isNaN(d as any)) return iso;
     const p = (n) => String(n).padStart(2, '0');
     return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) +
       ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
@@ -99,7 +99,7 @@
   // argument on each settings load so forms already open follow the toggle. The
   // server applies the same rule on POST, which covers a form that was
   // rendered before the setting flipped.
-  function syncIntentFields(root) {
+  function syncIntentFields(root?: any) {
     (root || document).querySelectorAll('.intent-field').forEach(function (field) {
       const fix = field.querySelector('input[value="fix"]');
       const question = field.querySelector('input[value="question"]');
@@ -255,7 +255,7 @@
         setCollapsed(box, v);
       }
     });
-    document.querySelectorAll('.viewed-btn[data-file]').forEach(function (btn) {
+    document.querySelectorAll('.viewed-btn[data-file]').forEach(function (btn: any) {
       updateViewedButton(btn, isViewed(btn.dataset.file));
     });
     renderSidebarTree();
@@ -805,13 +805,13 @@
   function updatePinButtons() {
     const pinned = {};
     pins.forEach(function (p) { pinned[String(p.index)] = true; });
-    document.querySelectorAll('.pin-btn').forEach(function (b) {
+    document.querySelectorAll('.pin-btn').forEach(function (b: any) {
       const active = !!pinned[b.dataset.fileIndex];
       b.classList.toggle('active', active);
       b.setAttribute('aria-pressed', active ? 'true' : 'false');
     });
     // Repo-file tree rows: mark the ones whose panel is currently open.
-    document.querySelectorAll('.repo-tree .tree-file').forEach(function (r) {
+    document.querySelectorAll('.repo-tree .tree-file').forEach(function (r: any) {
       r.classList.toggle('active', !!pinned['repo:' + r.dataset.path]);
     });
   }
@@ -830,7 +830,7 @@
       '</div>' +
       '<div class="pin-panel-body"></div>';
     panel.querySelector('.pin-panel-file').textContent = file.path;
-    panel.querySelector('.pin-panel-file').title = file.path;
+    (panel.querySelector('.pin-panel-file') as any).title = file.path;
     const panelHeader = panel.querySelector('.pin-panel-header');
     panelHeader.insertBefore(
       copyPathButton(file.path),
@@ -961,10 +961,10 @@
       '<button class="pin-panel-close" type="button" title="閉じる">✕</button>' +
       '</div>' +
       '<div class="pin-panel-body"></div>';
-    const nameEl = panel.querySelector('.pin-panel-file');
+    const nameEl: any = panel.querySelector('.pin-panel-file');
     nameEl.textContent = f.path;
     nameEl.title = f.path;
-    panel.querySelector('.pin-panel-open').href = '/file/' + encodeURIComponent(f.path);
+    (panel.querySelector('.pin-panel-open') as any).href = '/file/' + encodeURIComponent(f.path);
     panel.querySelector('.pin-panel-header').insertBefore(
       copyPathButton(f.path),
       panel.querySelector('.pin-panel-open')
@@ -1075,7 +1075,7 @@
 
     const form = sec.querySelector('.overall-form');
     const textarea = sec.querySelector('textarea');
-    const btn = sec.querySelector('.overall-submit');
+    const btn: any = sec.querySelector('.overall-submit');
     syncIntentFields(form);
 
     function submit() {
@@ -1448,7 +1448,7 @@
       const entry = counts[top.file] || (counts[top.file] = { check: 0, open: 0 });
       entry[state] += 1;
     });
-    document.querySelectorAll('.tree-count[data-file]').forEach(function (el) {
+    document.querySelectorAll('.tree-count[data-file]').forEach(function (el: any) {
       const entry = counts[el.dataset.file];
       const n = entry ? entry.check + entry.open : 0;
       el.textContent = n ? String(n) : '';
@@ -1486,7 +1486,7 @@
     }
     // A collapsed thread hides its cards; expand it before scrolling so the
     // jump from the sidebar always lands on something visible.
-    const block = card.closest('.comment-thread-block');
+    const block: any = card.closest('.comment-thread-block');
     if (block && block.classList.contains('collapsed')) {
       block.classList.remove('collapsed');
       if (block.dataset.topId) setThreadCollapsed(block.dataset.topId, false);
@@ -1729,7 +1729,7 @@
     highlightSelection();
   }
 
-  document.addEventListener('mousedown', function (e) {
+  document.addEventListener('mousedown', function (e: any) {
     const td = e.target.closest && e.target.closest('td.num[data-file]');
     if (!td) return;
     e.preventDefault();
@@ -1737,7 +1737,7 @@
     dragging = true;
   });
 
-  document.addEventListener('mouseover', function (e) {
+  document.addEventListener('mouseover', function (e: any) {
     if (!dragging || !selection) return;
     const td = e.target.closest && e.target.closest('td.num[data-file]');
     if (!td) return;
@@ -1790,7 +1790,7 @@
   }
 
   function findRowFor(file, side, line) {
-    const tds = document.querySelectorAll(
+    const tds: any = document.querySelectorAll(
       'td.num[data-file][data-side="' + side + '"][data-line="' + line + '"]'
     );
     for (let i = 0; i < tds.length; i++) {
@@ -1858,7 +1858,7 @@
     function submit() {
       const body = textarea.value.trim();
       if (!body) return;
-      wrap.querySelector('.submit').disabled = true;
+      (wrap.querySelector('.submit') as any).disabled = true;
       api('POST', '/api/comments', {
         file: r.file,
         side: r.side,
@@ -1873,7 +1873,7 @@
         refresh();
       }).catch(function (err) {
         alert('コメントの保存に失敗しました: ' + err);
-        wrap.querySelector('.submit').disabled = false;
+        (wrap.querySelector('.submit') as any).disabled = false;
       });
     }
 
@@ -1897,7 +1897,7 @@
       ta.focus();
 
       function save() {
-        const saveBtn = wrap.querySelector('.save');
+        const saveBtn: any = wrap.querySelector('.save');
         saveBtn.disabled = true;
         api('POST', '/api/edit', {
           file: r.file,
@@ -1943,7 +1943,7 @@
     return (c.author || 'user') === 'agent';
   }
 
-  function commentCard(c, isReply) {
+  function commentCard(c: any, isReply?: boolean) {
     const div = document.createElement('div');
     div.className = 'comment-card' + (isReply ? ' reply-card' : '') +
       (isAgentComment(c) ? ' agent-comment' : '');
@@ -2336,7 +2336,7 @@
       function submit() {
         const body = textarea.value.trim();
         if (!body) return;
-        form.querySelector('.reply-submit').disabled = true;
+        (form.querySelector('.reply-submit') as any).disabled = true;
         api('POST', '/api/comments', {
           parentId: top.id,
           body: body,
@@ -2349,7 +2349,7 @@
           refresh();
         }).catch(function (err) {
           alert('返信の保存に失敗しました: ' + err);
-          form.querySelector('.reply-submit').disabled = false;
+          (form.querySelector('.reply-submit') as any).disabled = false;
         });
       }
       form.querySelector('.reply-submit').addEventListener('click', submit);
@@ -2462,7 +2462,7 @@
 
   /* ---------- api ---------- */
 
-  function api(method, url, body) {
+  function api(method: string, url: string, body?: any) {
     return fetch(url, {
       method: method,
       headers: body ? { 'Content-Type': 'application/json' } : {},
@@ -2485,7 +2485,7 @@
   function isEditingDraft() {
     const areas = document.querySelectorAll('.comment-form textarea, .reply-form textarea');
     for (let i = 0; i < areas.length; i++) {
-      const ta = areas[i];
+      const ta: any = areas[i];
       if (document.activeElement === ta) return true;
       if (ta.value && ta.value.trim() !== '') return true;
     }
@@ -2602,7 +2602,7 @@
     settingsPanel = panel;
 
     api('GET', '/api/settings').then(function (data) {
-      panel.querySelectorAll('input[data-key]').forEach(function (input) {
+      panel.querySelectorAll('input[data-key]').forEach(function (input: any) {
         input.checked = !!(data.settings && data.settings[input.dataset.key]);
         input.addEventListener('change', function () {
           const body = {};
@@ -2615,7 +2615,7 @@
           });
         });
       });
-      panel.querySelectorAll('textarea[data-text-key]').forEach(function (area) {
+      panel.querySelectorAll('textarea[data-text-key]').forEach(function (area: any) {
         const saved = (data.settings && data.settings[area.dataset.textKey]) || '';
         area.value = saved;
         // Saved on change (= blur after an edit), not per keystroke.
@@ -3195,7 +3195,7 @@
 
   /* ---------- document comment rendering ---------- */
 
-  function docSection(title, hint) {
+  function docSection(title: string, hint?: string) {
     const sec = document.createElement('section');
     sec.className = 'doc-thread-section';
     let html = '<h2>' + esc(title) + '</h2>';
@@ -3343,7 +3343,7 @@
     function submit() {
       const body = textarea.value.trim();
       if (!body) return;
-      wrap.querySelector('.submit').disabled = true;
+      (wrap.querySelector('.submit') as any).disabled = true;
       api('POST', '/api/comments', {
         documentId: DOC.id,
         htmlTarget: target,
@@ -3354,7 +3354,7 @@
         refresh();
       }).catch(function (err) {
         alert('コメントの保存に失敗しました: ' + err);
-        wrap.querySelector('.submit').disabled = false;
+        (wrap.querySelector('.submit') as any).disabled = false;
       });
     }
     wrap.querySelector('.submit').addEventListener('click', submit);
@@ -3513,7 +3513,7 @@
 
   function buildElementTarget(el) {
     const text = String(el.textContent || '').replace(/\s+/g, ' ').trim();
-    const target = {
+    const target: any = {
       kind: 'element',
       selector: docCssPath(el),
       tag: el.nodeName.toLowerCase(),

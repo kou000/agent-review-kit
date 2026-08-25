@@ -119,12 +119,12 @@ agent-review-kit generate --preserve-finished      # レビュー中の更新（
 
 - `--base` を省略すると**前回 generate の base を引き継ぐ**（初回は working tree vs HEAD）。
 - 未追跡（untracked）ファイルは追加ファイルの差分として自動で含まれる（ignore 済みファイルは除外。バイナリは `Binary files differ` 表示）。
-- `.agent-review/review.html`（+ `app.js` / `style.css`）を生成する。
+- `.agent-review/review.html`（+ `client/*.js` / `style.css`）を生成する。
 - レビューデータは**現在の git ブランチのディレクトリ**に置かれる:
 
 ```
 .agent-review/
-  review.html, app.js, style.css      # 今表示中のレビュー（リポジトリ共通）
+  review.html, client/, style.css     # 今表示中のレビュー（リポジトリ共通）
   server.json                         # サーバー情報（リポジトリで1つ）
   .env                                # 設定のデフォルト（任意・手書き。後述「設定のデフォルト」）
   branches/<ブランチ名>/
@@ -441,7 +441,7 @@ agent-review-kit status
 npm run dev -- generate        # tsx で src/cli.ts を直接実行
 npm run typecheck              # 型チェック
 npm run lint                   # ESLint
-npm run build                  # dist/ にビルド（client 資産のコピーを含む）
+npm run build                  # dist/ にビルド（server + client。style.css のコピーを含む）
 ```
 
 ## 制約・注意
@@ -449,4 +449,4 @@ npm run build                  # dist/ にビルド（client 資産のコピー�
 - サーバーは localhost 向けのローカル開発ツールであり、認証はない（127.0.0.1 に bind）。外部公開しないこと。
 - 差分を再生成して行がずれたコメントは、画面下部の「現在の差分に位置づけできないコメント」に退避表示される。
 - レビューデータはブランチ単位。ブランチを切り替えたら `generate` を再実行してレビューHTMLも切り替える。
-- ツール本体を更新した後は、進行中レビューなら `generate --preserve-finished` を再実行する（`.agent-review/` の `app.js` / `style.css` は generate 時にコピーされるため）。
+- ツール本体を更新した後は、進行中レビューなら `generate --preserve-finished` を再実行する（`.agent-review/` の `client/*.js` / `style.css` は generate 時にコピーされるため）。

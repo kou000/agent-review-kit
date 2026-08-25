@@ -11,12 +11,13 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json && mkdir -p dist/client && cp src/client/* dist/client/",
+    "build": "npm run build:server && npm run build:client",
+    "build:server": "tsc -p tsconfig.json",
+    "build:client": "tsc -p tsconfig.client.json && cp src/client/style.css dist/client/",
     "dev": "tsx src/cli.ts",
-    "test": "npm run build && node --test test/*.test.js",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",
     "lint": "eslint src",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "npm run build:client && tsx --test tests/*.test.ts"
   },
   "engines": {
     "node": ">=18"
