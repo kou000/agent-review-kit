@@ -2,6 +2,7 @@ import { api } from '../api.js';
 import { copyPathButton } from '../dom.js';
 import { attachTreeSideResize, restoreTreeSideWidth } from '../resize.js';
 import { app, diffMeta } from '../state.js';
+import { appendEditorLink } from './editorLink.js';
 import { buildFileTable, renderRepoTree } from './repoView.js';
 
 /* ---------- standalone repository tree page (/files) ---------- */
@@ -45,8 +46,13 @@ export function renderTreePage() {
   const side = document.createElement('aside');
   side.className = 'sidebar tree-page-side';
   const heading = document.createElement('div');
-  heading.className = 'sidebar-title';
-  heading.textContent = 'リポジトリのファイル';
+  heading.className = 'sidebar-title tree-page-title';
+  // The count is filled in once the file list loads, so the label lives in its
+  // own span — rewriting it must not drop the 「<editor> で開く」 link.
+  const headingLabel = document.createElement('span');
+  headingLabel.textContent = 'リポジトリのファイル';
+  heading.appendChild(headingLabel);
+  appendEditorLink(heading);
   side.appendChild(heading);
 
   // 検索ボックス（左ペイン上部）: git grep をサーバ側で実行し、結果でツリー
@@ -313,7 +319,7 @@ export function renderTreePage() {
     const files = data.files || [];
     treeWrap.textContent = '';
     renderRepoTree(files, treeWrap, openInViewer);
-    heading.textContent = 'リポジトリのファイル (' + files.length + ')';
+    headingLabel.textContent = 'リポジトリのファイル (' + files.length + ')';
     if (!files.length) treeWrap.textContent = '追跡中のファイルがありません';
   }).catch(function (err) {
     treeWrap.textContent = '取得に失敗しました: ' + errorText(err);

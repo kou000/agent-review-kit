@@ -1057,3 +1057,31 @@ test('unresolved は wontfix / dismissed を未解決に数えない', async () 
   // 集計式そのもの: unresolved = open + seen。
   assert.equal(dismissed.unresolved, dismissed.counts.open + dismissed.counts.seen);
 });
+
+test('editorUriTemplate は status/settings に載るが PUT /api/settings では変更されない', async () => {
+  const getSettings = async (): Promise<Record<string, unknown>> =>
+    ((await (await fetch(`${baseUrl}/api/settings`)).json()) as {
+      settings: Record<string, unknown>;
+    }).settings;
+
+  // HOME は空の一時ディレクトリなので .env は無く、組み込みデフォルトが出る。
+  const status = (await (await fetch(`${baseUrl}/api/status`)).json()) as {
+    projectDir: string;
+    settings: Record<string, unknown>;
+  };
+  assert.equal(status.settings.editorUriTemplate, 'vscode://file{path}');
+  assert.equal(typeof status.projectDir, 'string');
+  assert.equal((await getSettings()).editorUriTemplate, 'vscode://file{path}');
+
+  // 環境ファイル専用のマシンごとの設定なので、ブラウザからは書き換えられない
+  // （href に入る値なので許可キーに入れていない）。
+  const res = await fetch(`${baseUrl}/api/settings`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ editorUriTemplate: 'javascript:alert(1)' }),
+  });
+  assert.equal(res.status, 200);
+  const after = ((await res.json()) as { settings: Record<string, unknown> }).settings;
+  assert.equal(after.editorUriTemplate, 'vscode://file{path}');
+  assert.equal((await getSettings()).editorUriTemplate, 'vscode://file{path}');
+});

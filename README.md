@@ -303,9 +303,12 @@ ARK_READ_ONLY_MODE=false           # 読み取り専用モード
 ARK_VIEWED_AUTO_RESET=true         # 差分変更時に Viewed を自動解除
 ARK_DELIVERY_NOTE_ENABLED=true     # wait-comments 受信出力に処理指示の note を同乗（組み込み既定は false）
 ARK_DELIVERY_NOTE_TEXT="修正時はテストも更新すること"  # note の本文（既定は委譲指示。空文字なら note なし）
+ARK_EDITOR_URI_TEMPLATE="vscode://vscode-remote/wsl+Ubuntu{path}"  # 「VS Code で開く」ボタンのURI（組み込み既定は vscode://file{path}）
 ```
 
 優先順位は **settings.json の明示値 > `.env` > 組み込みデフォルト**。`.env` はあくまで「初期値」で、ブラウザの歯車メニューで一度設定を変更すると全キーが `settings.json` に確定するため、以降そのブランチには `.env` の変更は反映されない（新しいブランチのレビューには反映される）。bool は `true/false/1/0` のみ有効で、それ以外の値は無視して組み込みデフォルトに落ちる。
+
+`ARK_EDITOR_URI_TEMPLATE` は「リポジトリのファイル」見出しに並ぶ**「VS Code で開く」ボタン**（レビューページのサイドバーと `/files` ページ。ファイルごとではなくリポジトリ単位で1つ）が開く URI のテンプレートで、`{path}` がプロジェクトのルートディレクトリの絶対パスに置き換わる。既定は `vscode://file{path}`。WSL 上のリポジトリを Windows 側の VS Code で開くなら `vscode://vscode-remote/wsl+Ubuntu{path}`、Cursor なら `cursor://file{path}` のように差し替える。マシンごとのパス変換という位置づけなので、このキーだけは**ブラウザの設定パネル（歯車メニュー）からは変更できない**（`PUT /api/settings` は無視する）`.env` 専用の設定（`GET /api/status` / `GET /api/settings` のレスポンスには載る）。値がそのまま href に入るため、ブラウザ側で許可するのは `vscode:` / `vscode-insiders:` / `vscodium:` / `cursor:` / `windsurf:` のみで、それ以外のスキームならボタン自体を出さない。
 
 `.env` はホームディレクトリ配下の人ごとのファイルなので、リポジトリには置かない（コミットの心配も不要）。
 

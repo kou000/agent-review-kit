@@ -168,6 +168,13 @@ export interface ReviewSettings {
   // The `note` text itself, freely editable. Defaults to the delegate-to-
   // subagents instruction below; empty means no note even while enabled.
   deliveryNoteText: string;
+  // URI template for the 「VS Code で開く」 buttons (review sidebar / /files
+  // page): `{path}` is replaced with the project directory. Machine-local path
+  // translation, so it is env-file only — deliberately NOT in the PUT
+  // /api/settings allow-list (the browser must not be able to rewrite a URI it
+  // then puts in an href). The client only renders the button for an
+  // editor-scheme URI (see client/diff/editorLink.ts).
+  editorUriTemplate: string;
 }
 
 export const DEFAULT_SETTINGS: ReviewSettings = {
@@ -179,6 +186,10 @@ export const DEFAULT_SETTINGS: ReviewSettings = {
     '修正を伴うコメントは、メインセッションで直接コードを編集せず、Agent ツールでサブエージェントに委譲すること（1件だけでも委譲する）。' +
     '複数件ある場合は1つのメッセージで並行起動し、完了を待たずに次のコメントの委譲へ進む。' +
     'メインセッションは委譲・回答・対応記録（resolve-comment）のオーケストレーションに徹する。',
+  // WSL のリポジトリを Windows 側の VS Code で開くなら
+  // 'vscode://vscode-remote/wsl+Ubuntu{path}'、Cursor なら 'cursor://file{path}'
+  // のように ~/.agent-review/.env の ARK_EDITOR_URI_TEMPLATE で差し替える。
+  editorUriTemplate: 'vscode://file{path}',
 };
 
 // One captured fix: a git-format patch stored under the current branch's
