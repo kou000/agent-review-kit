@@ -1,5 +1,5 @@
 import { state } from './state.js';
-import { updatePinLayout } from './app.js';
+import { updatePinLayout } from './diff/pins.js';
 
 /* ---------- draggable panel widths ---------- */
 
