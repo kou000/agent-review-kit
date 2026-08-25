@@ -39,7 +39,7 @@ export function renderHtml(data: DiffData): string {
   </div>
 </header>
 <main id="app"></main>
-<script src="./app.js"></script>
+<script type="module" src="./client/app.js"></script>
 </body>
 </html>
 `;
@@ -73,7 +73,7 @@ export function renderCommitHtml(data: DiffData, meta: CommitMeta): string {
   </div>
 </header>
 <main id="app"></main>
-<script src="/app.js"></script>
+<script type="module" src="/client/app.js"></script>
 </body>
 </html>
 `;
@@ -113,7 +113,7 @@ export function renderSnapshotHtml(data: DiffData, info: SnapshotPageInfo): stri
   </div>
 </header>
 <main id="app"></main>
-<script src="/app.js"></script>
+<script type="module" src="/client/app.js"></script>
 </body>
 </html>
 `;
@@ -154,7 +154,7 @@ export function renderFileHtml(info: RepoFilePage): string {
   </div>
 </header>
 <main id="app"></main>
-<script src="/app.js"></script>
+<script type="module" src="/client/app.js"></script>
 </body>
 </html>
 `;
@@ -186,14 +186,32 @@ export function renderDocumentHtml(meta: HtmlDocumentMeta): string {
   </div>
 </header>
 <main id="app"></main>
-<script src="/app.js"></script>
+<script type="module" src="/client/app.js"></script>
 </body>
 </html>
 `;
 }
 
+// Recursively copy every compiled client module (.js) under srcDir into
+// destDir, preserving the directory layout (the entry module imports its
+// siblings by relative path).
+function copyClientJs(srcDir: string, destDir: string): void {
+  fs.mkdirSync(destDir, { recursive: true });
+  for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
+    const from = path.join(srcDir, entry.name);
+    const to = path.join(destDir, entry.name);
+    if (entry.isDirectory()) copyClientJs(from, to);
+    else if (entry.isFile() && entry.name.endsWith('.js')) fs.copyFileSync(from, to);
+  }
+}
+
 export function writeAssets(paths: ReviewPaths): void {
   const assetDir = clientAssetDir();
-  fs.copyFileSync(path.join(assetDir, 'app.js'), paths.appJs);
+  if (!fs.existsSync(path.join(assetDir, 'app.js'))) {
+    throw new Error(
+      `client assets not found in ${assetDir}: run \`npm run build:client\` first`
+    );
+  }
+  copyClientJs(assetDir, paths.clientDir);
   fs.copyFileSync(path.join(assetDir, 'style.css'), paths.styleCss);
 }

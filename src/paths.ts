@@ -12,7 +12,9 @@ export interface ReviewPaths {
   // Global (~/.agent-review/.env), not per-repo: it holds the person's
   // preferred defaults, which every review in every repository starts from.
   envFile: string;
-  appJs: string;
+  // Compiled client ES modules (app.js + the modules it imports), copied here
+  // by writeAssets and served under /client/*.
+  clientDir: string;
   styleCss: string;
   // Review data is scoped per git branch (branches/<slug>/...), so comments,
   // snapshots and settings from one review never leak into another branch's
@@ -97,7 +99,7 @@ export function reviewPaths(cwd: string = process.cwd()): ReviewPaths {
     html: path.join(dir, 'review.html'),
     serverJson: path.join(dir, 'server.json'),
     envFile: path.join(os.homedir(), '.agent-review', '.env'),
-    appJs: path.join(dir, 'app.js'),
+    clientDir: path.join(dir, 'client'),
     styleCss: path.join(dir, 'style.css'),
     branch,
     branchDir,
@@ -118,5 +120,10 @@ export function ensureDir(dir: string): void {
 }
 
 export function clientAssetDir(): string {
-  return path.join(__dirname, 'client');
+  // Compiled layout: dist/paths.js sits next to dist/client/. Under tsx the
+  // sources in src/client are TypeScript (nothing servable), so fall back to
+  // the built assets — `npm run build:client` must have run first.
+  const sibling = path.join(__dirname, 'client');
+  if (fs.existsSync(path.join(sibling, 'app.js'))) return sibling;
+  return path.join(__dirname, '..', 'dist', 'client');
 }

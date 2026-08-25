@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "outDir": "dist/client",
+    "rootDir": "src/client",
+    // The client was ported mechanically from plain JS; strict mode would
+    // force annotation churn without changing emitted behavior.
+    "strict": false,
+    "types": [],
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": ["src/client/**/*.ts"]
+}
