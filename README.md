@@ -228,6 +228,7 @@ agent-review-kit resolve-comment comment_xxx --status fixed --message "修正後
 ```
 
 status: `open` / `seen` / `fixed` / `answered` / `wontfix` / `resolved` / `dismissed`（AI指摘の見送り）。
+解決済みとして扱われるのは `resolved` だけで、`wontfix` / `dismissed` は「対応しない判断の記録」なので**解決済みにはならず、画面では「要確認」として残る**（ただしエージェント側の作業待ちではないので `unresolved` には含まれない）。
 `--message` は `agentResponse` としてコメントに保存され、画面にインライン表示される。
 `--snapshot <id>` はスナップショット（後述）の差分ページ `/snapshot/<id>` へのリンク、
 `--commit <sha>` は `/commit/<sha>` へのリンクを返信に添える。
@@ -263,7 +264,7 @@ agent-review-kit add-comment --body "レビュー全体への所感"   # --file 
 AI（agent）名義のコメントとして投稿され、画面では紫の「AI」バッジ付きで表示される。
 投稿した指摘は `wait-comments` に配達されない。ユーザーが返信（または指摘カードの
 「🔧 修正を依頼」ボタン）すると、その返信が通常のコメントとして届く。未返信の指摘は
-「レビュー終了」時にサーバーが一括で `dismissed` にする。
+「レビュー終了」時にサーバーが一括で `dismissed` にする（終了時の記録であり解決ではないので、画面では「要確認」として残る）。
 
 ### 7. 状態確認
 
@@ -285,7 +286,11 @@ agent-review-kit status
 }
 ```
 
-`unresolved` は `open + seen` の件数（論理削除済みは全集計から除外）。`finished` はレビュー終了ボタンが押された時刻（`generate` でリセット）。
+`unresolved` は `open + seen` の件数（論理削除済みは全集計から除外）。エージェント側の作業待ちを表す。
+`wontfix`（対応しない判断）と `dismissed`（AI指摘の見送り）は解決の記録ではないので**解決済みにはならず、画面では「要確認」として残る**が、
+待っているのはユーザーの確認でありエージェントの作業ではないため `unresolved` には数えない（解決済みは `resolved` だけ）。
+`wait-comments` の配達対象も `open`（`--resume` 時は `seen`）のみで、`wontfix` / `dismissed` は配達されない。
+`finished` はレビュー終了ボタンが押された時刻（`generate` でリセット）。
 
 ### 8. 設定のデフォルト（.env）
 

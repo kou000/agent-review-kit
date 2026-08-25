@@ -157,7 +157,7 @@ Codex では `serve` と `wait-comments` をそれぞれ長時間実行できる
    agent-review-kit resolve-comment <id> --status answered --message "判断できない理由と選択肢"
    ```
 
-   対応しない判断をユーザーと合意済みの場合は `--status wontfix` を使う。
+   対応しない判断をユーザーと合意済みの場合は `--status wontfix` を使う（`wontfix` は判断の記録なので解決済みにはならず、画面では「要確認」として残る。ただしエージェント側の作業待ちではないので `unresolved` からは外れる）。
 
 9. コードを修正し、まだ `finishing = false` の場合は、レビューHTMLを再生成する（コメントは保持される）:
 
@@ -173,7 +173,7 @@ Codex では `serve` と `wait-comments` をそれぞれ長時間実行できる
     agent-review-kit status
     ```
 
-    `unresolved`（open + seen）が未解決コメント数。
+    `unresolved`（open + seen）が未解決コメント数＝エージェント側の作業待ち。`wontfix` / `dismissed` は解決済みには数えないが（解決済みは `resolved` だけ）、待っているのはユーザーの確認なので画面上は「要確認」として残るだけで `unresolved` には含まれない。
 
 11. 未解決コメントが残っている、またはユーザーのレビューが続いている間は、すでに保持している `activeWaitSessionId` の結果を回収する。値がない場合に限り、手順4の通常待機（`--resume` なし）を1本起動する。`received` を回収したら処理キューへ追加して再び1本だけ待機を起動する。`finished` を回収したら `finishing = true` とし、待機を再起動せず処理キューを drain する。
 
@@ -314,5 +314,6 @@ HTMLレビューでも、修正はサブエージェントに委譲し、メイ�
 - レビュー対象の diff を変えたい場合（例: コミット後に base を変える）は `generate --base <ref> --preserve-finished` を再実行する。
 - ユーザーはコメントを論理削除できる（削除済みは wait-comments に配達されず、未解決数にも入らない）。対応中だったコメントが消えていたら、対応を中止してよい。
 - `unresolved`（open + seen）にはユーザーが未対応の **AI 指摘も含まれる**。AI レビューモードでは「unresolved が 0 になるまで」を終了条件にせず、`finished` シグナルまたはユーザーの完了宣言で終了する。
+- `wontfix` / `dismissed` は解決済みにはならず画面上は「要確認」として残るが、`unresolved` には含まれない（待っているのはユーザーの確認でエージェントの作業ではない）。`wait-comments` にも再配達されないので、これらを待ち続けても届かない。
 - サイドバー下部にレビュー対象（base..HEAD）のコミット一覧があり、ユーザーはコミット単体の差分ページを開ける。エージェント側の操作は不要。
 - **agent-review-kit 本体を更新した後は、進行中レビューなら `generate --preserve-finished` を再実行する**（`.agent-review/` の client/*.js / style.css は generate 時にコピーされるため、古いままだと新 UI・新 API が動かない）。

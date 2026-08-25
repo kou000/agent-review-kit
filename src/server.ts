@@ -117,6 +117,9 @@ export function buildStatus(paths: ReviewPaths): Record<string, unknown> {
     projectDir: path.dirname(paths.dir),
     branch: paths.branch,
     total: comments.length,
+    // 未解決 = open + seen。unresolved はエージェント側の作業待ちを表す。
+    // wontfix / dismissed は解決済みではないが、待っているのはユーザーの確認
+    // （画面では「要確認」）でありエージェントの作業ではないので、ここには含めない。
     unresolved: counts.open + counts.seen,
     counts,
     base: state?.base ?? null,
