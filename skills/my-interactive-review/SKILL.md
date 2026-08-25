@@ -315,4 +315,4 @@ HTMLレビューでも、修正はサブエージェントに委譲し、メイ�
 - ユーザーはコメントを論理削除できる（削除済みは wait-comments に配達されず、未解決数にも入らない）。対応中だったコメントが消えていたら、対応を中止してよい。
 - `unresolved`（open + seen）にはユーザーが未対応の **AI 指摘も含まれる**。AI レビューモードでは「unresolved が 0 になるまで」を終了条件にせず、`finished` シグナルまたはユーザーの完了宣言で終了する。
 - サイドバー下部にレビュー対象（base..HEAD）のコミット一覧があり、ユーザーはコミット単体の差分ページを開ける。エージェント側の操作は不要。
-- **agent-review-kit 本体を更新した後は、進行中レビューなら `generate --preserve-finished` を再実行する**（`.agent-review/` の app.js / style.css は generate 時にコピーされるため、古いままだと新 UI・新 API が動かない）。
+- **agent-review-kit 本体を更新した後は、進行中レビューなら `generate --preserve-finished` を再実行する**（`.agent-review/` の client/*.js / style.css は generate 時にコピーされるため、古いままだと新 UI・新 API が動かない）。
