@@ -5,9 +5,12 @@ import { generate } from './commands/generate';
 import {
   embedNewSideFromTree,
   getCommitMeta,
+  isGitRepo,
+  MAX_GREP_QUERY_CHARS,
   parseUnifiedDiff,
   runGitCommitDiff,
   runGitCommitLog,
+  runGitGrep,
   runGitLsFiles,
 } from './gitDiff';
 import { bakeDiffHighlight, highlightFile } from './highlight';
@@ -17,6 +20,7 @@ import {
   renderCommitHtml,
   renderDocumentHtml,
   renderFileHtml,
+  renderRepoTreeHtml,
   renderSnapshotHtml,
   RepoFilePage,
 } from './render';
@@ -420,6 +424,19 @@ async function handle(
     return;
   }
 
+  // Standalone two-pane page for browsing every tracked repository file,
+  // opened from the sidebar's「リポジトリのファイル」heading. The file list
+  // is fetched client-side (/api/repo-files) and the page never auto-reloads,
+  // so tree state survives the agent regenerating the diff.
+  if (method === 'GET' && p === '/files') {
+    res.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+    });
+    res.end(renderRepoTreeHtml());
+    return;
+  }
+
   // Standalone read-only page for one tracked repository file, opened from a
   // repo-file pin panel's「新しいタブで開く」. Same guard as /api/file: only
   // git-tracked regular files are served.
@@ -713,6 +730,46 @@ async function handle(
       return;
     }
     json(res, 200, { file: info });
+    return;
+  }
+
+  // Full-text search over the tracked files, for the /files page's search box.
+  // `git grep` is the whole implementation: tracked files only (the same
+  // safety boundary as /api/file) and binaries excluded. Literal search by
+  // default; regex=1 / case=1 switch the two flags.
+  if (method === 'GET' && p === '/api/grep') {
+    const q = url.searchParams.get('q') ?? '';
+    if (!q) {
+      json(res, 400, { error: 'q is required' });
+      return;
+    }
+    if (q.length > MAX_GREP_QUERY_CHARS) {
+      json(res, 400, { error: `q is too long (max ${MAX_GREP_QUERY_CHARS} chars)` });
+      return;
+    }
+    const projectDir = path.dirname(paths.dir);
+    try {
+      json(
+        res,
+        200,
+        runGitGrep(
+          q,
+          {
+            regex: url.searchParams.get('regex') === '1',
+            caseSensitive: url.searchParams.get('case') === '1',
+          },
+          projectDir
+        )
+      );
+    } catch (e) {
+      // git リポジトリでなければ /api/repo-files と同じく空結果。リポジトリな
+      // のに失敗したのは検索式の問題（不正な正規表現など）なので 400。
+      if (!isGitRepo(projectDir)) {
+        json(res, 200, { results: [], truncated: false });
+        return;
+      }
+      json(res, 400, { error: `検索できませんでした: ${e instanceof Error ? e.message : String(e)}` });
+    }
     return;
   }
 

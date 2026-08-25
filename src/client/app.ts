@@ -14,6 +14,7 @@ import {
   renderFilePage,
   renderSnapshotPage,
 } from './diff/render.js';
+import { renderTreePage } from './diff/treePage.js';
 import { docRefresh, initDocMode } from './doc/index.js';
 
 export function focusComment(id) {
@@ -349,15 +350,17 @@ function setupScrollTop() {
 }
 
 // Standalone views: /commit/<sha> (window.__COMMIT__), /snapshot/<id>
-// (window.__SNAPSHOT__) and /file/<path> (window.__FILE__). All reuse the
-// read-only renderers and skip the interactive review chrome — no comments,
-// forms, polling or reloads. Bail out before any of that is wired.
+// (window.__SNAPSHOT__), /file/<path> (window.__FILE__) and /files
+// (window.__TREE__). All reuse the read-only renderers and skip the
+// interactive review chrome — no comments, forms, polling or reloads. Bail
+// out before any of that is wired.
 function main() {
-  if (window.__COMMIT__ || window.__SNAPSHOT__ || window.__FILE__) {
+  if (window.__COMMIT__ || window.__SNAPSHOT__ || window.__FILE__ || window.__TREE__) {
     restorePersistedWidths();
     if (window.__COMMIT__) renderCommitPage();
     else if (window.__SNAPSHOT__) renderSnapshotPage();
-    else renderFilePage();
+    else if (window.__FILE__) renderFilePage();
+    else renderTreePage();
     setupScrollTop();
     return;
   }

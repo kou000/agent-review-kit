@@ -64,22 +64,32 @@ function copyTextFallback(text) {
   return ok;
 }
 
+// Idle label of copyPathButton. Emoji (U+1F4CB) rather than a symbol glyph such
+// as U+29C9 '⧉': those live in fonts that many environments don't ship, so the
+// button rendered as tofu (□). The emoji matches the 📌 / 💬 / ✏️ / 🔧 buttons
+// already used elsewhere, which are known to render here.
+const COPY_PATH_IDLE = '📋';
+// Flashed for COPY_PATH_FLASH_MS after a click, then reverted to the idle label.
+const COPY_PATH_OK = '✓';
+const COPY_PATH_FAIL = '✕';
+const COPY_PATH_FLASH_MS = 1200;
+
 // Small button that copies `path` to the clipboard and flashes ✓ on success.
 export function copyPathButton(path) {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'copy-path-btn';
-  btn.textContent = '⧉';
+  btn.textContent = COPY_PATH_IDLE;
   btn.title = 'パスをコピー: ' + path;
   btn.setAttribute('aria-label', 'ファイルパスをコピー');
   btn.addEventListener('click', function () {
     copyText(path).then(function (ok) {
-      btn.textContent = ok ? '✓' : '✕';
+      btn.textContent = ok ? COPY_PATH_OK : COPY_PATH_FAIL;
       btn.classList.toggle('copied', ok);
       setTimeout(function () {
-        btn.textContent = '⧉';
+        btn.textContent = COPY_PATH_IDLE;
         btn.classList.remove('copied');
-      }, 1200);
+      }, COPY_PATH_FLASH_MS);
     });
   });
   return btn;

@@ -21,6 +21,9 @@
   --attention: #d29922;
   /* Draggable panel widths (adjusted at runtime, persisted in localStorage). */
   --sidebar-width: 260px;
+  /* Tree-pane width on the /files page (draggable, persisted separately from
+     --sidebar-width — see resize.ts). */
+  --tree-side-width: 320px;
   /* Combined width of all pinned panels; kept in sync by JS so the main content
      margin-right always matches the total right-side gutter. */
   --pin-total-width: 0px;
@@ -1012,11 +1015,16 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 }
 
 /* ---------- copy path button ---------- */
+/* Label is 📋 while idle and swaps to ✓ / ✕ for a moment after a click; the
+   emoji is a touch wider than those glyphs, so fix a min-width and center the
+   text to keep the file header from shifting during the flash. */
 .copy-path-btn {
   flex: 0 0 auto;
-  padding: 1px 7px;
+  min-width: 28px;
+  padding: 1px 6px;
   line-height: 1.3;
   font-size: 12px;
+  text-align: center;
   color: var(--muted);
 }
 .copy-path-btn:hover { color: var(--fg); }
@@ -1192,7 +1200,19 @@ body.resizing #doc-frame { pointer-events: none; }
 
 /* ---------- repository file viewer (support feature) ---------- */
 
-.repo-tree-title { cursor: pointer; user-select: none; }
+/* Section heading in the sidebar, so it takes the same 12px top gap as the
+   other .sidebar-title sections above it (.sidebar-comments-title /
+   .sidebar-commits-title). Without it this heading butted straight against the
+   commit list, which got obvious once the outlined 「別タブで開く ↗」 link
+   started riding on the row. The link is centered by align-items, so the gap
+   grows above the row without shifting the label against it. */
+.repo-tree-title {
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  margin-top: 12px;
+}
 .repo-tree { margin-bottom: 8px; }
 .repo-tree .tree-dir { cursor: pointer; user-select: none; }
 .repo-tree .tree-dir:hover { color: var(--accent); }
@@ -1206,6 +1226,88 @@ body.resizing #doc-frame { pointer-events: none; }
 table.diff.file-view td.num { cursor: default; }
 table.diff.file-view td.num:hover { color: var(--muted); font-weight: 400; }
 
+/* 「新しいタブで開く」 link on a repo-tree file row. Icon-only (the row is
+   already labelled by its file name), so the padding + hover background give
+   it a real button-sized hit area without growing the row: font-size 14px at
+   line-height 1 plus 2px of vertical padding stays within the row's own text
+   line box, so only the clickable width grows. */
+.repo-file-open {
+  margin-left: auto;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  text-decoration: none;
+  color: var(--muted);
+  opacity: 0.85;
+  font-size: 14px;
+  line-height: 1;
+}
+.repo-file-open:hover {
+  color: var(--accent);
+  opacity: 1;
+  background: var(--btn-hover-bg);
+}
+
+/* 「別タブで開く」 links that sit next to a heading or a file header. Labelled
+   and outlined like a button so they read as their own control — the repo-tree
+   heading is itself a click target (open/close), so the two must not look
+   alike. */
+.repo-tree-open, .file-open-tab {
+  margin-left: auto;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--header-bg);
+  text-decoration: none;
+  color: var(--muted);
+  font-weight: 400;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.repo-tree-open:hover, .file-open-tab:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--btn-hover-bg);
+}
+.repo-tree-open { font-size: 11px; }
+/* .file-header is monospace + bold; the label reads better in the body font. */
+.file-open-tab {
+  font-size: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans JP", Helvetica, Arial, sans-serif;
+}
+
+/* ---------- standalone repo tree page (/files) ---------- */
+
+/* Two panes via the existing .layout flex row: the left pane reuses .sidebar
+   (sticky, own vertical scroll) plus the same .sidebar-resizer drag handle,
+   and #app takes the remaining width as the file viewer. The width is its own
+   variable rather than --sidebar-width (see resize.ts). */
+.tree-page .tree-page-side {
+  flex: 0 0 var(--tree-side-width);
+  width: var(--tree-side-width);
+}
+/* Unlike the review page, the tree IS this page — keep it on narrow screens
+   (where .sidebar is normally hidden), stacked above the viewer. The resizer
+   stays hidden there: the panes stack vertically, so there is no width to
+   drag (width: auto below also overrides --tree-side-width). */
+@media (max-width: 899px) {
+  .tree-page .tree-page-side {
+    display: block;
+    position: static;
+    width: auto;
+    max-height: 40vh;
+    margin: 16px 16px 0;
+  }
+}
+
 /* 「新しいタブで開く」 link in a repo-file pin panel header. */
 .pin-panel-open {
   text-decoration: none;
@@ -1215,3 +1317,73 @@ table.diff.file-view td.num:hover { color: var(--muted); font-weight: 400; }
   flex: none;
 }
 .pin-panel-open:hover { color: var(--accent); }
+
+/* ---------- search box on the /files page (GET /api/grep) ---------- */
+
+/* Sits between the pane heading and the tree; the result list takes the
+   tree's place (the tree is only hidden, never rebuilt). */
+.tree-search { margin-bottom: 8px; }
+.tree-search-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tree-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: inherit;
+  font-size: 12px;
+  padding: 4px 6px;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.tree-search-input:focus { outline: none; border-color: var(--accent); }
+.tree-search-row button { flex: 0 0 auto; }
+.tree-search-opts {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.tree-search-opts label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.tree-search-opts input { margin: 0; cursor: pointer; }
+
+/* Status line above the hits (count, 検索中…, error) and the truncation note. */
+.tree-search-note {
+  color: var(--muted);
+  padding: 2px 4px 6px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+.tree-search-more {
+  border-bottom: none;
+  border-top: 1px solid var(--border);
+  padding: 6px 4px 2px;
+  margin: 4px 0 0;
+}
+/* One hit: 「パス:行番号」 over the matched line, both clipped to one line so
+   long lines can't widen the pane. */
+.grep-hit {
+  padding: 3px 4px;
+  border-left: 2px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.grep-hit:hover { background: var(--header-bg); }
+.grep-hit.active { background: var(--header-bg); border-left-color: var(--accent); }
+.grep-hit-loc, .grep-hit-text {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+.grep-hit-loc { color: var(--muted); }
+.grep-hit.active .grep-hit-loc { color: var(--accent); }
+
+/* Line jumped to from a search result — same tone as .comment-flash, but as a
+   row background since an outline on a table row renders unevenly. */
+tr.grep-line-flash td { background: rgba(240, 192, 0, 0.28); }

@@ -160,6 +160,38 @@ export function renderFileHtml(info: RepoFilePage): string {
 `;
 }
 
+// Standalone two-pane page for browsing every tracked repository file
+// (/files). Mirrors renderFileHtml: same client bundle, app.js switches to
+// the tree view when window.__TREE__ is set. The file list itself is NOT
+// embedded — the client fetches it from /api/repo-files, so this shell never
+// goes stale. Unlike the review page it also never auto-reloads, so tree
+// state survives the agent regenerating the diff.
+export function renderRepoTreeHtml(): string {
+  return `<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>リポジトリのファイル — agent-review-kit</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<script>window.__TREE__ = true;</script>
+<header id="topbar">
+  <div class="topbar-inner">
+    <span class="brand">agent-review-kit</span>
+    <span id="diff-meta"></span>
+    <span id="unresolved-badge" class="badge" hidden>-</span>
+    <span id="conn-state" class="conn"></span>
+  </div>
+</header>
+<main id="app"></main>
+<script type="module" src="/client/app.js"></script>
+</body>
+</html>
+`;
+}
+
 // Review page for one published HTML document (/doc/<id>). Mirrors the other
 // standalone pages: same client bundle, app.js switches to the HTML-review
 // view when window.__DOC__ is set. The document body itself is NOT embedded

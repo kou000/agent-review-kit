@@ -38,6 +38,92 @@ export function runGitLsFiles(cwd: string): string[] {
     .filter((p) => p.length > 0);
 }
 
+// Whether cwd sits inside a git work tree. Used to tell a genuine `git grep`
+// failure (invalid regex → 400) apart from「そもそも git リポジトリでない」,
+// which every repo-file endpoint answers with an empty result instead.
+export function isGitRepo(cwd: string): boolean {
+  try {
+    git(['rev-parse', '--is-inside-work-tree'], cwd);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/* ---------- tracked-file grep (search box on the /files page) ---------- */
+
+export interface GrepMatch {
+  path: string;
+  line: number;
+  text: string;
+}
+
+export interface GrepOutcome {
+  results: GrepMatch[];
+  truncated: boolean; // 上限に達して打ち切ったか
+}
+
+export interface GrepOptions {
+  regex?: boolean; // 既定はリテラル検索 (-F)
+  caseSensitive?: boolean; // 既定は大文字小文字を区別しない (-i)
+}
+
+// 検索語の長さ上限（リクエストの検証は呼び出し側）。
+export const MAX_GREP_QUERY_CHARS = 200;
+// 返す結果の総行数上限。git grep の -m はファイル毎なので、全体で切るのは
+// こちらの責任。
+export const MAX_GREP_RESULTS = 500;
+// 1 マッチ行の表示文字数上限（minify 済みの長大な行で応答が膨らむのを防ぐ）。
+export const MAX_GREP_LINE_CHARS = 400;
+
+// `git grep` across the repository. Tracked files ONLY (git grep's default),
+// the same safety boundary as the repo-file viewer — no untracked secrets, no
+// .agent-review internals — and -I keeps binaries out. The query always goes
+// in behind `-e`, never as a bare argument, so a value starting with '-' can
+// never be taken for an option.
+export function runGitGrep(query: string, opts: GrepOptions, cwd: string): GrepOutcome {
+  // -z makes each match a `path\0line\0text` record, so a path containing ':'
+  // still parses unambiguously (same reason runGitLsFiles uses it).
+  const args = ['grep', '-n', '--no-color', '-I', '-z'];
+  // -E: git grep の既定は POSIX 基本正規表現(BRE)で ( | + ? がリテラル扱いに
+  // なるため、ripgrep や GitHub と同じ拡張正規表現(ERE)を明示する。
+  if (opts.regex) args.push('-E');
+  else args.push('-F');
+  if (!opts.caseSensitive) args.push('-i');
+  args.push('-e', query);
+  let out: string;
+  try {
+    out = git(args, cwd);
+  } catch (err) {
+    // exit 1 は「マッチなし」で、git grep の正常な結果。それ以外（不正な正規
+    // 表現なら 128）は stderr を載せて投げ直し、呼び出し側が 400 にする。
+    const e = err as { status?: number; stderr?: Buffer | string };
+    if (e.status === 1) return { results: [], truncated: false };
+    const stderr = e.stderr == null ? '' : e.stderr.toString().trim();
+    throw new Error(stderr || String(err));
+  }
+  const results: GrepMatch[] = [];
+  let truncated = false;
+  for (const record of out.split('\n')) {
+    if (!record) continue;
+    if (results.length >= MAX_GREP_RESULTS) {
+      truncated = true;
+      break;
+    }
+    const pathEnd = record.indexOf('\0');
+    const lineEnd = record.indexOf('\0', pathEnd + 1);
+    if (pathEnd < 0 || lineEnd < 0) continue;
+    const line = parseInt(record.slice(pathEnd + 1, lineEnd), 10);
+    if (!Number.isFinite(line)) continue;
+    results.push({
+      path: record.slice(0, pathEnd),
+      line,
+      text: record.slice(lineEnd + 1).slice(0, MAX_GREP_LINE_CHARS),
+    });
+  }
+  return { results, truncated };
+}
+
 // Synthesize an "added file" diff for every untracked (but not ignored) file, so
 // brand-new files/directories that haven't been `git add`-ed yet still show up in
 // the review. Ignored files are excluded via --exclude-standard (honors

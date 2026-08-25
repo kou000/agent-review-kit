@@ -85,11 +85,12 @@ export function openRepoFile(filePath) {
 }
 
 // Nested tree of every tracked file, for the sidebar's「リポジトリのファイル」
-// section. Directories start collapsed and their children render lazily on
-// first expand (repos can hold thousands of files). Files already in the
-// diff are dimmed — their content is on the main page. Clicking a file
-// toggles its pin panel.
-export function renderRepoTree(files, container) {
+// section and the standalone /files page. Directories start collapsed and
+// their children render lazily on first expand (repos can hold thousands of
+// files). Files already in the diff are dimmed — their content is on the main
+// page. Clicking a file toggles its pin panel; the /files page swaps that
+// behavior via onOpenFile (omitted = review-page behavior, unchanged).
+export function renderRepoTree(files, container, onOpenFile?) {
   const inDiff = {};
   DIFF.files.forEach(function (f) { inDiff[f.path] = true; });
   const root = { dirs: {}, files: [] };
@@ -133,7 +134,19 @@ export function renderRepoTree(files, container) {
       label.textContent = f.name;
       label.title = inDiff[f.path] ? f.path + '（差分に含まれるファイル）' : f.path;
       fEl.appendChild(label);
-      fEl.addEventListener('click', function () { openRepoFile(f.path); });
+      // 「新しいタブで開く」 link: pin panels vanish on the page's auto reload,
+      // so offer a standalone /file/<path> tab as a stable alternative.
+      const open = document.createElement('a');
+      open.className = 'repo-file-open';
+      open.href = '/file/' + encodeURIComponent(f.path);
+      open.target = '_blank';
+      open.rel = 'noopener';
+      open.title = f.path + ' を新しいタブで開く';
+      open.setAttribute('aria-label', 'このファイルを新しいタブで開く');
+      open.textContent = '↗';
+      open.addEventListener('click', function (e) { e.stopPropagation(); });
+      fEl.appendChild(open);
+      fEl.addEventListener('click', function () { (onOpenFile || openRepoFile)(f.path); });
       parent.appendChild(fEl);
     });
   })(root, container, 0);
