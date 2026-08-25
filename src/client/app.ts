@@ -50,7 +50,10 @@ export function focusComment(id) {
 // notified state of each agentResponse is persisted in localStorage so a
 // response is announced exactly once per browser, surviving the automatic
 // page reload that follows `generate`.
-const AGENT_SEEN_KEY = 'ark-agent-seen';
+// The key is per page (diff / each document): both page kinds overwrite the
+// stored map with only the comments they can see, so sharing one key would
+// let concurrently open pages wipe each other's baseline and re-notify.
+const AGENT_SEEN_KEY = 'ark-agent-seen' + (DOC ? '-doc-' + DOC.id : '');
 const TOAST_MS = 10000;
 
 function ensureToastStack() {
