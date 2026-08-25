@@ -196,6 +196,116 @@ test('POST /api/comments/<id>/resolve は大元のコメントの未解決の返
   assert.equal(byId.get(reply2.id), 'resolved');
 });
 
+// 解決済みスレッドに後から返信が生えたときの救済経路。resolved な親へもう一度
+// resolve を投げると、あとから生えた open な返信だけがまとめて resolved になる。
+test('resolved な大元に resolve を再度呼ぶと、後から追加された返信も resolve される', async () => {
+  const post = async (payload: Record<string, unknown>): Promise<{ id: string }> => {
+    const res = await fetch(`${baseUrl}/api/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    assert.equal(res.status, 201);
+    return ((await res.json()) as { comment: { id: string } }).comment;
+  };
+  const resolve = async (id: string): Promise<void> => {
+    const res = await fetch(`${baseUrl}/api/comments/${id}/resolve`, { method: 'POST' });
+    assert.equal(res.status, 200);
+  };
+  const parent = await post({ body: '再カスケード親' });
+  await resolve(parent.id);
+
+  // 親が解決済みになったあとに生えた返信。
+  const late1 = await post({ parentId: parent.id, body: '後から返信1' });
+  const late2 = await post({ parentId: parent.id, body: '後から返信2' });
+
+  await resolve(parent.id);
+
+  const all = ((await (await fetch(`${baseUrl}/api/comments`)).json()) as {
+    comments: { id: string; status: string }[];
+  }).comments;
+  const byId = new Map(all.map((c) => [c.id, c.status]));
+  assert.equal(byId.get(parent.id), 'resolved');
+  assert.equal(byId.get(late1.id), 'resolved');
+  assert.equal(byId.get(late2.id), 'resolved');
+});
+
+// 画面の「エージェントに再送」の土台（resolved から直接 open に戻す API 経路）。
+// resolve は親から返信へカスケードするが、その取り消し（PATCH status=open）は
+// カスケードしない非対称な挙動であることを固定する。
+test('resolved なコメントは PATCH status=open で未解決に戻せる（返信はカスケードしない）', async () => {
+  const post = async (payload: Record<string, unknown>): Promise<{ id: string }> => {
+    const res = await fetch(`${baseUrl}/api/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    assert.equal(res.status, 201);
+    return ((await res.json()) as { comment: { id: string } }).comment;
+  };
+  const parent = await post({ body: '解決取り消しの親' });
+  const reply = await post({ parentId: parent.id, body: '解決取り消しの返信' });
+
+  const resolved = await fetch(`${baseUrl}/api/comments/${parent.id}/resolve`, { method: 'POST' });
+  assert.equal(resolved.status, 200);
+
+  const patched = await fetch(`${baseUrl}/api/comments/${encodeURIComponent(parent.id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status: 'open' }),
+  });
+  assert.equal(patched.status, 200);
+  assert.equal(((await patched.json()) as { comment: { status: string } }).comment.status, 'open');
+
+  const all = ((await (await fetch(`${baseUrl}/api/comments`)).json()) as {
+    comments: { id: string; status: string }[];
+  }).comments;
+  const byId = new Map(all.map((c) => [c.id, c.status]));
+  assert.equal(byId.get(parent.id), 'open');
+  // カスケードで resolved になった返信はそのまま（解除は単一コメントのみ）。
+  assert.equal(byId.get(reply.id), 'resolved');
+});
+
+// 画面の「Unresolve」ボタンの土台。open ではなく answered に戻すことで、画面上は
+// 要確認として残るが wait-comments の配達対象（open）には入らない。ここでは
+// answered への PATCH が通ること・返信へカスケードしないことを固定する
+// （tooltip の「まとめて解決された返信は元に戻らない」の根拠）。
+test('resolved なコメントは PATCH status=answered で要確認に戻せる（返信はカスケードしない）', async () => {
+  const post = async (payload: Record<string, unknown>): Promise<{ id: string }> => {
+    const res = await fetch(`${baseUrl}/api/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    assert.equal(res.status, 201);
+    return ((await res.json()) as { comment: { id: string } }).comment;
+  };
+  const parent = await post({ body: 'Unresolve の親' });
+  const reply = await post({ parentId: parent.id, body: 'Unresolve の返信' });
+
+  const resolved = await fetch(`${baseUrl}/api/comments/${parent.id}/resolve`, { method: 'POST' });
+  assert.equal(resolved.status, 200);
+
+  const patched = await fetch(`${baseUrl}/api/comments/${encodeURIComponent(parent.id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status: 'answered' }),
+  });
+  assert.equal(patched.status, 200);
+  assert.equal(
+    ((await patched.json()) as { comment: { status: string } }).comment.status,
+    'answered',
+  );
+
+  const all = ((await (await fetch(`${baseUrl}/api/comments`)).json()) as {
+    comments: { id: string; status: string }[];
+  }).comments;
+  const byId = new Map(all.map((c) => [c.id, c.status]));
+  assert.equal(byId.get(parent.id), 'answered');
+  // カスケードで resolved になった返信はそのまま（解除は単一コメントのみ）。
+  assert.equal(byId.get(reply.id), 'resolved');
+});
+
 test('resolve-comment CLI でも大元を settled にすると未解決の返信が resolve される', async () => {
   const post = async (payload: Record<string, unknown>): Promise<{ id: string }> => {
     const res = await fetch(`${baseUrl}/api/comments`, {
@@ -889,4 +999,61 @@ test('GET /file/<path> は読み取り専用ページを返し、未追跡は 40
 
   const missing = await fetch(`${baseUrl}/file/${encodeURIComponent('untracked-secret.env')}`);
   assert.equal(missing.status, 404);
+});
+
+/* ---------- 未解決の集計 (GET /api/status) ---------- */
+
+interface StatusResponse {
+  unresolved: number;
+  counts: Record<string, number>;
+}
+
+test('unresolved は wontfix / dismissed を未解決に数えない', async () => {
+  const post = async (payload: Record<string, unknown>): Promise<{ id: string }> => {
+    const res = await fetch(`${baseUrl}/api/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    assert.equal(res.status, 201);
+    return ((await res.json()) as { comment: { id: string } }).comment;
+  };
+  const getStatus = async (): Promise<StatusResponse> =>
+    (await (await fetch(`${baseUrl}/api/status`)).json()) as StatusResponse;
+  const setStatus = async (id: string, status: string): Promise<void> => {
+    const res = await fetch(`${baseUrl}/api/comments/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    });
+    assert.equal(res.status, 200);
+  };
+
+  const target = await post({ body: '未解決集計の検証' });
+
+  // 投稿直後は open = エージェント側の作業待ちなので unresolved に入る。
+  const open = await getStatus();
+
+  // resolved にすると作業待ちが消えて unresolved が1件減る。これを基準にする。
+  await setStatus(target.id, 'resolved');
+  const resolved = await getStatus();
+  assert.equal(resolved.unresolved, open.unresolved - 1);
+
+  // wontfix（対応しない判断）は解決済みではない（画面では「要確認」に残る）が、
+  // 待っているのはユーザーの確認でエージェントの作業ではないので unresolved は
+  // resolved と同じまま増えない。
+  await setStatus(target.id, 'wontfix');
+  const wontfix = await getStatus();
+  assert.equal(wontfix.counts.wontfix, resolved.counts.wontfix + 1);
+  assert.equal(wontfix.counts.resolved, resolved.counts.resolved - 1);
+  assert.equal(wontfix.unresolved, resolved.unresolved);
+
+  // dismissed（レビュー終了時の AI 指摘見送り）も同じ扱い。
+  await setStatus(target.id, 'dismissed');
+  const dismissed = await getStatus();
+  assert.equal(dismissed.counts.dismissed, resolved.counts.dismissed + 1);
+  assert.equal(dismissed.unresolved, resolved.unresolved);
+
+  // 集計式そのもの: unresolved = open + seen。
+  assert.equal(dismissed.unresolved, dismissed.counts.open + dismissed.counts.seen);
 });

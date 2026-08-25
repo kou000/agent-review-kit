@@ -6,7 +6,9 @@ export type CommentStatus =
   | 'wontfix'
   | 'resolved'
   // An AI review finding the user never acted on. Set in bulk when the review
-  // is finished (POST /api/finish); excluded from the unresolved count.
+  // is finished (POST /api/finish). Not a resolution — the UI keeps it in
+  // 要確認 — but it isn't work left for the agent either, so it stays out of
+  // the unresolved count and wait-comments never delivers it.
   | 'dismissed';
 
 export const COMMENT_STATUSES: CommentStatus[] = [

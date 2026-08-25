@@ -61,8 +61,8 @@ export function threadStructure(list) {
 
 /* ---------- thread collapse state ---------- */
 
-// A thread whose every comment is settled (resolved / dismissed / wontfix)
-// starts collapsed to a one-line summary, like GitHub's resolved threads.
+// A thread whose every comment is settled (resolved) starts collapsed to a
+// one-line summary, like GitHub's resolved threads.
 // Only an explicit user toggle is persisted (localStorage); the default is
 // recomputed from statuses on every render, so a thread that gets reopened
 // expands again by itself.
@@ -91,7 +91,11 @@ export function pruneThreadCollapse() {
   if (changed) saveThreadCollapse();
 }
 
-export const SETTLED_STATUSES = { resolved: true, dismissed: true, wontfix: true };
+// Only an explicit resolve settles a comment. wontfix / dismissed are records
+// of a judgement (or of an untouched AI finding at review end), so treating
+// them as done would quietly clear things the user never confirmed; they stay
+// on the list as 要確認 instead.
+export const SETTLED_STATUSES = { resolved: true };
 
 export function isThreadCollapsed(top, replies) {
   if (Object.prototype.hasOwnProperty.call(state.threadCollapse, top.id)) {
@@ -107,9 +111,10 @@ export function isThreadCollapsed(top, replies) {
 // Rolls a whole thread up into one of three states, so the sidebar can say
 // whose turn it is at a glance:
 //   open    — something is still on the agent (an open/seen user comment)
-//   check   — the ball is in the user's court: the agent answered/fixed, or
-//             an AI review finding (open/seen agent comment) awaits a reply
-//   settled — every comment is resolved/wontfix/dismissed
+//   check   — the ball is in the user's court: the agent answered/fixed, a
+//             wontfix/dismissed judgement awaits confirmation, or an AI review
+//             finding (open/seen agent comment) awaits a reply
+//   settled — every comment is resolved
 export function threadState(top, replies) {
   const all = [top].concat(replies);
   let needsCheck = false;
@@ -237,13 +242,17 @@ export function commentCard(c: any, isReply?: boolean) {
         .catch(function (err) { alert('更新に失敗しました: ' + err); });
     });
     actions.appendChild(btn);
-    // seen のまま応答が滞留したコメントの復旧手段: open に戻して wait-comments
-    // に再配達させる。エージェント処理中に押すと同じ id で二重に届くので、
-    // 応答がないときのための手動リカバリと位置づける。
-    if (c.status === 'seen') {
+    // エージェントへ「もう一度届ける」唯一の手段: open に戻して wait-comments
+    // に再配達させる。対象は 2 つの状況 —
+    //   seen     … 配達済みだが応答が返ってこないまま止まっている（手動リカバリ）
+    //   answered … 応答済み、または Unresolve で解決を取り消した後の再依頼
+    // エージェント処理中に押すと同じ id で二重に届く点は変わらないので、
+    // あくまで手動の再依頼と位置づける。wait-comments はユーザーのコメントしか
+    // 配達しないため、AI 指摘（agent 発）では押しても何も起きない = 出さない。
+    if (!isAgentComment(c) && (c.status === 'seen' || c.status === 'answered')) {
       const resend = document.createElement('button');
       resend.textContent = 'エージェントに再送';
-      resend.title = '応答がないまま止まっているコメントを open に戻し、エージェントに再度配達する';
+      resend.title = 'このコメントを open に戻してエージェントに再度配達する（応答が止まったときの再送・解決取り消し後の再依頼）';
       resend.addEventListener('click', function () {
         api('PATCH', '/api/comments/' + encodeURIComponent(c.id), { status: 'open' })
           .then(refresh)
@@ -251,6 +260,28 @@ export function commentCard(c: any, isReply?: boolean) {
       });
       actions.appendChild(resend);
     }
+  } else {
+    // resolved の取り消し。誤って解決したコメントや、解決後に議論が再開した
+    // スレッドを戻す手段で、トップレベル・返信の両方に出す（Resolve ボタンは
+    // status !== 'resolved' のときだけなので、両者は自然に排他になる）。
+    // open ではなく answered に戻すのは、これが「表示上の解決取り消し」だから:
+    // 画面には要確認として残るが、wait-comments の配達対象（open）には入らず
+    // 待機中のエージェントを叩き起こさない。エージェントへの再依頼は上の
+    // 「エージェントに再送」ボタンの役割（answered からも押せる）。
+    const reopen = document.createElement('button');
+    reopen.textContent = 'Unresolve';
+    // resolve はトップレベルから返信へカスケードするが、サーバーはこの PATCH
+    // では対象コメントの status しか書き換えない（非対称）。まとめて解決された
+    // 返信は戻らないので、その旨をトップレベルの tooltip に添える。
+    reopen.title = isReply
+      ? '解決を取り消して要確認に戻す（エージェントには通知しない）'
+      : '解決を取り消して要確認に戻す（エージェントには通知しない／まとめて解決された返信は元に戻らない）';
+    reopen.addEventListener('click', function () {
+      api('PATCH', '/api/comments/' + encodeURIComponent(c.id), { status: 'answered' })
+        .then(refresh)
+        .catch(function (err) { alert('更新に失敗しました: ' + err); });
+    });
+    actions.appendChild(reopen);
   }
   // Soft delete (any status, any author). A top-level delete takes its
   // replies with it on the server side, so warn accordingly.
