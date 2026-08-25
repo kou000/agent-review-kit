@@ -2866,6 +2866,36 @@
     } catch (e) { /* ignore */ }
   }
 
+  // Collapsed state is a flag independent of the width, so reopening restores
+  // the previous (persisted) width untouched.
+  const DOC_PANEL_COLLAPSED_KEY = 'ark-doc-panel-collapsed';
+
+  function setDocPanelCollapsed(on) {
+    if (!docLayoutEl) return;
+    docPanelCollapsed = on;
+    docLayoutEl.classList.toggle('panel-collapsed', on);
+    if (docReopenBtn) docReopenBtn.classList.toggle('visible', on);
+    syncDocMarksHidden();
+    try { localStorage.setItem(DOC_PANEL_COLLAPSED_KEY, on ? '1' : '0'); } catch (e) { /* ignore */ }
+  }
+
+  // With the panel hidden the in-document comment highlights are noise, so the
+  // collapsed flag is mirrored into the iframe as a root class that neutralizes
+  // them. Also called from docFrameReady: on a reload the frame loads after the
+  // persisted collapsed state was already restored.
+  function syncDocMarksHidden() {
+    const doc = frameDoc();
+    if (doc && doc.documentElement) {
+      doc.documentElement.classList.toggle('ark-marks-hidden', docPanelCollapsed);
+    }
+  }
+
+  function restoreDocPanelCollapsed() {
+    try {
+      if (localStorage.getItem(DOC_PANEL_COLLAPSED_KEY) === '1') setDocPanelCollapsed(true);
+    } catch (e) { /* ignore */ }
+  }
+
   /* ---------- HTML document review (window.__DOC__) ---------- */
 
   // The published document renders inside an iframe whose response carries a
@@ -2885,6 +2915,9 @@
   let docPickBtn = null;
   let docFloatBtn = null; // floating「コメント」button over a text selection
   let docHoverEl = null; // element currently outlined in pick mode
+  let docLayoutEl = null; // .doc-layout root; carries the panel-collapsed class
+  let docReopenBtn = null; // right-edge tab shown while the panel is collapsed
+  let docPanelCollapsed = false; // mirrored into the iframe as ark-marks-hidden
 
   function docTargetText(c) {
     const t = c.htmlTarget;
@@ -3582,7 +3615,9 @@
     '.ark-el-anchor { outline: 2px solid rgba(88, 166, 255, 0.7); outline-offset: 2px; cursor: pointer; }\n' +
     '.ark-pick-hover { outline: 2px dashed rgba(88, 166, 255, 0.95) !important; outline-offset: 2px; }\n' +
     'body.ark-picking, body.ark-picking * { cursor: crosshair !important; }\n' +
-    '.ark-flash, mark.ark-mark.ark-flash { background: rgba(88, 166, 255, 0.35) !important; }';
+    '.ark-flash, mark.ark-mark.ark-flash { background: rgba(88, 166, 255, 0.35) !important; }\n' +
+    'html.ark-marks-hidden mark.ark-mark { background: transparent; border-bottom: 0; cursor: inherit; }\n' +
+    'html.ark-marks-hidden .ark-el-anchor { outline: none; cursor: inherit; }';
 
   function docFrameReady() {
     const doc = frameDoc();
@@ -3600,6 +3635,7 @@
       }
     });
     docFrameWired = true;
+    syncDocMarksHidden();
     // Anchors could not be resolved before the frame existed: force a
     // comment re-render against the loaded DOM.
     lastCommentsJson = '';
@@ -3609,6 +3645,7 @@
   function buildDocLayout() {
     const layout = document.createElement('div');
     layout.className = 'doc-layout';
+    docLayoutEl = layout;
 
     const frameWrap = document.createElement('div');
     frameWrap.className = 'doc-frame-wrap';
@@ -3654,6 +3691,13 @@
       openDocCommentForm(null);
     });
     toolbar.appendChild(overallBtn);
+
+    const collapseBtn = document.createElement('button');
+    collapseBtn.type = 'button';
+    collapseBtn.textContent = 'コメント欄を隠す »';
+    collapseBtn.title = 'コメント欄を折りたたむ（画面右端のタブで再表示）';
+    collapseBtn.addEventListener('click', function () { setDocPanelCollapsed(true); });
+    toolbar.appendChild(collapseBtn);
     panel.appendChild(toolbar);
 
     docFormSlot = document.createElement('div');
@@ -3670,6 +3714,17 @@
     panel.appendChild(docThreadsEl);
 
     layout.appendChild(panel);
+
+    docReopenBtn = document.createElement('button');
+    docReopenBtn.type = 'button';
+    docReopenBtn.className = 'doc-panel-reopen';
+    docReopenBtn.textContent = '«';
+    docReopenBtn.title = 'コメント欄を開く';
+    docReopenBtn.setAttribute('aria-label', 'コメント欄を開く');
+    docReopenBtn.addEventListener('click', function () { setDocPanelCollapsed(false); });
+    layout.appendChild(docReopenBtn);
+    restoreDocPanelCollapsed();
+
     app.appendChild(layout);
   }
 

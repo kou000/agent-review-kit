@@ -1120,6 +1120,29 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 .doc-resizer:hover, .doc-resizer.dragging { background: var(--accent); }
 /* While dragging, the iframe must not swallow the pointermove stream. */
 body.resizing #doc-frame { pointer-events: none; }
+/* Collapsed comment panel: the iframe takes the full width. A slim tab pinned
+   to the viewport's right edge (doc-panel-reopen) brings the panel back —
+   needed because collapsing hides the panel together with its own buttons. */
+.doc-layout.panel-collapsed .doc-comments,
+.doc-layout.panel-collapsed .doc-resizer { display: none; }
+.doc-panel-reopen {
+  display: none;
+  position: fixed;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  z-index: 30;
+  padding: 16px 5px;
+  border: 1px solid var(--border);
+  border-right: 0;
+  border-radius: 6px 0 0 6px;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+.doc-panel-reopen.visible { display: block; }
+.doc-panel-reopen:hover { color: var(--accent); border-color: var(--accent); }
 .doc-toolbar {
   display: flex;
   flex-wrap: wrap;
