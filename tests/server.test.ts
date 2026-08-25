@@ -792,6 +792,94 @@ test('GET /api/file は未追跡ファイル・プロジェクト外パスを 40
   assert.equal(reviewDir.status, 404);
 });
 
+/* ---------- ファイル内検索 (GET /api/grep) ---------- */
+
+interface GrepResponse {
+  results: { path: string; line: number; text: string }[];
+  truncated: boolean;
+}
+
+test('GET /api/grep はマッチした行をパス・行番号付きで返す', async () => {
+  // snap.ts は既存テストがコミット済み: `export const answer: number = 42;`。
+  const res = await fetch(`${baseUrl}/api/grep?q=${encodeURIComponent('answer: number')}`);
+  assert.equal(res.status, 200);
+  const data = (await res.json()) as GrepResponse;
+  assert.equal(data.truncated, false);
+  const hit = data.results.find((r) => r.path === 'snap.ts');
+  assert.ok(hit, 'snap.ts のマッチが返る');
+  assert.equal(hit!.line, 1);
+  assert.equal(hit!.text, 'export const answer: number = 42;');
+});
+
+test('GET /api/grep はマッチしない語で空の results を返す', async () => {
+  const res = await fetch(`${baseUrl}/api/grep?q=${encodeURIComponent('絶対に存在しない検索語XYZQ')}`);
+  assert.equal(res.status, 200);
+  const data = (await res.json()) as GrepResponse;
+  assert.deepEqual(data.results, []);
+  assert.equal(data.truncated, false);
+});
+
+test('GET /api/grep は q なし・長すぎる q を 400 で拒否する', async () => {
+  const empty = await fetch(`${baseUrl}/api/grep`);
+  assert.equal(empty.status, 400);
+
+  const tooLong = await fetch(`${baseUrl}/api/grep?q=${'a'.repeat(201)}`);
+  assert.equal(tooLong.status, 400);
+});
+
+test('GET /api/grep は regex=1 で正規表現として検索し、既定はリテラル検索になる', async () => {
+  const regex = await fetch(`${baseUrl}/api/grep?q=${encodeURIComponent('answer.*= *42')}&regex=1`);
+  assert.equal(regex.status, 200);
+  const matched = (await regex.json()) as GrepResponse;
+  assert.ok(matched.results.some((r) => r.path === 'snap.ts'));
+
+  // 同じ式をリテラル扱いすればどこにもマッチしない（正規表現が既定でない証拠）。
+  const literal = await fetch(`${baseUrl}/api/grep?q=${encodeURIComponent('answer.*= *42')}`);
+  assert.equal(literal.status, 200);
+  assert.deepEqual(((await literal.json()) as GrepResponse).results, []);
+});
+
+test('GET /api/grep は regex=1 で ERE メタ文字（交替・繰り返し）を解釈する', async () => {
+  fs.writeFileSync(path.join(tmp, 'ere.txt'), 'call ab here\ncall ac here\nxxx tail\n');
+  git(['add', 'ere.txt'], tmp);
+  git(['commit', '-m', 'add ere.txt'], tmp);
+
+  // BRE では ( ) | がリテラルなのでヒットしない式。ERE として解釈される検証。
+  const alt = await fetch(`${baseUrl}/api/grep?q=${encodeURIComponent('a(b|c)')}&regex=1`);
+  assert.equal(alt.status, 200);
+  const altHits = ((await alt.json()) as GrepResponse).results.filter(
+    (r) => r.path === 'ere.txt'
+  );
+  assert.deepEqual(
+    altHits.map((r) => r.line),
+    [1, 2]
+  );
+
+  // + も同様に BRE ではリテラル。
+  const plus = await fetch(`${baseUrl}/api/grep?q=${encodeURIComponent('x+ tail')}&regex=1`);
+  assert.equal(plus.status, 200);
+  const plusHits = ((await plus.json()) as GrepResponse).results.filter(
+    (r) => r.path === 'ere.txt'
+  );
+  assert.deepEqual(
+    plusHits.map((r) => r.line),
+    [3]
+  );
+
+  // 同じ式をリテラル扱いすればマッチしない（ERE 解釈が regex=1 限定である証拠）。
+  const literal = await fetch(`${baseUrl}/api/grep?q=${encodeURIComponent('a(b|c)')}`);
+  assert.equal(literal.status, 200);
+  assert.deepEqual(((await literal.json()) as GrepResponse).results, []);
+});
+
+test('GET /api/grep は不正な正規表現を 400 で返す', async () => {
+  // ERE では括弧が閉じていない式がエラー（BRE の `a\(` は ERE ではリテラル）。
+  const res = await fetch(`${baseUrl}/api/grep?q=${encodeURIComponent('a(')}&regex=1`);
+  assert.equal(res.status, 400);
+  const data = (await res.json()) as { error: string };
+  assert.match(data.error, /検索できませんでした/);
+});
+
 test('GET /file/<path> は読み取り専用ページを返し、未追跡は 404 になる', async () => {
   const res = await fetch(`${baseUrl}/file/${encodeURIComponent('README.md')}`);
   assert.equal(res.status, 200);

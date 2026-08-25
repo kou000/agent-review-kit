@@ -54,19 +54,26 @@ export function startDrag(handle, onMove) {
   document.addEventListener('pointercancel', up, true);
 }
 
-// Wire the sidebar drag handle. stopPropagation keeps the handle's pointerdown
-// from ever reaching the document-level diff-selection handlers.
-export function attachSidebarResize(handle, sidebar) {
+// Wire a drag handle sitting on the right edge of a left-hand pane: the pane's
+// left edge stays put during the drag, so its width is (pointerX - left).
+// `apply` clamps/applies the width and returns the value stored under `key`.
+// stopPropagation keeps the handle's pointerdown from ever reaching the
+// document-level diff-selection handlers.
+function attachLeftPaneResize(handle, pane, apply, key) {
   handle.addEventListener('mousedown', function (e) { e.stopPropagation(); });
   handle.addEventListener('pointerdown', function (e) {
     e.preventDefault();
     e.stopPropagation();
-    const left = sidebar.getBoundingClientRect().left;
+    const left = pane.getBoundingClientRect().left;
     startDrag(handle, function (clientX) {
-      const w = setSidebarWidth(clientX - left);
-      try { localStorage.setItem(SIDEBAR_KEY, String(w)); } catch (e2) { /* ignore */ }
+      const w = apply(clientX - left);
+      try { localStorage.setItem(key, String(w)); } catch (e2) { /* ignore */ }
     });
   });
+}
+
+export function attachSidebarResize(handle, sidebar) {
+  attachLeftPaneResize(handle, sidebar, setSidebarWidth, SIDEBAR_KEY);
 }
 
 // Resize a single pin panel. The panel's right edge is fixed during its own
@@ -97,6 +104,35 @@ export function restorePersistedWidths() {
   } catch (e) { /* ignore */ }
   // Pin widths are per-panel and applied when a panel is created; nothing to
   // restore globally (the last-used width is read via savedPinDefault).
+}
+
+// Tree-pane width (px) on the /files page. Deliberately NOT sharing
+// --sidebar-width / ark-sidebar-width with the review sidebar: there the tree
+// is a side navigation next to the diff, while on /files it IS the page — it
+// lists every tracked file, so deep paths routinely need more room than the
+// review sidebar's 480px cap, and a wider pane there should not shrink the
+// diff on the review page. Same flavour as setSidebarWidth otherwise (clamp,
+// CSS variable, localStorage), with the identical minimum so the drag feels
+// the same on both pages.
+const TREE_SIDE_MIN = SIDEBAR_MIN;
+const TREE_SIDE_MAX = 720;
+const TREE_SIDE_KEY = 'ark-tree-width';
+
+export function setTreeSideWidth(px) {
+  const w = Math.max(TREE_SIDE_MIN, Math.min(TREE_SIDE_MAX, Math.round(px)));
+  document.documentElement.style.setProperty('--tree-side-width', w + 'px');
+  return w;
+}
+
+export function attachTreeSideResize(handle, side) {
+  attachLeftPaneResize(handle, side, setTreeSideWidth, TREE_SIDE_KEY);
+}
+
+export function restoreTreeSideWidth() {
+  try {
+    const w = parseFloat(localStorage.getItem(TREE_SIDE_KEY));
+    if (!isNaN(w)) setTreeSideWidth(w);
+  } catch (e) { /* ignore */ }
 }
 
 // Comment-panel width (px) on the /doc/<id> page, same CSS-variable +

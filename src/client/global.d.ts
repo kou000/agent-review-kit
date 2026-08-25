@@ -6,4 +6,5 @@ interface Window {
   __COMMIT__?: any;
   __SNAPSHOT__?: any;
   __FILE__?: any;
+  __TREE__?: any;
 }

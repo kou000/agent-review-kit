@@ -210,8 +210,23 @@ export function buildSidebar() {
   // clicking a file opens it read-only in the pin stack (see openRepoFile).
   const repoHeading = document.createElement('div');
   repoHeading.className = 'sidebar-title repo-tree-title';
-  repoHeading.textContent = '▸ リポジトリのファイル';
   repoHeading.title = 'クリックで開閉。差分に含まれないファイルも参照できます';
+  // The toggle rewrites the label text, so it lives in its own span — the
+  // ↗ link after it survives every open/close.
+  const repoLabel = document.createElement('span');
+  repoLabel.textContent = '▸ リポジトリのファイル';
+  repoHeading.appendChild(repoLabel);
+  // 「ツリーを別タブで開く」: the standalone /files page keeps its tree state
+  // across the review page's auto reloads.
+  const repoTreeOpen = document.createElement('a');
+  repoTreeOpen.className = 'repo-tree-open';
+  repoTreeOpen.href = '/files';
+  repoTreeOpen.target = '_blank';
+  repoTreeOpen.rel = 'noopener';
+  repoTreeOpen.title = 'リポジトリのファイル一覧を別タブで開く';
+  repoTreeOpen.textContent = '別タブで開く ↗';
+  repoTreeOpen.addEventListener('click', function (e) { e.stopPropagation(); });
+  repoHeading.appendChild(repoTreeOpen);
   sidebar.appendChild(repoHeading);
   const repoWrap = document.createElement('div');
   repoWrap.className = 'repo-tree';
@@ -221,7 +236,7 @@ export function buildSidebar() {
   repoHeading.addEventListener('click', function () {
     const open = repoWrap.hidden;
     repoWrap.hidden = !open;
-    repoHeading.textContent = (open ? '▾' : '▸') + ' リポジトリのファイル';
+    repoLabel.textContent = (open ? '▾' : '▸') + ' リポジトリのファイル';
     if (open && !repoLoaded) {
       repoLoaded = true;
       repoWrap.textContent = '読み込み中…';
