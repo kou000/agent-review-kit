@@ -331,8 +331,20 @@ async function handle(
     serveFile(res, paths.html, 'text/html; charset=utf-8');
     return;
   }
-  if (method === 'GET' && p === '/app.js') {
-    serveFile(res, paths.appJs, 'text/javascript; charset=utf-8');
+  // Client ES modules (app.js plus everything it imports), copied into
+  // .agent-review/client/ by writeAssets. The pathname is matched before any
+  // decoding, so the whitelist regex (no '%', no '\\') plus the per-segment
+  // check make traversal outside clientDir impossible.
+  const clientMatch = /^\/client\/([A-Za-z0-9._/-]+\.js)$/.exec(p);
+  if (method === 'GET' && clientMatch) {
+    const rel = clientMatch[1];
+    const segments = rel.split('/');
+    if (segments.some((seg) => seg === '' || seg === '.' || seg === '..')) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('Not found');
+      return;
+    }
+    serveFile(res, path.join(paths.clientDir, ...segments), 'text/javascript; charset=utf-8');
     return;
   }
   if (method === 'GET' && p === '/style.css') {
