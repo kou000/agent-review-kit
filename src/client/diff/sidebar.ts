@@ -10,6 +10,7 @@ import {
   threadStructure,
 } from '../threads.js';
 import { focusComment } from '../app.js';
+import { appendEditorLink } from './editorLink.js';
 import { updatePinButtons } from './pins.js';
 import { openRepoFile, renderRepoTree } from './repoView.js';
 import { applyViewedState, isViewed, saveViewed } from './viewed.js';
@@ -216,6 +217,13 @@ export function buildSidebar() {
   const repoLabel = document.createElement('span');
   repoLabel.textContent = '▸ リポジトリのファイル';
   repoHeading.appendChild(repoLabel);
+  // Both heading buttons live in one box so the narrow sidebar can drop them
+  // to a second row as a group (see .repo-tree-actions): with the buttons as
+  // direct flex children of the heading, there was no room left for the label
+  // at the default 260px width and it wrapped one character per line.
+  const repoActions = document.createElement('div');
+  repoActions.className = 'repo-tree-actions';
+  repoHeading.appendChild(repoActions);
   // 「ツリーを別タブで開く」: the standalone /files page keeps its tree state
   // across the review page's auto reloads.
   const repoTreeOpen = document.createElement('a');
@@ -226,7 +234,11 @@ export function buildSidebar() {
   repoTreeOpen.title = 'リポジトリのファイル一覧を別タブで開く';
   repoTreeOpen.textContent = '別タブで開く ↗';
   repoTreeOpen.addEventListener('click', function (e) { e.stopPropagation(); });
-  repoHeading.appendChild(repoTreeOpen);
+  repoActions.appendChild(repoTreeOpen);
+  // 「<editor> で開く」: opens this repository (not a single file) in the local
+  // editor via settings.editorUriTemplate. Appended asynchronously — it needs
+  // projectDir from GET /api/status.
+  appendEditorLink(repoActions);
   sidebar.appendChild(repoHeading);
   const repoWrap = document.createElement('div');
   repoWrap.className = 'repo-tree';

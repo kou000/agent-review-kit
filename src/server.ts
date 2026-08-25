@@ -655,6 +655,9 @@ async function handle(
 
   // Partial update: only known keys with the right type are applied, anything
   // else in the body is ignored. Returns the full settings after the merge.
+  // editorUriTemplate is intentionally missing: it is a machine-local path
+  // translation set in ~/.agent-review/.env only, and its value ends up in an
+  // href, so the browser must not be able to change it.
   if (method === 'PUT' && p === '/api/settings') {
     const body = await readBody(req);
     const settings = mutateSettings(paths.settings, (s) => {

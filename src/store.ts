@@ -199,6 +199,10 @@ export function loadSettings(file: string, envFile?: string): ReviewSettings {
       typeof raw.deliveryNoteText === 'string'
         ? raw.deliveryNoteText
         : defaults.deliveryNoteText,
+    editorUriTemplate:
+      typeof raw.editorUriTemplate === 'string'
+        ? raw.editorUriTemplate
+        : defaults.editorUriTemplate,
   };
 }
 

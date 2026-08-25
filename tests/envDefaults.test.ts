@@ -98,6 +98,28 @@ test('mutateSettings（PUT相当）でも未変更キーは .env デフォルト
   }
 });
 
+test('.env の ARK_EDITOR_URI_TEMPLATE が設定として読み込まれる', () => {
+  const tmp = makeTmpDir();
+  try {
+    const envFile = path.join(tmp, '.env');
+    // 未設定なら組み込みデフォルト（vscode://file{path}）。
+    assert.equal(
+      resolveDefaultSettings(envFile).editorUriTemplate,
+      DEFAULT_SETTINGS.editorUriTemplate
+    );
+    assert.equal(DEFAULT_SETTINGS.editorUriTemplate, 'vscode://file{path}');
+    // WSL 上のリポジトリを Windows 側の VS Code で開く想定の値。
+    fs.writeFileSync(
+      envFile,
+      'ARK_EDITOR_URI_TEMPLATE="vscode://vscode-remote/wsl+Ubuntu{path}"\n'
+    );
+    const settings = loadSettings(path.join(tmp, 'settings.json'), envFile);
+    assert.equal(settings.editorUriTemplate, 'vscode://vscode-remote/wsl+Ubuntu{path}');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('parseEnvFile はクォート・コメント・空行を扱える', () => {
   const tmp = makeTmpDir();
   try {

@@ -1211,7 +1211,38 @@ body.resizing #doc-frame { pointer-events: none; }
   user-select: none;
   display: flex;
   align-items: center;
+  /* The sidebar is 260px by default and the two buttons on this row take
+     ~200px of it, which left the label no width at all: it wrapped one
+     character per line. Wrapping instead lets the whole button box fall to a
+     second row (row-gap keeps the rows apart), and the label below keeps its
+     own text on one line, so the heading is either one row or two — never a
+     vertical stack of characters. */
+  flex-wrap: wrap;
+  row-gap: 6px;
   margin-top: 12px;
+}
+/* Heading label (its text is rewritten by the open/close toggle and by the
+   /files file count, hence the span). Never break it up: shrink to an ellipsis
+   in the extreme case instead. */
+.repo-tree-title > span, .tree-page-title > span {
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Button box of the sidebar heading (別タブで開く / <editor> で開く). Shrinkable
+   so that on the second row the buttons themselves wrap and stay inside the
+   sidebar; both rows stay flush right. */
+.repo-tree-actions {
+  margin-left: auto;
+  flex: 0 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
 }
 .repo-tree { margin-bottom: 8px; }
 .repo-tree .tree-dir { cursor: pointer; user-select: none; }
@@ -1278,6 +1309,10 @@ table.diff.file-view td.num:hover { color: var(--muted); font-weight: 400; }
   background: var(--btn-hover-bg);
 }
 .repo-tree-open { font-size: 11px; }
+/* Inside .repo-tree-actions the box itself is right-aligned and its gap spaces
+   the buttons, so they must not claim the free space individually (several
+   margin-left:auto siblings split it and drift apart). */
+.repo-tree-actions .repo-tree-open { margin-left: 0; }
 /* .file-header is monospace + bold; the label reads better in the body font. */
 .file-open-tab {
   font-size: 12px;
@@ -1285,6 +1320,17 @@ table.diff.file-view td.num:hover { color: var(--muted); font-weight: 400; }
 }
 
 /* ---------- standalone repo tree page (/files) ---------- */
+
+/* Heading of the left pane: a flex row so the 「エディタで開く」 link can sit at
+   its right edge (.repo-tree-open uses margin-left: auto). Only one button
+   rides here and the pane is 320px, so it fits on the row; wrapping is the
+   same safety net as on the sidebar heading for very narrow panes. */
+.tree-page-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
 
 /* Two panes via the existing .layout flex row: the left pane reuses .sidebar
    (sticky, own vertical scroll) plus the same .sidebar-resizer drag handle,

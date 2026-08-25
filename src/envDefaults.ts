@@ -62,5 +62,9 @@ export function resolveDefaultSettings(envFile: string): ReviewSettings {
       typeof env.ARK_DELIVERY_NOTE_TEXT === 'string'
         ? env.ARK_DELIVERY_NOTE_TEXT.slice(0, MAX_TEXT)
         : DEFAULT_SETTINGS.deliveryNoteText,
+    editorUriTemplate:
+      typeof env.ARK_EDITOR_URI_TEMPLATE === 'string'
+        ? env.ARK_EDITOR_URI_TEMPLATE.slice(0, MAX_TEXT)
+        : DEFAULT_SETTINGS.editorUriTemplate,
   };
 }
