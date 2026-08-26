@@ -119,7 +119,7 @@ export function renderSnapshotHtml(data: DiffData, info: SnapshotPageInfo): stri
 `;
 }
 
-// One tracked repository file for the standalone /file/<path> page, opened
+// One repository file for the standalone /file/<path> page, opened
 // from a repo-file pin panel's「新しいタブで開く」. Content mirrors the
 // /api/file response shape.
 export interface RepoFilePage {
@@ -160,8 +160,8 @@ export function renderFileHtml(info: RepoFilePage): string {
 `;
 }
 
-// Standalone two-pane page for browsing every tracked repository file
-// (/files). Mirrors renderFileHtml: same client bundle, app.js switches to
+// Standalone two-pane page for browsing every repository file — tracked and
+// untracked, ignored excluded — (/files). Mirrors renderFileHtml: same client bundle, app.js switches to
 // the tree view when window.__TREE__ is set. The file list itself is NOT
 // embedded — the client fetches it from /api/repo-files, so this shell never
 // goes stale. Unlike the review page it also never auto-reloads, so tree

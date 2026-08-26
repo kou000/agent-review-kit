@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { after, before, test } from 'node:test';
-import { parseUnifiedDiff, runGitDiff } from '../src/gitDiff';
+import { parseUnifiedDiff, runGitDiff, runGitLsFiles } from '../src/gitDiff';
 import { FileDiff } from '../src/types';
 
 let tmp: string;
@@ -73,6 +73,20 @@ test('--base diff also includes untracked files as added and excludes ignored', 
   assert.equal(m.get('root_untracked.txt')?.status, 'added');
   assert.equal(m.has('debug.log'), false);
   assert.equal(m.has('ignored_dir/f.txt'), false);
+});
+
+test('runGitLsFiles lists tracked + untracked files, ignored excluded (diff と同じ境界)', () => {
+  const files = runGitLsFiles(tmp);
+
+  // tracked
+  assert.ok(files.includes('tracked.txt'));
+  assert.ok(files.includes('.gitignore'));
+  // untracked (not ignored): 差分に出る新規ファイルはツリーにも出る
+  assert.ok(files.includes('root_untracked.txt'));
+  assert.ok(files.includes('newdir/sub/newfile.rs'));
+  // ignored: .env 等の秘密ファイルは従来どおり出ない
+  assert.equal(files.includes('debug.log'), false);
+  assert.equal(files.includes('ignored_dir/f.txt'), false);
 });
 
 test('untracked binary files are marked binary, matching tracked binary handling', () => {

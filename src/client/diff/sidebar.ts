@@ -207,7 +207,8 @@ export function buildSidebar() {
   loadCommitList(commitHeading, commitList);
 
   // Repository file viewer (support feature): a collapsed-by-default section
-  // listing every tracked file. The list loads lazily on first expand;
+  // listing every repository file (untracked included, ignored excluded).
+  // The list loads lazily on first expand;
   // clicking a file opens it read-only in the pin stack (see openRepoFile).
   const repoHeading = document.createElement('div');
   repoHeading.className = 'sidebar-title repo-tree-title';

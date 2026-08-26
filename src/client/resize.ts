@@ -109,7 +109,7 @@ export function restorePersistedWidths() {
 // Tree-pane width (px) on the /files page. Deliberately NOT sharing
 // --sidebar-width / ark-sidebar-width with the review sidebar: there the tree
 // is a side navigation next to the diff, while on /files it IS the page — it
-// lists every tracked file, so deep paths routinely need more room than the
+// lists every repository file, so deep paths routinely need more room than the
 // review sidebar's 480px cap, and a wider pane there should not shrink the
 // diff on the review page. Same flavour as setSidebarWidth otherwise (clamp,
 // CSS variable, localStorage), with the identical minimum so the drag feels

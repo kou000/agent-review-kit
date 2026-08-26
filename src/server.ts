@@ -276,10 +276,11 @@ function validateIntent(v: unknown): { intent?: CommentIntent } | string {
 // matching generate's newLines embed cap.
 const MAX_FILE_VIEW_BYTES = 1024 * 1024;
 
-// Read one tracked repository file for the repo-file viewer. Only files
-// listed by `git ls-files` are served — the list is both the path validation
-// (no traversal, no .agent-review internals) and a guard against exposing
-// untracked secrets (.env etc.). Returns the /api/file payload shape shared
+// Read one repository file (tracked or untracked-but-not-ignored, matching
+// the diff's boundary) for the repo-file viewer. Only files listed by
+// runGitLsFiles are served — the list is both the path validation (no
+// traversal, no .agent-review internals) and a guard against exposing
+// ignored secrets (.env etc.). Returns the /api/file payload shape shared
 // with the standalone /file/<path> page, or null for anything not servable.
 async function readRepoFile(projectDir: string, relPath: string): Promise<RepoFilePage | null> {
   if (!relPath) return null;
@@ -295,8 +296,7 @@ async function readRepoFile(projectDir: string, relPath: string): Promise<RepoFi
   } catch {
     return null;
   }
-  // Tracked symlinks are rejected too: following one could read outside the
-  // project.
+  // Symlinks are rejected too: following one could read outside the project.
   if (!stat.isFile()) return null;
   if (stat.size > MAX_FILE_VIEW_BYTES) return { path: relPath, tooLarge: true };
   const buf = fs.readFileSync(abs);
@@ -427,8 +427,9 @@ async function handle(
     return;
   }
 
-  // Standalone two-pane page for browsing every tracked repository file,
-  // opened from the sidebar's「リポジトリのファイル」heading. The file list
+  // Standalone two-pane page for browsing every repository file (tracked and
+  // untracked, ignored files excluded), opened from the sidebar's
+  //「リポジトリのファイル」heading. The file list
   // is fetched client-side (/api/repo-files) and the page never auto-reloads,
   // so tree state survives the agent regenerating the diff.
   if (method === 'GET' && p === '/files') {
@@ -440,16 +441,17 @@ async function handle(
     return;
   }
 
-  // Standalone read-only page for one tracked repository file, opened from a
+  // Standalone read-only page for one repository file, opened from a
   // repo-file pin panel's「新しいタブで開く」. Same guard as /api/file: only
-  // git-tracked regular files are served.
+  // regular files listed by runGitLsFiles (tracked + untracked, ignored
+  // excluded) are served.
   const fileMatch = /^\/file\/(.+)$/.exec(p);
   if (method === 'GET' && fileMatch) {
     const rel = decodeURIComponent(fileMatch[1]);
     const info = await readRepoFile(path.dirname(paths.dir), rel);
     if (!info) {
       res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-      res.end(`file not found (tracked files only): ${rel}`);
+      res.end(`file not found (not a repository file): ${rel}`);
       return;
     }
     res.writeHead(200, {
@@ -715,8 +717,9 @@ async function handle(
     return;
   }
 
-  // Every tracked file of the repository, for the sidebar's repo-file tree
-  // (support feature: view unchanged files next to the diff).
+  // Every repository file (tracked + untracked, ignored excluded), for the
+  // sidebar's repo-file tree (support feature: view unchanged files next to
+  // the diff).
   if (method === 'GET' && p === '/api/repo-files') {
     try {
       json(res, 200, { files: runGitLsFiles(path.dirname(paths.dir)) });
@@ -726,23 +729,24 @@ async function handle(
     return;
   }
 
-  // Content of one tracked file (repo-file viewer pin panel). Highlighted
+  // Content of one repository file (repo-file viewer pin panel). Highlighted
   // per request with the same Shiki setup as generate.
   if (method === 'GET' && p === '/api/file') {
     const rel = url.searchParams.get('path') ?? '';
     const info = await readRepoFile(path.dirname(paths.dir), rel);
     if (!info) {
-      json(res, 404, { error: `file not found (tracked files only): ${rel}` });
+      json(res, 404, { error: `file not found (not a repository file): ${rel}` });
       return;
     }
     json(res, 200, { file: info });
     return;
   }
 
-  // Full-text search over the tracked files, for the /files page's search box.
-  // `git grep` is the whole implementation: tracked files only (the same
-  // safety boundary as /api/file) and binaries excluded. Literal search by
-  // default; regex=1 / case=1 switch the two flags.
+  // Full-text search for the /files page's search box. `git grep` is the
+  // whole implementation: tracked files only (deliberately narrower than the
+  // tree/viewer, which also cover untracked files — see runGitGrep) and
+  // binaries excluded. Literal search by default; regex=1 / case=1 switch the
+  // two flags.
   if (method === 'GET' && p === '/api/grep') {
     const q = url.searchParams.get('q') ?? '';
     if (!q) {

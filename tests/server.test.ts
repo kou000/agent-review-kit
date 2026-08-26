@@ -865,11 +865,22 @@ test('POST /api/documents/:id/edit は未知の id なら 404、readOnlyMode 中
 
 /* ---------- リポジトリファイルビューア (GET /api/repo-files, /api/file, /file/:path) ---------- */
 
-test('GET /api/repo-files は git 追跡ファイルの一覧を返す', async () => {
+test('GET /api/repo-files は追跡ファイルと未追跡ファイルを返し、ignore 対象と .agent-review は含めない', async () => {
+  // 未追跡（.gitignore 対象外）は差分と同じ境界でツリーにも出る。
+  fs.writeFileSync(path.join(tmp, '.gitignore'), '*.env\n');
+  fs.writeFileSync(path.join(tmp, 'untracked-new.ts'), 'export const fresh = 1;\n');
+  fs.writeFileSync(path.join(tmp, 'untracked-secret.env'), 'TOKEN=xyz\n');
   const res = await fetch(`${baseUrl}/api/repo-files`);
   assert.equal(res.status, 200);
   const data = (await res.json()) as { files: string[] };
-  assert.ok(data.files.includes('README.md'));
+  assert.ok(data.files.includes('README.md')); // tracked
+  assert.ok(data.files.includes('untracked-new.ts')); // untracked
+  assert.equal(data.files.includes('untracked-secret.env'), false); // ignored
+  // .agent-review/ は self-ignore（generate/publishHtml が書く .gitignore）で除外。
+  assert.equal(
+    data.files.some((f) => f.startsWith('.agent-review/')),
+    false
+  );
 });
 
 test('GET /api/file は追跡ファイルの行とハイライトを返す', async () => {
@@ -885,13 +896,21 @@ test('GET /api/file は追跡ファイルの行とハイライトを返す', asy
   assert.match(data.file.html![0], /color:#[0-9a-fA-F]{6}/);
 });
 
-test('GET /api/file は未追跡ファイル・プロジェクト外パスを 404 で拒否する', async () => {
-  // 未追跡ファイル（.env のような秘密情報を配信しないことの検証）。
-  fs.writeFileSync(path.join(tmp, 'untracked-secret.env'), 'TOKEN=xyz\n');
-  const untracked = await fetch(
+test('GET /api/file は未追跡（ignore 対象外）ファイルも読める', async () => {
+  // ツリーに出るファイルは中身も閲覧できる（前テストで作成済み）。
+  const res = await fetch(`${baseUrl}/api/file?path=${encodeURIComponent('untracked-new.ts')}`);
+  assert.equal(res.status, 200);
+  const data = (await res.json()) as { file: { path: string; lines: string[] } };
+  assert.equal(data.file.path, 'untracked-new.ts');
+  assert.equal(data.file.lines[0], 'export const fresh = 1;');
+});
+
+test('GET /api/file は ignore 対象ファイル・プロジェクト外パスを 404 で拒否する', async () => {
+  // .gitignore 対象（.env のような秘密情報を配信しないことの検証。前テストで作成済み）。
+  const ignored = await fetch(
     `${baseUrl}/api/file?path=${encodeURIComponent('untracked-secret.env')}`
   );
-  assert.equal(untracked.status, 404);
+  assert.equal(ignored.status, 404);
 
   const outside = await fetch(`${baseUrl}/api/file?path=${encodeURIComponent('../outside.txt')}`);
   assert.equal(outside.status, 404);
