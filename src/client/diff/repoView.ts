@@ -84,7 +84,8 @@ export function openRepoFile(filePath) {
   });
 }
 
-// Nested tree of every tracked file, for the sidebar's「リポジトリのファイル」
+// Nested tree of every repository file (tracked + untracked, ignored
+// excluded), for the sidebar's「リポジトリのファイル」
 // section and the standalone /files page. Directories start collapsed and
 // their children render lazily on first expand (repos can hold thousands of
 // files). Files already in the diff are dimmed — their content is on the main

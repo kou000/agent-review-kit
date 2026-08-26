@@ -28,12 +28,15 @@ function gitAllowDiffExit(args: string[], cwd: string): string {
   }
 }
 
-// Tracked files of the repository, for the repo-file viewer. -z avoids git's
-// path quoting so non-ASCII names come through verbatim. Deliberately tracked
-// files ONLY: the list doubles as the serving allowlist (no traversal, no
-// .agent-review internals, no untracked secrets like .env).
+// Repository files for the repo-file viewer: tracked (--cached) plus
+// untracked-but-not-ignored (--others --exclude-standard), the same boundary
+// as runUntrackedDiff — a brand-new file that shows up in the diff must also
+// show up in the tree. -z avoids git's path quoting so non-ASCII names come
+// through verbatim. The list doubles as the serving allowlist: no traversal,
+// no .agent-review internals (self-ignored by generate/publishHtml, so
+// --exclude-standard drops them), no ignored secrets like .env.
 export function runGitLsFiles(cwd: string): string[] {
-  return git(['ls-files', '-z'], cwd)
+  return git(['ls-files', '-z', '--cached', '--others', '--exclude-standard'], cwd)
     .split('\0')
     .filter((p) => p.length > 0);
 }
@@ -50,7 +53,7 @@ export function isGitRepo(cwd: string): boolean {
   }
 }
 
-/* ---------- tracked-file grep (search box on the /files page) ---------- */
+/* ---------- repo-file grep (search box on the /files page) ---------- */
 
 export interface GrepMatch {
   path: string;
@@ -77,8 +80,10 @@ export const MAX_GREP_RESULTS = 500;
 export const MAX_GREP_LINE_CHARS = 400;
 
 // `git grep` across the repository. Tracked files ONLY (git grep's default),
-// the same safety boundary as the repo-file viewer — no untracked secrets, no
-// .agent-review internals — and -I keeps binaries out. The query always goes
+// deliberately narrower than the repo-file tree/viewer (runGitLsFiles), which
+// also lists untracked files: the accepted asymmetry is that search skips
+// untracked files. Ignored secrets and .agent-review internals stay out
+// either way, and -I keeps binaries out. The query always goes
 // in behind `-e`, never as a bare argument, so a value starting with '-' can
 // never be taken for an option.
 export function runGitGrep(query: string, opts: GrepOptions, cwd: string): GrepOutcome {
