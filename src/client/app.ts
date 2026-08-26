@@ -16,8 +16,12 @@ import {
 } from './diff/render.js';
 import { renderTreePage } from './diff/treePage.js';
 import { docRefresh, initDocMode } from './doc/index.js';
+import { setDocPanelCollapsed } from './doc/panel.js';
 
 export function focusComment(id) {
+  // 全コメント非表示中はカードに layout がなく scrollIntoView が効かない。
+  // サイドバーやトーストからのジャンプは「見たい」意思表示なので解除する。
+  if (!DOC && state.commentsHidden) setCommentsHidden(false);
   const card = document.querySelector(
     '.comment-card[data-comment-id="' + id + '"]'
   );
@@ -170,6 +174,43 @@ export function refresh() {
 
 /* ---------- topbar controls (settings gear + mode badge) ---------- */
 
+/* ---- 全コメント表示/非表示トグル ----
+ * インラインのコメントスレッドが行間を広げてコードが読みづらくなるのを
+ * 避けるため、コメント表示をまとめて消す topbar ボタン。
+ * diff ページでは body クラス（CSS で thread-row 等を display:none）で隠す。
+ * DOM には残るので、非表示中に届いた新着も再表示すればそのまま見える。
+ * コメント投稿フォームは隠さないため、非表示中も新規投稿はできる。
+ * doc ページはコメントが行間ではなく右パネルに出るので、既存のパネル
+ * 折りたたみ（setDocPanelCollapsed、永続化キーもそちらの既存のもの）に
+ * 委譲し、ボタンの見た目だけを共通化する。 */
+const COMMENTS_HIDDEN_KEY = 'ark-comments-hidden';
+
+export function updateCommentsToggle() {
+  const btn = state.commentsToggleBtn;
+  if (!btn) return;
+  const hidden = DOC ? state.docPanelCollapsed : state.commentsHidden;
+  btn.textContent =
+    (hidden ? 'コメントを表示' : 'コメントを隠す') + ' (' + state.comments.length + ')';
+  btn.title = hidden
+    ? '非表示にしたコメントを再表示する'
+    : 'すべてのコメント表示を隠す（コメントの投稿は引き続き可能）';
+  btn.setAttribute('aria-pressed', hidden ? 'true' : 'false');
+  btn.classList.toggle('active', hidden);
+}
+
+export function setCommentsHidden(on) {
+  state.commentsHidden = !!on;
+  document.body.classList.toggle('comments-hidden', state.commentsHidden);
+  try { localStorage.setItem(COMMENTS_HIDDEN_KEY, on ? '1' : '0'); } catch (e) { /* ignore */ }
+  updateCommentsToggle();
+}
+
+function restoreCommentsHidden() {
+  try {
+    if (localStorage.getItem(COMMENTS_HIDDEN_KEY) === '1') setCommentsHidden(true);
+  } catch (e) { /* ignore */ }
+}
+
 // Every place that learns the current settings (status poll, settings PUT
 // response) routes through here, so the read-only badge and the intent
 // selectors can never disagree with the server.
@@ -269,6 +310,16 @@ export function setupTopbarControls() {
   state.modeBadge.title = '読み取り専用モード: エージェントはコードを修正せず回答のみ行います';
   state.modeBadge.hidden = true;
   inner.appendChild(state.modeBadge);
+
+  state.commentsToggleBtn = document.createElement('button');
+  state.commentsToggleBtn.id = 'comments-toggle-btn';
+  state.commentsToggleBtn.type = 'button';
+  state.commentsToggleBtn.addEventListener('click', function () {
+    if (DOC) setDocPanelCollapsed(!state.docPanelCollapsed);
+    else setCommentsHidden(!state.commentsHidden);
+  });
+  inner.appendChild(state.commentsToggleBtn);
+  updateCommentsToggle();
 
   const finishBtn = document.createElement('button');
   finishBtn.id = 'finish-btn';
@@ -374,6 +425,7 @@ function main() {
 
   restorePersistedWidths();
   setupTopbarControls();
+  restoreCommentsHidden();
   renderDiff();
   refresh();
   state.refreshTimer = setInterval(refresh, 3000);

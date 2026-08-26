@@ -1,4 +1,5 @@
 import { app, state } from '../state.js';
+import { updateCommentsToggle } from '../app.js';
 import { pruneThreadCollapse, renderThread } from '../threads.js';
 import { findRowFor } from './form.js';
 import { renderCommentList, updateTreeCounts } from './sidebar.js';
@@ -69,4 +70,5 @@ export function renderComments() {
 
   updateTreeCounts();
   renderCommentList();
+  updateCommentsToggle();
 }
