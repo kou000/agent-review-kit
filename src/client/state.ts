@@ -44,6 +44,10 @@ export const state: any = {
   threadCollapse: {},
   toastStack: null,
   lastCommentsJson: '',
+  // 全コメント非表示トグル（diff ページ）。localStorage 復元は app.ts の
+  // restoreCommentsHidden。doc ページは docPanelCollapsed が同じ役割を担う。
+  commentsHidden: false,
+  commentsToggleBtn: null, // topbar の「コメントを隠す/表示」ボタン
   modeBadge: null,
   branchLabel: null,
   settingsPanel: null,

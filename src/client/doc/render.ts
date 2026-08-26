@@ -1,3 +1,4 @@
+import { updateCommentsToggle } from '../app.js';
 import { esc } from '../dom.js';
 import { state } from '../state.js';
 import { pruneThreadCollapse, renderThread, threadStructure } from '../threads.js';
@@ -40,6 +41,7 @@ export function docAppendThread(container, list, canJump, topId) {
 
 export function docRenderComments() {
   pruneThreadCollapse();
+  updateCommentsToggle();
   if (!state.docThreadsEl) return;
   const doc = frameDoc();
   // Until the frame has loaded there is nothing to resolve against; the

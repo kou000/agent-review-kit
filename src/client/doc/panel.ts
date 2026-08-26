@@ -1,4 +1,5 @@
 import { state } from '../state.js';
+import { updateCommentsToggle } from '../app.js';
 import { frameDoc } from './resolve.js';
 
 // Collapsed state is a flag independent of the width, so reopening restores
@@ -11,6 +12,9 @@ export function setDocPanelCollapsed(on) {
   state.docLayoutEl.classList.toggle('panel-collapsed', on);
   if (state.docReopenBtn) state.docReopenBtn.classList.toggle('visible', on);
   syncDocMarksHidden();
+  // topbar の「コメントを隠す/表示」ボタン（app.ts）は doc ページでは
+  // このパネル折りたたみに委譲しているので、どこから畳んでもラベルを揃える。
+  updateCommentsToggle();
   try { localStorage.setItem(DOC_PANEL_COLLAPSED_KEY, on ? '1' : '0'); } catch (e) { /* ignore */ }
 }
 
