@@ -10,6 +10,7 @@ import {
   threadStructure,
 } from '../threads.js';
 import { focusComment } from '../app.js';
+import { setCollapsed } from './collapse.js';
 import { appendEditorLink } from './editorLink.js';
 import { updatePinButtons } from './pins.js';
 import { openRepoFile, renderRepoTree } from './repoView.js';
@@ -103,7 +104,11 @@ function renderTreeNode(node, container, depth) {
     fEl.appendChild(badge);
     fEl.addEventListener('click', function () {
       const el = document.getElementById('file-' + f.index);
-      if (el && typeof el.scrollIntoView === 'function') {
+      if (!el) return;
+      // 確認済み等で折りたたまれていても、クリックで飛んだ先が読めるように
+      // 展開してからスクロールする（確認済みマーク自体は維持する）。
+      if (el.classList.contains('collapsed')) setCollapsed(el, false);
+      if (typeof el.scrollIntoView === 'function') {
         el.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
     });
