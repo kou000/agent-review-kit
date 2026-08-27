@@ -110,6 +110,13 @@ export interface ReviewComment {
   // Anchor inside the rendered document. null/omitted = a comment on the
   // whole document (the HTML-review analog of an overall comment).
   htmlTarget?: HtmlTarget | null;
+  // Images the user pasted into the comment form, as ids of files stored
+  // under the branch's images/ directory (served at /api/images/<id>).
+  // Deliberately NOT data URIs: comments.json stays small, and wait-comments
+  // delivers these as file paths so the agent's context only ever carries a
+  // path (it Reads the file when it actually needs the pixels). Omitted = no
+  // images (backward compatible).
+  images?: string[];
   // A reply to another comment. When set, this comment's anchor (file/side/all
   // line numbers) is copied from its parent, and parentId always points at a
   // top-level comment (threads are one level deep). Omitted/null = top-level.

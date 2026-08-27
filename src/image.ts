@@ -54,3 +54,41 @@ export function encodeImageToDataUri(filePath: string): string {
   const base64 = fs.readFileSync(filePath).toString('base64');
   return `data:${mime};base64,${base64}`;
 }
+
+/* ---------- comment attachment images (user-pasted, stored as files) ---------- */
+
+// Shape of a stored comment-image id. It doubles as the file name under the
+// branch's images/ directory and appears in URLs (/api/images/<id>), so the
+// pattern is deliberately narrow: no separators, no dots outside the single
+// extension — an id that matches can never traverse out of imagesDir.
+export const COMMENT_IMAGE_ID_RE = /^img_[a-z0-9]+\.(png|jpg|gif|webp)$/;
+
+export function newCommentImageId(ext: string): string {
+  const rand = Math.random().toString(36).slice(2, 8);
+  return `img_${Date.now().toString(36)}${rand}.${ext}`;
+}
+
+// Detect the actual image format from the file's magic bytes. The upload's
+// Content-Type header is untrusted; the signature decides both the stored
+// extension and (via MIME_BY_EXT) the MIME the file is served back with.
+// Returns the canonical extension, or null for anything not a supported image.
+export function sniffImageExt(buf: Buffer): 'png' | 'jpg' | 'gif' | 'webp' | null {
+  if (buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) {
+    return 'png';
+  }
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'jpg';
+  if (buf.length >= 4 && buf.toString('latin1', 0, 4) === 'GIF8') return 'gif';
+  if (
+    buf.length >= 12 &&
+    buf.toString('latin1', 0, 4) === 'RIFF' &&
+    buf.toString('latin1', 8, 12) === 'WEBP'
+  ) {
+    return 'webp';
+  }
+  return null;
+}
+
+// MIME for serving a stored comment image, from its (validated) id.
+export function mimeForImageId(id: string): string | null {
+  return MIME_BY_EXT[path.extname(id).toLowerCase()] ?? null;
+}

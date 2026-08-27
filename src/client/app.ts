@@ -163,6 +163,9 @@ export function isEditingDraft() {
     if (document.activeElement === ta) return true;
     if (ta.value && ta.value.trim() !== '') return true;
   }
+  // Pasted-but-unsent images are a draft too: a re-render would rebuild the
+  // form and silently drop the attachments (see attachImagePaste).
+  if (document.querySelector('.comment-form.has-images, .reply-form.has-images')) return true;
   return false;
 }
 

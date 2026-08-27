@@ -1,5 +1,6 @@
 import { api } from '../api.js';
 import { copyPathButton, esc, fmtDate } from '../dom.js';
+import { attachImagePaste } from '../images.js';
 import { intentFieldHtml, selectedIntent, syncIntentFields } from '../intent.js';
 import { app, connState, DIFF, diffMeta, state } from '../state.js';
 import {
@@ -281,7 +282,7 @@ function buildOverallSection() {
     '<p class="hint">ファイルや行に紐づかない、レビュー全体への指摘・質問。</p>' +
     '<div class="overall-list"></div>' +
     '<div class="overall-form comment-form">' +
-    '<textarea placeholder="レビュー全体へのコメント（Ctrl+Enterで送信）"></textarea>' +
+    '<textarea placeholder="レビュー全体へのコメント（Ctrl+Enterで送信 / 画像はペーストで添付）"></textarea>' +
     intentFieldHtml() +
     '<div class="buttons"><button class="primary overall-submit">コメントを追加</button></div>' +
     '</div>';
@@ -290,13 +291,25 @@ function buildOverallSection() {
   const textarea = sec.querySelector('textarea');
   const btn: any = sec.querySelector('.overall-submit');
   syncIntentFields(form);
+  const attachments = attachImagePaste(form, textarea);
 
   function submit() {
-    const body = textarea.value.trim();
+    const images = attachments.ids();
+    if (attachments.busy()) {
+      alert('画像をアップロード中です。完了までお待ちください。');
+      return;
+    }
+    // An image alone is a valid comment; the server still requires a body.
+    const body = textarea.value.trim() || (images.length ? '（画像添付）' : '');
     if (!body) return;
     btn.disabled = true;
-    api('POST', '/api/comments', { body: body, intent: selectedIntent(form) }).then(function () {
+    api('POST', '/api/comments', {
+      body: body,
+      intent: selectedIntent(form),
+      images: images,
+    }).then(function () {
       textarea.value = '';
+      attachments.clear();
       // Blur so a Ctrl+Enter submit (which keeps focus) doesn't leave the
       // textarea as activeElement — isEditingDraft() would otherwise defer
       // the refresh forever and the new comment would never appear.

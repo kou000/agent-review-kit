@@ -1,5 +1,6 @@
 import { api } from '../api.js';
 import { bodySnippet, esc } from '../dom.js';
+import { attachImagePaste } from '../images.js';
 import { intentFieldHtml, selectedIntent, syncIntentFields } from '../intent.js';
 import { DOC, state } from '../state.js';
 import { focusComment, refresh } from '../app.js';
@@ -31,7 +32,7 @@ export function openDocCommentForm(target) {
   wrap.className = 'comment-form doc-comment-form';
   wrap.innerHTML =
     '<div class="form-meta">' + esc(docTargetPreview(target)) + '</div>' +
-    '<textarea placeholder="コメントを入力（Ctrl+Enterで送信）"></textarea>' +
+    '<textarea placeholder="コメントを入力（Ctrl+Enterで送信 / 画像はペーストで添付）"></textarea>' +
     intentFieldHtml() +
     '<div class="buttons">' +
     '<button class="primary submit">コメントを追加</button>' +
@@ -43,10 +44,17 @@ export function openDocCommentForm(target) {
   state.docFormSlot.appendChild(wrap);
   syncIntentFields(wrap);
   const textarea = wrap.querySelector('textarea');
+  const attachments = attachImagePaste(wrap, textarea);
   textarea.focus();
 
   function submit() {
-    const body = textarea.value.trim();
+    const images = attachments.ids();
+    if (attachments.busy()) {
+      alert('画像をアップロード中です。完了までお待ちください。');
+      return;
+    }
+    // An image alone is a valid comment; the server still requires a body.
+    const body = textarea.value.trim() || (images.length ? '（画像添付）' : '');
     if (!body) return;
     (wrap.querySelector('.submit') as any).disabled = true;
     api('POST', '/api/comments', {
@@ -54,6 +62,7 @@ export function openDocCommentForm(target) {
       htmlTarget: target,
       body: body,
       intent: selectedIntent(wrap),
+      images: images,
     }).then(function () {
       closeDocForm();
       refresh();

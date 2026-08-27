@@ -30,6 +30,8 @@ export interface ReviewPaths {
   snapshotsIndex: string;
   documentsDir: string;
   documentsIndex: string;
+  // Comment attachment images (user-pasted), one file per image id.
+  imagesDir: string;
 }
 
 // Raw current-branch name. Detached HEAD falls back to the short sha (each
@@ -112,6 +114,7 @@ export function reviewPaths(cwd: string = process.cwd()): ReviewPaths {
     snapshotsIndex: path.join(snapshotsDir, 'index.json'),
     documentsDir,
     documentsIndex: path.join(documentsDir, 'index.json'),
+    imagesDir: path.join(branchDir, 'images'),
   };
 }
 

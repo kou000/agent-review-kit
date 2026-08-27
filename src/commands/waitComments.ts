@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
-import { ensureDir, reviewPaths } from '../paths';
+import { ensureDir, ReviewPaths, reviewPaths } from '../paths';
 import { loadComments, loadFinished, loadSettings, mutateComments, nowIso } from '../store';
 import { ReviewComment, ReviewSettings, commentAuthor } from '../types';
 
@@ -556,6 +556,38 @@ function buildDeliveryNote(settings: ReviewSettings): string | undefined {
   return text ? text : undefined;
 }
 
+// What rides with attached images so the consumer needs no skill-file
+// knowledge of the feature (instructions decay with context distance; text
+// riding with the batch does not).
+const IMAGES_NOTE =
+  'imagePaths はユーザーがコメントに添付した画像ファイルの絶対パス。' +
+  '内容の確認が必要なコメントについてのみ、Read ツールでそのパスを読み込んで画像として参照すること。';
+
+// The delivered JSON for one "received" batch. Comments carry pasted images
+// as stored ids (see ReviewComment.images); the agent-facing payload swaps
+// them for absolute file paths so the agent's context only ever holds a path
+// and it Reads the file when it actually needs the pixels — never base64.
+function deliveredPayload(
+  received: ReviewComment[],
+  paths: ReviewPaths,
+  settings: ReviewSettings
+): Record<string, unknown> {
+  const note = buildDeliveryNote(settings);
+  const hasImages = received.some((c) => c.images !== undefined && c.images.length > 0);
+  const comments = received.map((c) => {
+    if (!c.images || c.images.length === 0) return c as unknown as Record<string, unknown>;
+    const { images, ...rest } = c;
+    return { ...rest, imagePaths: images.map((id) => path.join(paths.imagesDir, id)) };
+  });
+  return {
+    status: 'received',
+    ...(note !== undefined && { note }),
+    ...(hasImages && { imagesNote: IMAGES_NOTE }),
+    settings,
+    comments,
+  };
+}
+
 // Normally only the user's live open comments are deliverable. Resume mode also
 // returns seen user comments left behind by an interrupted agent session.
 // Agent-authored findings stay open until the user replies or the review ends;
@@ -638,14 +670,7 @@ export async function waitComments(opts: WaitOptions = {}): Promise<void> {
           // The current settings ride along with every delivery so the consumer
           // (the agent) always has readOnlyMode etc. in front of it at triage.
           const settings = loadSettings(paths.settings, paths.envFile);
-          const note = buildDeliveryNote(settings);
-          console.log(
-            JSON.stringify(
-              { status: 'received', ...(note !== undefined && { note }), settings, comments: received },
-              null,
-              2
-            )
-          );
+          console.log(JSON.stringify(deliveredPayload(received, paths, settings), null, 2));
           return;
         }
       }
@@ -659,19 +684,7 @@ export async function waitComments(opts: WaitOptions = {}): Promise<void> {
         const finalReceived = takeDeliverable(paths.comments, opts);
         if (finalReceived.length > 0) {
           const settings = loadSettings(paths.settings, paths.envFile);
-          const note = buildDeliveryNote(settings);
-          console.log(
-            JSON.stringify(
-              {
-                status: 'received',
-                ...(note !== undefined && { note }),
-                settings,
-                comments: finalReceived,
-              },
-              null,
-              2
-            )
-          );
+          console.log(JSON.stringify(deliveredPayload(finalReceived, paths, settings), null, 2));
           return;
         }
         console.log(JSON.stringify({ status: 'finished', comments: [] }, null, 2));

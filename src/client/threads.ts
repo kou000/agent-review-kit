@@ -1,5 +1,6 @@
 import { api } from './api.js';
 import { bodySnippet, esc, escNl, fmtDate, isSafeImageDataUri } from './dom.js';
+import { attachImagePaste, commentBodyHtml, commentImagesHtml } from './images.js';
 import { intentFieldHtml, selectedIntent, syncIntentFields } from './intent.js';
 import { state } from './state.js';
 import { refresh } from './app.js';
@@ -153,6 +154,11 @@ export function commentCard(c: any, isReply?: boolean) {
     const range = c.startLine === c.endLine ? 'L' + c.startLine : 'L' + c.startLine + '-L' + c.endLine;
     posText = esc(c.file) + ' ' + (c.side === 'new' ? '' : '(旧) ') + esc(range);
   }
+  // Body text with [画像: <id>] markers rewritten to their inline image;
+  // whatever attachment isn't referenced by a marker still falls through to
+  // the below-the-body strip (commentImagesHtml), so nothing goes unshown.
+  const bodyRendered = commentBodyHtml(c.body, c.images);
+  const remainingImages = (c.images || []).filter(function (id) { return !bodyRendered.usedIds[id]; });
   let html =
     '<div class="meta">' +
     (isAgentComment(c) ? '<span class="who-pill">AI</span>' : '') +
@@ -162,7 +168,10 @@ export function commentCard(c: any, isReply?: boolean) {
     '<span>' + posText + '</span>' +
     '<span>' + esc(fmtDate(c.createdAt)) + '</span>' +
     '</div>' +
-    '<div class="body">' + esc(c.body) + '</div>';
+    '<div class="body">' + bodyRendered.html + '</div>' +
+    // Images the user pasted into the comment form (stored ids, served from
+    // /api/images/<id>; only ids matching the strict shape render).
+    commentImagesHtml(remainingImages);
   if (c.agentResponse && c.agentResponse.message) {
     html += '<div class="agent-response"><span class="who">agent</span>' +
       escNl(c.agentResponse.message);
@@ -390,7 +399,7 @@ export function appendReplyUI(td, top) {
     const form = document.createElement('div');
     form.className = 'reply-form';
     form.innerHTML =
-      '<textarea placeholder="返信を入力（Ctrl+Enterで送信）"></textarea>' +
+      '<textarea placeholder="返信を入力（Ctrl+Enterで送信 / 画像はペーストで添付）"></textarea>' +
       intentFieldHtml() +
       '<div class="buttons">' +
       '<button class="primary reply-submit">返信する</button>' +
@@ -399,6 +408,7 @@ export function appendReplyUI(td, top) {
     wrap.appendChild(form);
     syncIntentFields(form);
     const textarea = form.querySelector('textarea');
+    const attachments = attachImagePaste(form, textarea);
     textarea.focus();
 
     function close() {
@@ -406,13 +416,20 @@ export function appendReplyUI(td, top) {
       btn.style.display = '';
     }
     function submit() {
-      const body = textarea.value.trim();
+      const images = attachments.ids();
+      if (attachments.busy()) {
+        alert('画像をアップロード中です。完了までお待ちください。');
+        return;
+      }
+      // An image alone is a valid reply; the server still requires a body.
+      const body = textarea.value.trim() || (images.length ? '（画像添付）' : '');
       if (!body) return;
       (form.querySelector('.reply-submit') as any).disabled = true;
       api('POST', '/api/comments', {
         parentId: top.id,
         body: body,
         intent: selectedIntent(form),
+        images: images,
       }).then(function () {
         // Close the form (removing its textarea) before refreshing so the
         // just-submitted text no longer counts as an in-progress draft;
