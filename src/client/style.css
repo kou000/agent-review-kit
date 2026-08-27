@@ -1488,6 +1488,9 @@ table.diff.file-view td.num:hover { color: var(--muted); font-weight: 400; }
 }
 .tree-search-opts label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
 .tree-search-opts input { margin: 0; cursor: pointer; }
+/* 検索対象の切り替え（ファイルの中身 / ファイル名）。ペインは狭くできるので
+   収まらなければ折り返す。 */
+.tree-search-modes { flex-wrap: wrap; row-gap: 4px; }
 
 /* Status line above the hits (count, 検索中…, error) and the truncation note. */
 .tree-search-note {
@@ -1521,6 +1524,10 @@ table.diff.file-view td.num:hover { color: var(--muted); font-weight: 400; }
 }
 .grep-hit-loc { color: var(--muted); }
 .grep-hit.active .grep-hit-loc { color: var(--accent); }
+/* ファイル名検索の行はパスだけなので、grep の「場所」表示（muted）ではなく
+   本文と同じ濃さで見せる。 */
+.grep-hit-path { color: var(--fg); }
+.grep-hit.active .grep-hit-path { color: var(--accent); }
 
 /* Line jumped to from a search result — same tone as .comment-flash, but as a
    row background since an outline on a table row renders unevenly. */
