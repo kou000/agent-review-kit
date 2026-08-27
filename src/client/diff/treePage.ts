@@ -55,8 +55,9 @@ export function renderTreePage() {
   appendEditorLink(heading);
   side.appendChild(heading);
 
-  // 検索ボックス（左ペイン上部）: git grep をサーバ側で実行し、結果でツリー
-  // の表示を差し替える。
+  // 検索ボックス（左ペイン上部）: 中身の検索は git grep をサーバ側で実行し、
+  // ファイル名の検索は取得済みの一覧をその場で絞り込む。どちらも結果で
+  // ツリーの表示を差し替える。
   const search = document.createElement('div');
   search.className = 'tree-search';
   const searchRow = document.createElement('div');
@@ -79,6 +80,28 @@ export function renderTreePage() {
   searchRow.appendChild(clearBtn);
   search.appendChild(searchRow);
 
+  // 検索対象の切り替え。中身の検索はサーバ（git grep）、ファイル名の検索は
+  // /api/repo-files で取得済みの一覧をクライアント側で絞り込む。
+  const modeRow = document.createElement('div');
+  modeRow.className = 'tree-search-opts tree-search-modes';
+  const modeLabel = document.createElement('span');
+  modeLabel.textContent = '対象:';
+  modeRow.appendChild(modeLabel);
+  function modeRadio(labelText, checked) {
+    const label = document.createElement('label');
+    const radio = document.createElement('input');
+    radio.type = 'radio';
+    radio.name = 'tree-search-mode';
+    radio.checked = checked;
+    label.appendChild(radio);
+    label.appendChild(document.createTextNode(labelText));
+    modeRow.appendChild(label);
+    return radio;
+  }
+  modeRadio('ファイルの中身', true);
+  const nameMode = modeRadio('ファイル名', false);
+  search.appendChild(modeRow);
+
   const optRow = document.createElement('div');
   optRow.className = 'tree-search-opts';
   function optCheckbox(labelText) {
@@ -94,6 +117,22 @@ export function renderTreePage() {
   const caseBox = optCheckbox('大文字小文字を区別');
   search.appendChild(optRow);
   side.appendChild(search);
+
+  // 入力欄の文言だけがモードで変わる（オプションは両モード共通）。
+  function applyMode() {
+    const byName = nameMode.checked;
+    input.placeholder = byName ? 'ファイル名で検索' : 'ファイルの中を検索';
+    input.setAttribute(
+      'aria-label',
+      byName ? 'リポジトリのファイル名を検索' : 'リポジトリのファイル内を検索'
+    );
+  }
+  applyMode();
+
+  // ファイル名検索が絞り込む対象。/api/repo-files の応答をそのまま保持する
+  // （このページは再読み込みしないので取り直しは不要）。
+  let repoFiles: any[] = [];
+  let repoFilesLoaded = false;
 
   const treeWrap = document.createElement('div');
   treeWrap.className = 'repo-tree';
@@ -209,7 +248,7 @@ export function renderTreePage() {
     });
   }
 
-  /* ---------- search (GET /api/grep) ---------- */
+  /* ---------- search (中身: GET /api/grep / ファイル名: 一覧の絞り込み) ---------- */
 
   function showTree() {
     results.hidden = true;
@@ -270,10 +309,83 @@ export function renderTreePage() {
     }
   }
 
+  // ファイル名検索の結果件数の上限。行単位の grep（サーバ側 500 件）と同じ
+  // 考え方で、左ペインに数千行を積まないための頭打ち。
+  const MAX_NAME_HITS = 500;
+
+  // 絞り込みは「ファイル名」ではなくリポジトリルートからのパス全体に対して
+  // 行う（'treePage' でも 'client/diff' でも引ける）。オプションは中身の
+  // 検索と共通で、正規表現は JS の RegExp、既定は部分一致。
+  function nameMatcher(query) {
+    if (regexBox.checked) {
+      const re = new RegExp(query, caseBox.checked ? '' : 'i');
+      return function (p) { return re.test(p); };
+    }
+    if (caseBox.checked) {
+      return function (p) { return p.indexOf(query) !== -1; };
+    }
+    const lower = query.toLowerCase();
+    return function (p) { return p.toLowerCase().indexOf(lower) !== -1; };
+  }
+
+  // 一覧はページ読み込み時の /api/repo-files の応答をそのまま使うのでサーバ
+  // 往復なし。ファイル自体の中身は開いたときに取り直す（openInViewer）。
+  function runNameSearch(query) {
+    if (!repoFilesLoaded) {
+      showResults('ファイル一覧を読み込み中です');
+      return;
+    }
+    let match;
+    try {
+      match = nameMatcher(query);
+    } catch (e: any) {
+      showResults('正規表現が不正です: ' + (e && e.message ? e.message : String(e)));
+      return;
+    }
+    // /api/repo-files はパスの文字列配列（renderRepoTree と同じ形）。
+    const matched = repoFiles.filter(function (f) { return match(String(f)); });
+    if (!matched.length) {
+      showResults('「' + query + '」に一致するファイルはありません');
+      return;
+    }
+    const truncated = matched.length > MAX_NAME_HITS;
+    const hits = truncated ? matched.slice(0, MAX_NAME_HITS) : matched;
+    showResults('ファイル名の検索結果 (' + matched.length + '件)');
+    hits.forEach(function (f) {
+      const filePath = String(f);
+      const row = document.createElement('div');
+      row.className = 'grep-hit';
+      const loc = document.createElement('div');
+      loc.className = 'grep-hit-loc grep-hit-path';
+      loc.textContent = filePath;
+      loc.title = filePath;
+      row.appendChild(loc);
+      row.addEventListener('click', function () {
+        results.querySelectorAll('.grep-hit.active').forEach(function (el) {
+          el.classList.remove('active');
+        });
+        row.classList.add('active');
+        openInViewer(filePath);
+      });
+      results.appendChild(row);
+    });
+    if (truncated) {
+      const more = document.createElement('div');
+      more.className = 'tree-search-note tree-search-more';
+      more.textContent =
+        '先頭 ' + MAX_NAME_HITS + ' 件のみ表示しています。検索語を絞ってください。';
+      results.appendChild(more);
+    }
+  }
+
   function runSearch() {
     const query = input.value.trim();
     if (!query) {
       showTree();
+      return;
+    }
+    if (nameMode.checked) {
+      runNameSearch(query);
       return;
     }
     showResults('検索中…');
@@ -309,6 +421,10 @@ export function renderTreePage() {
   }
   regexBox.addEventListener('change', rerunIfSearching);
   caseBox.addEventListener('change', rerunIfSearching);
+  modeRow.addEventListener('change', function () {
+    applyMode();
+    rerunIfSearching();
+  });
   clearBtn.addEventListener('click', function () {
     input.value = '';
     showTree();
@@ -317,6 +433,8 @@ export function renderTreePage() {
 
   api('GET', '/api/repo-files').then(function (data) {
     const files = data.files || [];
+    repoFiles = files;
+    repoFilesLoaded = true;
     treeWrap.textContent = '';
     renderRepoTree(files, treeWrap, openInViewer);
     headingLabel.textContent = 'リポジトリのファイル (' + files.length + ')';
