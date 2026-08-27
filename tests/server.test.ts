@@ -1104,3 +1104,104 @@ test('editorUriTemplate は status/settings に載るが PUT /api/settings で�
   assert.equal(after.editorUriTemplate, 'vscode://file{path}');
   assert.equal((await getSettings()).editorUriTemplate, 'vscode://file{path}');
 });
+
+/* ---------- コメント添付画像 (POST/GET /api/images, comments.images) ---------- */
+
+// 1x1 の透明 PNG。マジックバイト検証・保存・配信の一連を賄う最小の実画像。
+const TINY_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64'
+);
+
+async function uploadImage(body: Buffer): Promise<Response> {
+  return fetch(`${baseUrl}/api/images`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body,
+  });
+}
+
+test('POST /api/images は PNG を保存して id を返し、GET で配信できる', async () => {
+  const res = await uploadImage(TINY_PNG);
+  assert.equal(res.status, 201);
+  const { id } = (await res.json()) as { id: string };
+  // Content-Type ヘッダではなくマジックバイトで判定される（octet-stream で送っても png）。
+  assert.match(id, /^img_[a-z0-9]+\.png$/);
+  assert.ok(fs.existsSync(path.join(reviewPaths(tmp).imagesDir, id)));
+
+  const get = await fetch(`${baseUrl}/api/images/${id}`);
+  assert.equal(get.status, 200);
+  assert.equal(get.headers.get('content-type'), 'image/png');
+  assert.equal(get.headers.get('x-content-type-options'), 'nosniff');
+  assert.deepEqual(Buffer.from(await get.arrayBuffer()), TINY_PNG);
+});
+
+test('POST /api/images は画像でないデータを 400 で拒否する', async () => {
+  const res = await uploadImage(Buffer.from('<html>not an image</html>'));
+  assert.equal(res.status, 400);
+});
+
+test('GET /api/images は id 形状に合わないパスを 404 にする', async () => {
+  for (const bad of ['..%2Fcomments.json', 'img_abc.txt', 'notimg.png']) {
+    const res = await fetch(`${baseUrl}/api/images/${bad}`);
+    assert.equal(res.status, 404, bad);
+  }
+});
+
+test('POST /api/comments は images を各コメント形（diff・全体・返信）に保存する', async () => {
+  const up = (await (await uploadImage(TINY_PNG)).json()) as { id: string };
+
+  // diff コメント
+  const diffRes = await fetch(`${baseUrl}/api/comments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      file: 'a.ts',
+      side: 'new',
+      startLine: 1,
+      endLine: 1,
+      startDiffLine: 1,
+      endDiffLine: 1,
+      body: 'with image',
+      images: [up.id],
+    }),
+  });
+  assert.equal(diffRes.status, 201);
+  const diffComment = ((await diffRes.json()) as { comment: { id: string; images?: string[] } })
+    .comment;
+  assert.deepEqual(diffComment.images, [up.id]);
+
+  // 返信
+  const replyRes = await fetch(`${baseUrl}/api/comments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ parentId: diffComment.id, body: 'reply image', images: [up.id] }),
+  });
+  assert.equal(replyRes.status, 201);
+  assert.deepEqual(
+    ((await replyRes.json()) as { comment: { images?: string[] } }).comment.images,
+    [up.id]
+  );
+
+  // 全体コメント（images 省略時はフィールドごと省かれる）
+  const overallRes = await fetch(`${baseUrl}/api/comments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ body: 'no image' }),
+  });
+  assert.equal(overallRes.status, 201);
+  assert.ok(
+    !('images' in ((await overallRes.json()) as { comment: Record<string, unknown> }).comment)
+  );
+});
+
+test('POST /api/comments は不正な画像 id・未アップロード id を 400 にする', async () => {
+  for (const images of [['../etc/passwd'], ['img_notuploaded.png'], 'img_x.png']) {
+    const res = await fetch(`${baseUrl}/api/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body: 'bad images', images }),
+    });
+    assert.equal(res.status, 400, JSON.stringify(images));
+  }
+});

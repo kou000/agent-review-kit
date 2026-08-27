@@ -15,7 +15,14 @@ import {
 } from './gitDiff';
 import { bakeDiffHighlight, highlightFile } from './highlight';
 import { documentHtmlPath, findDocument } from './htmlDocument';
-import { ReviewPaths, reviewPaths } from './paths';
+import {
+  COMMENT_IMAGE_ID_RE,
+  MAX_IMAGE_BYTES,
+  mimeForImageId,
+  newCommentImageId,
+  sniffImageExt,
+} from './image';
+import { ensureDir, ReviewPaths, reviewPaths } from './paths';
 import {
   renderCommitHtml,
   renderDocumentHtml,
@@ -76,6 +83,34 @@ function readBody(req: http.IncomingMessage): Promise<Record<string, unknown>> {
       }
     });
     req.on('error', reject);
+  });
+}
+
+// Read a raw (binary) request body up to maxBytes. Returns null when the body
+// exceeds the cap — the caller answers 413 and the connection is dropped so an
+// oversized upload never buffers fully in memory.
+function readRawBody(req: http.IncomingMessage, maxBytes: number): Promise<Buffer | null> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let done = false;
+    req.on('data', (c: Buffer) => {
+      if (done) return;
+      size += c.length;
+      if (size > maxBytes) {
+        done = true;
+        req.destroy();
+        resolve(null);
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on('end', () => {
+      if (!done) resolve(Buffer.concat(chunks));
+    });
+    req.on('error', (e) => {
+      if (!done) reject(e);
+    });
   });
 }
 
@@ -259,6 +294,33 @@ function validateCommentInput(b: Record<string, unknown>): CommentInput | string
     endDiffLine: b.endDiffLine as number,
     body,
   };
+}
+
+// Cap on attached images per comment. Screenshots of one finding are a
+// handful at most; the cap only stops a crafted request from ballooning
+// comments.json with references.
+const MAX_COMMENT_IMAGES = 8;
+
+/**
+ * Validate the optional `images` of a comment post: an array of previously
+ * uploaded image ids (POST /api/images). Every id must match the strict id
+ * shape AND exist on disk, so a comment can never reference a path outside
+ * imagesDir or an image that was never uploaded. Returns a spreadable
+ * fragment — `{}` when absent/empty — or an error message.
+ */
+function validateImages(v: unknown, imagesDir: string): { images?: string[] } | string {
+  if (v === undefined || v === null) return {};
+  if (!Array.isArray(v)) return 'images must be an array of image ids';
+  if (v.length > MAX_COMMENT_IMAGES) return `too many images (max ${MAX_COMMENT_IMAGES})`;
+  const out: string[] = [];
+  for (const id of v) {
+    if (typeof id !== 'string' || !COMMENT_IMAGE_ID_RE.test(id)) {
+      return `invalid image id: ${String(id)}`;
+    }
+    if (!fs.existsSync(path.join(imagesDir, id))) return `image not found: ${id}`;
+    out.push(id);
+  }
+  return out.length ? { images: out } : {};
 }
 
 /**
@@ -931,6 +993,60 @@ async function handle(
     return;
   }
 
+  // Upload one comment-attachment image (the raw image bytes are the request
+  // body). The magic bytes decide the stored format — the Content-Type header
+  // is ignored — and the returned id is what the comment form later posts in
+  // its `images` array. Files are stored per branch next to comments.json and
+  // are deliberately kept on delete (comments are soft-deleted too).
+  if (method === 'POST' && p === '/api/images') {
+    if (loadFinished(paths.finished)) {
+      json(res, 409, { error: 'review is already finished' });
+      return;
+    }
+    const buf = await readRawBody(req, MAX_IMAGE_BYTES);
+    if (buf === null) {
+      json(res, 413, { error: `image too large (max ${MAX_IMAGE_BYTES} bytes)` });
+      return;
+    }
+    const ext = sniffImageExt(buf);
+    if (!ext) {
+      json(res, 400, { error: 'unsupported image format (png/jpeg/gif/webp only)' });
+      return;
+    }
+    ensureDir(paths.imagesDir);
+    const id = newCommentImageId(ext);
+    fs.writeFileSync(path.join(paths.imagesDir, id), buf);
+    json(res, 201, { id });
+    return;
+  }
+
+  // Serve one stored comment image. The id pattern is the whole path
+  // validation (no separators can match), and ids are immutable — a given id
+  // never changes content — so the response is cacheable, unlike everything
+  // else this server serves.
+  const imageMatch = /^\/api\/images\/([A-Za-z0-9._-]+)$/.exec(p);
+  if (method === 'GET' && imageMatch) {
+    const id = imageMatch[1];
+    const mime = COMMENT_IMAGE_ID_RE.test(id) ? mimeForImageId(id) : null;
+    if (!mime) {
+      json(res, 404, { error: `image not found: ${id}` });
+      return;
+    }
+    fs.readFile(path.join(paths.imagesDir, id), (err, data) => {
+      if (err) {
+        json(res, 404, { error: `image not found: ${id}` });
+        return;
+      }
+      res.writeHead(200, {
+        'Content-Type': mime,
+        'Cache-Control': 'public, max-age=31536000, immutable',
+        'X-Content-Type-Options': 'nosniff',
+      });
+      res.end(data);
+    });
+    return;
+  }
+
   if (method === 'POST' && p === '/api/comments') {
     const body = await readBody(req);
 
@@ -947,6 +1063,14 @@ async function handle(
       .readOnlyMode
       ? { intent: 'question' }
       : validatedIntent;
+
+    // Pasted images, previously uploaded via POST /api/images. Every comment
+    // shape (diff, reply, document) accepts them.
+    const images = validateImages(body.images, paths.imagesDir);
+    if (typeof images === 'string') {
+      json(res, 400, { error: images });
+      return;
+    }
 
     // A reply carries a parentId. Its anchor is copied from the parent (the
     // request's position fields are ignored), and the stored parentId is
@@ -987,6 +1111,7 @@ async function handle(
           createdAt: now,
           updatedAt: now,
           ...intent,
+          ...images,
           parentId: topId,
         };
         // HTML-review threads: replies inherit the document anchor too, so a
@@ -1041,6 +1166,7 @@ async function handle(
         createdAt: now,
         updatedAt: now,
         ...intent,
+        ...images,
         documentId: body.documentId,
         htmlTarget: target,
       };
@@ -1062,6 +1188,7 @@ async function handle(
       createdAt: now,
       updatedAt: now,
       ...intent,
+      ...images,
     };
     const accepted = mutateComments(paths.comments, (comments) => {
       if (loadFinished(paths.finished)) return false;

@@ -14,6 +14,11 @@ import { ReviewComment } from '../src/types';
 // empty temp dir so every test starts from the built-in defaults.
 process.env.HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'ark-home-'));
 
+// waitComments はテストごとに SIGINT/SIGTERM ハンドラを登録する（本番では
+// 1 プロセス 1 回なので問題ない）。テストが 10 回を超えると
+// MaxListenersExceededWarning が出るため、このプロセスに限り上限を外す。
+process.setMaxListeners(0);
+
 function git(args: string[], cwd: string): void {
   execFileSync('git', args, { cwd, stdio: 'ignore' });
 }
@@ -278,6 +283,54 @@ test('manualEdit コメント（手動修正の記録）も received で配達�
 
     const after = loadComments(paths.comments);
     assert.equal(after.find((c) => c.id === 'm1')?.status, 'seen');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('画像付きコメントは images を imagePaths（絶対パス）に差し替えて配達し、保存側は images のまま', async () => {
+  const tmp = makeTmpRepo();
+  try {
+    const paths = reviewPaths(tmp);
+    const withImage: ReviewComment = { ...diffComment('i1'), images: ['img_abc123.png'] };
+    saveComments(paths.comments, [withImage, diffComment('i2')]);
+
+    const lines = await captureLog(() => waitComments({ timeout: 2, cwd: tmp }));
+    const result = JSON.parse(lines[0]) as {
+      status: string;
+      imagesNote?: string;
+      comments: Array<ReviewComment & { imagePaths?: string[] }>;
+    };
+    assert.equal(result.status, 'received');
+    // 画像があるバッチにだけ、参照方法の note が同梱される。
+    assert.ok(result.imagesNote);
+
+    const delivered = result.comments.find((c) => c.id === 'i1');
+    assert.deepEqual(delivered?.imagePaths, [path.join(paths.imagesDir, 'img_abc123.png')]);
+    assert.ok(path.isAbsolute(delivered!.imagePaths![0]));
+    // エージェントのコンテキストに base64 を流さないため images は落とす。
+    assert.ok(!('images' in delivered!));
+    // 画像なしコメントには imagePaths を付けない。
+    assert.ok(!('imagePaths' in result.comments.find((c) => c.id === 'i2')!));
+
+    // 配達時の差し替えが comments.json に書き戻されないこと。
+    const stored = loadComments(paths.comments).find((c) => c.id === 'i1');
+    assert.deepEqual(stored?.images, ['img_abc123.png']);
+    assert.ok(!('imagePaths' in stored!));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('画像なしバッチには imagesNote が乗らない', async () => {
+  const tmp = makeTmpRepo();
+  try {
+    const paths = reviewPaths(tmp);
+    saveComments(paths.comments, [diffComment('n1')]);
+    const lines = await captureLog(() => waitComments({ timeout: 2, cwd: tmp }));
+    const result = JSON.parse(lines[0]) as { status: string; imagesNote?: string };
+    assert.equal(result.status, 'received');
+    assert.ok(!('imagesNote' in result));
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
