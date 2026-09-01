@@ -59,10 +59,12 @@ export function buildDiffTable(file, interactive) {
     tbody.appendChild(tr);
 
     // The hunk header row (`tr.hunk`) right after this gap is created later,
-    // once file.hunks.forEach reaches it (see below). Once every hidden line
-    // in the gap has been revealed, that header is meaningless on its own
-    // (no more hidden rows to introduce) and should disappear along with
-    // this expander row.
+    // once file.hunks.forEach reaches it (see below). As soon as the user
+    // expands this gap in any direction, that `@@ -a,b +c,d @@` band stops
+    // carrying information: the expander row itself marks where the jump is
+    // and how many lines are still hidden, and the band would otherwise sit
+    // in the middle of freshly revealed, contiguous context. So the first
+    // reveal drops it (and a full reveal drops this expander row too).
     let headerRow = null;
 
     function contextRow(n) {
@@ -106,6 +108,10 @@ export function buildDiffTable(file, interactive) {
     }
 
     function finishReveal() {
+      if (headerRow) {
+        headerRow.remove();
+        headerRow = null;
+      }
       renderControls();
     }
 
@@ -126,7 +132,6 @@ export function buildDiffTable(file, interactive) {
       const remaining = state.hi - state.lo + 1;
       if (remaining <= 0) {
         tr.remove();
-        if (headerRow) headerRow.remove();
         return;
       }
       td.innerHTML = '';
@@ -162,8 +167,7 @@ export function buildDiffTable(file, interactive) {
 
     return {
       // Called once the hunk header row for the hunk right after this gap
-      // exists, so renderControls() can remove it together with this
-      // expander row when the gap is fully revealed.
+      // exists, so finishReveal() can drop it on the first expansion.
       attachHeaderRow: function (hr) {
         headerRow = hr;
       },
