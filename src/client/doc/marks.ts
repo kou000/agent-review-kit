@@ -1,4 +1,5 @@
 import { bodySnippet } from '../dom.js';
+import { stripMarkdown } from '../markdown.js';
 import { frameDoc } from './resolve.js';
 
 /* ---------- frame annotation (marks / element outlines) ---------- */
@@ -38,7 +39,7 @@ function wrapTextNodeSegment(doc, node, s, e, topId, title) {
 }
 
 export function wrapDocRange(doc, index, start, end, top) {
-  const title = 'コメント: ' + bodySnippet(top.body);
+  const title = 'コメント: ' + bodySnippet(stripMarkdown(top.body));
   const segs = [];
   for (let i = 0; i < index.nodes.length; i++) {
     const entry = index.nodes[i];
@@ -62,7 +63,7 @@ export function wrapDocRange(doc, index, start, end, top) {
 export function markDocElement(el, top) {
   el.classList.add('ark-el-anchor');
   el.setAttribute('data-ark-comment', top.id);
-  if (!el.title) el.title = 'コメント: ' + bodySnippet(top.body);
+  if (!el.title) el.title = 'コメント: ' + bodySnippet(stripMarkdown(top.body));
 }
 
 export function docJumpTo(topId) {

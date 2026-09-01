@@ -2,6 +2,7 @@
 
 import { api } from './api.js';
 import { bodySnippet } from './dom.js';
+import { stripMarkdown } from './markdown.js';
 import { syncIntentFields } from './intent.js';
 import { restorePersistedWidths } from './resize.js';
 import { badge, connState, DOC, state } from './state.js';
@@ -134,7 +135,7 @@ export function notifyAgentUpdates(list) {
     next[c.id] = fp;
     if (!first && seen[c.id] !== fp) {
       showToast('エージェントが返信しました (' + c.status + ')',
-        commentLocShort(c) + ' — ' + bodySnippet(c.agentResponse.message),
+        commentLocShort(c) + ' — ' + bodySnippet(stripMarkdown(c.agentResponse.message)),
         function () { focusComment(c.id); });
     }
   });

@@ -40,6 +40,24 @@ export function commentAuthor(c: ReviewComment): CommentAuthor {
 // exactly as before this field existed.
 export type CommentIntent = 'fix' | 'question';
 
+// One Shiki token of a highlighted comment code fence: `t` is the token text,
+// `s` the inline style exactly as styleAttr() (highlight.ts) emits it, e.g.
+// "color:#79c0ff" or "color:#ff7b72;font-style:italic". Omitted = unstyled.
+export interface FenceToken {
+  t: string;
+  s?: string;
+}
+
+// Server-side highlighting of the ``` code fences in a comment body or agent
+// reply, stored next to the text so the browser never needs Shiki. One entry
+// per fence in source order; null = that fence could not be highlighted
+// (unknown language or Shiki failure) and renders as plain escaped text. Each
+// fence is lines of tokens, mirroring codeToTokensBase's output shape. The
+// client treats the whole structure as untrusted — comments.json can be
+// edited by hand — so token text is escaped and styles are validated before
+// anything reaches the DOM (see client/markdown.ts).
+export type CommentFences = Array<{ lines: FenceToken[][] } | null>;
+
 export interface AgentResponse {
   message: string;
   updatedAt: string;
@@ -59,6 +77,11 @@ export interface AgentResponse {
   // /snapshot/<id>. Lets a fix be reviewed as its own diff page without
   // creating a commit on the branch. Omitted = no linked snapshot.
   snapshot?: string;
+  // Highlighting for the ``` fences in `message`, computed at resolve time
+  // after the same "\n"-literal normalization the client applies before
+  // rendering (unescapeNl in client/dom.ts), so fence positions line up.
+  // Omitted = no highlightable fences. See CommentFences.
+  fences?: CommentFences;
 }
 
 // Where an HTML-review comment points inside the rendered document. Captured
@@ -117,6 +140,10 @@ export interface ReviewComment {
   // path (it Reads the file when it actually needs the pixels). Omitted = no
   // images (backward compatible).
   images?: string[];
+  // Highlighting for the ``` fences in `body`, computed server-side when the
+  // comment is created (and recomputed when the body is edited). Omitted =
+  // no highlightable fences (backward compatible). See CommentFences.
+  fences?: CommentFences;
   // A reply to another comment. When set, this comment's anchor (file/side/all
   // line numbers) is copied from its parent, and parentId always points at a
   // top-level comment (threads are one level deep). Omitted/null = top-level.

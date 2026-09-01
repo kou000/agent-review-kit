@@ -4,6 +4,7 @@
  * posts the returned ids — comments.json never carries pixels. */
 
 import { esc } from './dom.js';
+import { renderMarkdown } from './markdown.js';
 
 // Longest edge the upload is downscaled to. Claude processes anything larger
 // by scaling it down to about this size anyway, so storing more pixels only
@@ -51,37 +52,39 @@ function inlineImageHtml(id) {
 const IMAGE_MARKER_RE = /\[画像: ([^\]]+)\]/g;
 
 /**
- * HTML for a comment card's body text, with each `[画像: <id>]` marker
- * rewritten to the attached image inline at that position. A marker only
- * renders as an image when its id is both (a) present in `images` and (b)
- * shaped like a real image id (isSafeImageId) — anything else is left as
- * plain escaped text, so a comment body can never be tricked into rendering
- * an arbitrary id as an <img src>.
+ * HTML for a comment card's body text: the body is rendered as Markdown
+ * (see markdown.ts) and each `[画像: <id>]` marker is replaced by the
+ * attached image inline at that position. A marker only becomes an image
+ * when its id is both (a) present in `images` and (b) shaped like a real
+ * image id (isSafeImageId) — anything else is left as plain text, so a
+ * comment body can never be tricked into rendering an arbitrary id as an
+ * <img src>.
+ *
+ * The markers are handed to renderMarkdown's liftInline hook rather than
+ * substituted before or after it: that way the emitted <a><img></a> is
+ * never re-read as Markdown, and a marker written inside a code fence stays
+ * literal like the rest of the block.
+ *
+ * `fences` is the comment's stored server-side fence highlighting, passed
+ * through to renderMarkdown untouched (it validates every token itself).
  *
  * Returns { html, usedIds }: `html` is ready to drop inside the card's
  * `.body` div, and `usedIds` marks which attached images were placed inline
  * so the caller can render the rest (unreferenced attachments) in the usual
  * below-the-body strip via commentImagesHtml, without showing an image twice.
  */
-export function commentBodyHtml(body, images) {
+export function commentBodyHtml(body, images, fences?) {
   const attached = {};
   (images || []).forEach(function (id) { if (isSafeImageId(id)) attached[id] = true; });
 
-  const text = String(body == null ? '' : body);
   const usedIds = {};
-  let html = '';
-  let last = 0;
-  let m;
-  IMAGE_MARKER_RE.lastIndex = 0;
-  while ((m = IMAGE_MARKER_RE.exec(text))) {
-    const id = m[1];
-    if (!attached[id]) continue;
-    html += esc(text.slice(last, m.index));
-    html += inlineImageHtml(id);
-    usedIds[id] = true;
-    last = IMAGE_MARKER_RE.lastIndex;
-  }
-  html += esc(text.slice(last));
+  const html = renderMarkdown(body, function (line, hold) {
+    return line.replace(IMAGE_MARKER_RE, function (m, id) {
+      if (!attached[id]) return m;
+      usedIds[id] = true;
+      return hold(inlineImageHtml(id));
+    });
+  }, fences);
 
   return { html: html, usedIds: usedIds };
 }

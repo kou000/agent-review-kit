@@ -1,9 +1,10 @@
 import { getCommitMeta } from '../gitDiff';
+import { highlightFences } from '../highlight';
 import { encodeImageToDataUri } from '../image';
 import { reviewPaths } from '../paths';
 import { findSnapshot } from '../snapshot';
 import { mutateComments, nowIso } from '../store';
-import { COMMENT_STATUSES, CommentStatus } from '../types';
+import { COMMENT_STATUSES, CommentFences, CommentStatus } from '../types';
 
 export interface ResolveOptions {
   id: string;
@@ -15,7 +16,7 @@ export interface ResolveOptions {
   cwd?: string;
 }
 
-export function resolveComment(opts: ResolveOptions): void {
+export async function resolveComment(opts: ResolveOptions): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
   const status = (opts.status ?? 'resolved') as CommentStatus;
   if (!COMMENT_STATUSES.includes(status)) {
@@ -76,6 +77,18 @@ export function resolveComment(opts: ResolveOptions): void {
     }
   }
 
+  // Highlight any ``` fences in the reply. The client renders the message
+  // after turning literal "\n" escapes into real newlines (unescapeNl in
+  // client/dom.ts), so fence extraction must see the same text: apply the
+  // same normalization before highlighting. Fence-less messages skip the
+  // Shiki import entirely (see highlightFences).
+  let messageFences: CommentFences | null = null;
+  if (opts.message) {
+    messageFences = await highlightFences(
+      opts.message.replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n')
+    );
+  }
+
   const updated = mutateComments(paths.comments, (comments) => {
     const comment = comments.find((c) => c.id === opts.id);
     if (!comment) return null;
@@ -87,6 +100,7 @@ export function resolveComment(opts: ResolveOptions): void {
       if (commitSha) comment.agentResponse.commit = commitSha;
       if (snapshotId) comment.agentResponse.snapshot = snapshotId;
       if (imageDataUris) comment.agentResponse.images = imageDataUris;
+      if (messageFences) comment.agentResponse.fences = messageFences;
     }
     // Settling a top-level comment (any status but open/seen) settles its
     // whole thread: replies still open/seen, plus replies only answered/fixed

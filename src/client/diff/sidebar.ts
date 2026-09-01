@@ -1,5 +1,6 @@
 import { api } from '../api.js';
 import { bodySnippet, esc } from '../dom.js';
+import { stripMarkdown } from '../markdown.js';
 import { attachSidebarResize } from '../resize.js';
 import { app, DIFF, state } from '../state.js';
 import {
@@ -419,7 +420,7 @@ function threadListItem(top, replies, state) {
 
   const body = document.createElement('span');
   body.className = 'comment-item-body';
-  body.textContent = bodySnippet(top.body);
+  body.textContent = bodySnippet(stripMarkdown(top.body));
 
   if (isAgentComment(top)) {
     const who = document.createElement('span');

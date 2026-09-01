@@ -1,6 +1,7 @@
 import { api } from './api.js';
-import { bodySnippet, esc, escNl, fmtDate, isSafeImageDataUri } from './dom.js';
+import { bodySnippet, esc, fmtDate, isSafeImageDataUri, unescapeNl } from './dom.js';
 import { attachImagePaste, commentBodyHtml, commentImagesHtml } from './images.js';
+import { renderMarkdown, stripMarkdown } from './markdown.js';
 import { intentFieldHtml, selectedIntent, syncIntentFields } from './intent.js';
 import { state } from './state.js';
 import { refresh } from './app.js';
@@ -154,10 +155,11 @@ export function commentCard(c: any, isReply?: boolean) {
     const range = c.startLine === c.endLine ? 'L' + c.startLine : 'L' + c.startLine + '-L' + c.endLine;
     posText = esc(c.file) + ' ' + (c.side === 'new' ? '' : '(旧) ') + esc(range);
   }
-  // Body text with [画像: <id>] markers rewritten to their inline image;
+  // Body rendered as Markdown, with [画像: <id>] markers rewritten to their
+  // inline image;
   // whatever attachment isn't referenced by a marker still falls through to
   // the below-the-body strip (commentImagesHtml), so nothing goes unshown.
-  const bodyRendered = commentBodyHtml(c.body, c.images);
+  const bodyRendered = commentBodyHtml(c.body, c.images, c.fences);
   const remainingImages = (c.images || []).filter(function (id) { return !bodyRendered.usedIds[id]; });
   let html =
     '<div class="meta">' +
@@ -173,8 +175,10 @@ export function commentCard(c: any, isReply?: boolean) {
     // /api/images/<id>; only ids matching the strict shape render).
     commentImagesHtml(remainingImages);
   if (c.agentResponse && c.agentResponse.message) {
+    // The reply's fences were highlighted after the same unescapeNl
+    // normalization applied here, so fence positions line up.
     html += '<div class="agent-response"><span class="who">agent</span>' +
-      escNl(c.agentResponse.message);
+      renderMarkdown(unescapeNl(c.agentResponse.message), null, c.agentResponse.fences);
     // A linked fix commit renders as a chip; clicking opens /commit/<sha>
     // (this commit's diff) in a new tab. sha is hex-only so it needs no
     // attribute escaping beyond esc() for the visible text.
@@ -334,7 +338,7 @@ export function renderThread(container, list) {
     pill.textContent = top.status;
     const snippet = document.createElement('span');
     snippet.className = 'thread-snippet';
-    snippet.textContent = bodySnippet(top.body);
+    snippet.textContent = bodySnippet(stripMarkdown(top.body));
     summary.appendChild(caret);
     if (isAgentComment(top)) {
       const who = document.createElement('span');
