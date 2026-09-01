@@ -13,7 +13,7 @@ import {
   runGitGrep,
   runGitLsFiles,
 } from './gitDiff';
-import { bakeDiffHighlight, highlightFile } from './highlight';
+import { bakeDiffHighlight, highlightFences, highlightFile } from './highlight';
 import { documentHtmlPath, findDocument } from './htmlDocument';
 import {
   COMMENT_IMAGE_ID_RE,
@@ -51,6 +51,7 @@ import {
 } from './store';
 import {
   COMMENT_STATUSES,
+  CommentFences,
   CommentIntent,
   CommentStatus,
   DiffData,
@@ -332,6 +333,18 @@ function validateIntent(v: unknown): { intent?: CommentIntent } | string {
   if (v === undefined || v === null) return {};
   if (v !== 'fix' && v !== 'question') return 'intent must be "fix" or "question"';
   return { intent: v };
+}
+
+/**
+ * Server-side highlighting for the ``` fences of a comment body about to be
+ * stored (see highlightFences). Returns a spreadable fragment — `{}` when the
+ * body has no highlightable fence, so the field stays off the stored comment.
+ * Computed before the comments lock is taken: highlighting is async and the
+ * store API is synchronous.
+ */
+async function fenceFragment(body: string): Promise<{ fences?: CommentFences }> {
+  const fences = await highlightFences(body);
+  return fences ? { fences } : {};
 }
 
 // Cap on a repo-file viewer payload (GET /api/file, GET /file/<path>),
@@ -676,6 +689,10 @@ async function handle(
       `以後この文書を更新する場合は保存済みの現在の内容（${docPath}）を基にすること。` +
       MANUAL_EDIT_NOTE +
       (newHtml ? `\n修正後のHTML:\n\`\`\`\n${quoted}\n\`\`\`` : '\n（対象要素を削除）');
+    // The quote fence itself has no info string, but quoted text containing
+    // its own ```lang blocks splits into further fences the client will
+    // render, so this body goes through the same highlighting as any other.
+    const fences = await fenceFragment(commentBody);
     const now = nowIso();
     const comment: ReviewComment = {
       id: newCommentId(),
@@ -689,6 +706,7 @@ async function handle(
       status: 'open',
       createdAt: now,
       updatedAt: now,
+      ...fences,
       documentId: id,
       htmlTarget: target,
       manualEdit: true,
@@ -962,6 +980,9 @@ async function handle(
       replacement.length === 0
         ? `【手動修正】ユーザーがブラウザ上で L${startLine}-L${endLine} を削除しました（ファイルに適用済み・コード対応は不要）。${MANUAL_EDIT_NOTE}`
         : `【手動修正】ユーザーがブラウザ上でこの範囲を直接修正しました（ファイルに適用済み・コード対応は不要）。${MANUAL_EDIT_NOTE}\n修正後の内容:\n\`\`\`\n${quoted}\n\`\`\``;
+    // Same policy as the document-edit record comment: the quote fence is
+    // plain, but quoted text can carry ```lang blocks of its own.
+    const fences = await fenceFragment(commentBody);
     const now = nowIso();
     const comment: ReviewComment = {
       id: newCommentId(),
@@ -975,6 +996,7 @@ async function handle(
       status: 'open',
       createdAt: now,
       updatedAt: now,
+      ...fences,
       manualEdit: true,
     };
     mutateComments(paths.comments, (comments) => {
@@ -1090,6 +1112,7 @@ async function handle(
         return;
       }
       const replyBody = body.body.trim();
+      const fences = await fenceFragment(replyBody);
       const result = mutateComments(paths.comments, (comments) => {
         if (loadFinished(paths.finished)) return { kind: 'finished' } as const;
         const parent = comments.find((c) => c.id === parentId);
@@ -1112,6 +1135,7 @@ async function handle(
           updatedAt: now,
           ...intent,
           ...images,
+          ...fences,
           parentId: topId,
         };
         // HTML-review threads: replies inherit the document anchor too, so a
@@ -1152,6 +1176,8 @@ async function handle(
         json(res, 400, { error: target });
         return;
       }
+      const docBody = body.body.trim();
+      const fences = await fenceFragment(docBody);
       const now = nowIso();
       const comment: ReviewComment = {
         id: newCommentId(),
@@ -1161,12 +1187,13 @@ async function handle(
         endLine: null,
         startDiffLine: null,
         endDiffLine: null,
-        body: body.body.trim(),
+        body: docBody,
         status: 'open',
         createdAt: now,
         updatedAt: now,
         ...intent,
         ...images,
+        ...fences,
         documentId: body.documentId,
         htmlTarget: target,
       };
@@ -1180,6 +1207,7 @@ async function handle(
       json(res, 400, { error: input });
       return;
     }
+    const fences = await fenceFragment(input.body);
     const now = nowIso();
     const comment: ReviewComment = {
       id: newCommentId(),
@@ -1189,6 +1217,7 @@ async function handle(
       updatedAt: now,
       ...intent,
       ...images,
+      ...fences,
     };
     const accepted = mutateComments(paths.comments, (comments) => {
       if (loadFinished(paths.finished)) return false;
@@ -1224,6 +1253,10 @@ async function handle(
       }
       newStatus = body.status as CommentStatus;
     }
+    // An edited body invalidates the stored fence highlighting (the entries
+    // are positional), so it is recomputed here and dropped when the new body
+    // has no highlightable fence.
+    const newFences = newBody !== undefined ? await highlightFences(newBody) : null;
     const result = mutateComments(paths.comments, (comments) => {
       // Reopening a comment makes it deliverable to wait-comments. Order that
       // transition against /api/finish just like comment creation: either the
@@ -1234,7 +1267,11 @@ async function handle(
       }
       const comment = comments.find((c) => c.id === id);
       if (!comment) return { kind: 'missing' } as const;
-      if (newBody !== undefined) comment.body = newBody;
+      if (newBody !== undefined) {
+        comment.body = newBody;
+        if (newFences) comment.fences = newFences;
+        else delete comment.fences;
+      }
       if (newStatus !== undefined) comment.status = newStatus;
       comment.updatedAt = nowIso();
       return { kind: 'updated', comment } as const;

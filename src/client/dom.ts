@@ -8,17 +8,14 @@ export function esc(s) {
     .replace(/"/g, '&quot;');
 }
 
-// Like esc(), but also turns literal "\n" / "\r\n" escape sequences into real
-// newlines. Agent replies arrive from the CLI (resolve-comment --message),
-// where a line break is almost always passed as the two characters backslash-n
-// rather than a real newline; without this they render as a literal "\n" on a
-// single line. User comment bodies come from the browser textarea (real
-// newlines) and never need this. esc() runs first, so only the literal escape
-// text is rewritten — real HTML stays escaped (sanitize behavior unchanged);
-// the white-space: pre-wrap on .agent-response then lays the lines out, the
-// same mechanism that already works for real newlines in .body.
-export function escNl(s) {
-  return esc(s).replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n');
+// Turns literal "\n" / "\r\n" escape sequences into real newlines. Agent
+// replies arrive from the CLI (resolve-comment --message), where a line break
+// is almost always passed as the two characters backslash-n rather than a real
+// newline; without this the Markdown renderer sees one long line and the break
+// shows up as a literal "\n". User comment bodies come from the browser
+// textarea (real newlines) and never need this.
+export function unescapeNl(s) {
+  return String(s == null ? '' : s).replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n');
 }
 
 // Only accept self-contained base64 image data URIs for inline agent images.

@@ -499,7 +499,6 @@ tr.widget-row td {
 }
 .comment-card .body {
   padding: 8px 10px;
-  white-space: pre-wrap;
 }
 .comment-card .agent-response {
   margin: 0 10px 8px;
@@ -507,7 +506,126 @@ tr.widget-row td {
   background: rgba(56, 139, 253, 0.1);
   border-left: 3px solid var(--accent);
   border-radius: 0 4px 4px 0;
-  white-space: pre-wrap;
+}
+
+/* ---------- Markdown-rendered text (see client/markdown.ts) ----------
+   .body and .agent-response hold renderMarkdown() output, so paragraph and
+   list spacing comes from the elements themselves; neither carries the
+   white-space: pre-wrap that used to lay out raw comment text. The
+   first/last-child margin reset keeps the card's own padding intact. */
+.comment-card .body > *:first-child,
+.comment-card .agent-response > *:first-child {
+  margin-top: 0;
+}
+.comment-card .body > *:last-child,
+.comment-card .agent-response > *:last-child {
+  margin-bottom: 0;
+}
+.comment-card .body p,
+.comment-card .agent-response p {
+  margin: 0 0 8px;
+}
+.comment-card .body h1, .comment-card .agent-response h1,
+.comment-card .body h2, .comment-card .agent-response h2,
+.comment-card .body h3, .comment-card .agent-response h3,
+.comment-card .body h4, .comment-card .agent-response h4,
+.comment-card .body h5, .comment-card .agent-response h5,
+.comment-card .body h6, .comment-card .agent-response h6 {
+  margin: 12px 0 6px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.comment-card .body h1, .comment-card .agent-response h1 { font-size: 17px; }
+.comment-card .body h2, .comment-card .agent-response h2 { font-size: 15px; }
+.comment-card .body h3, .comment-card .agent-response h3 { font-size: 14px; }
+.comment-card .body h4, .comment-card .agent-response h4,
+.comment-card .body h5, .comment-card .agent-response h5,
+.comment-card .body h6, .comment-card .agent-response h6 {
+  font-size: 13px;
+  color: var(--muted);
+}
+.comment-card .body ul, .comment-card .agent-response ul,
+.comment-card .body ol, .comment-card .agent-response ol {
+  margin: 0 0 8px;
+  padding-left: 20px;
+}
+.comment-card .body li, .comment-card .agent-response li {
+  margin: 2px 0;
+}
+/* A nested list sits inside its parent <li>, so it only needs to hug it. */
+.comment-card .body li > ul, .comment-card .agent-response li > ul,
+.comment-card .body li > ol, .comment-card .agent-response li > ol {
+  margin: 2px 0 0;
+}
+/* Task list item: the checkbox replaces the bullet, so pull it back into
+   the space the marker would have used. */
+.comment-card .body li.task-item, .comment-card .agent-response li.task-item {
+  list-style: none;
+  margin-left: -18px;
+}
+.comment-card .body li.task-item input,
+.comment-card .agent-response li.task-item input {
+  margin: 0 2px 0 0;
+  vertical-align: -1px;
+}
+.comment-card .body code, .comment-card .agent-response code {
+  padding: 0 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+.comment-card .body pre, .comment-card .agent-response pre {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow-x: auto;
+}
+.comment-card .body pre code, .comment-card .agent-response pre code {
+  padding: 0;
+  background: none;
+  border: 0;
+  white-space: pre;
+}
+.comment-card .body blockquote, .comment-card .agent-response blockquote {
+  margin: 0 0 8px;
+  padding-left: 10px;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+}
+.comment-card .body hr, .comment-card .agent-response hr {
+  margin: 12px 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+/* GFM table out of markdown.ts. Alignment arrives as md-center/md-right
+   classes on the cells — the renderer never emits a style attribute. */
+.comment-card .body table, .comment-card .agent-response table {
+  margin: 0 0 8px;
+  border-collapse: collapse;
+}
+.comment-card .body th, .comment-card .agent-response th,
+.comment-card .body td, .comment-card .agent-response td {
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+}
+.comment-card .body th, .comment-card .agent-response th {
+  background: var(--header-bg);
+}
+.comment-card .body .md-center, .comment-card .agent-response .md-center {
+  text-align: center;
+}
+.comment-card .body .md-right, .comment-card .agent-response .md-right {
+  text-align: right;
+}
+.comment-card .body a, .comment-card .agent-response a {
+  color: var(--accent);
+}
+.comment-card .body del, .comment-card .agent-response del {
+  color: var(--muted);
 }
 .comment-card .agent-response .who {
   font-size: 11px;

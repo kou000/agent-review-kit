@@ -1,5 +1,5 @@
 import type { createHighlighter, Highlighter, ThemedToken } from 'shiki';
-import { FileDiff } from './types';
+import { CommentFences, FenceToken, FileDiff } from './types';
 
 // Shiki 3.x is ESM-only (no CommonJS entry). With module:commonjs, TypeScript
 // downlevels a plain `import('shiki')` to `require('shiki')`, which throws
@@ -155,6 +155,85 @@ export async function highlightFile(
   const hl = await fileHighlighter();
   const out = highlightLines(hl, lines, lang);
   return out && out.length === lines.length ? out : null;
+}
+
+// Resolve a fence info string (the "ts" of ```ts) to a Shiki language id.
+// The first word is looked up in LANG_MAP, so file extensions work the way
+// people write them (```ts, ```py); a word that already is a loaded language
+// id (```typescript, ```bash) is accepted as-is. Anything else — including a
+// bare ``` — returns null and the fence stays plain.
+export function langForFenceInfo(info: string): string | null {
+  const word = String(info ?? '').trim().split(/\s+/)[0].toLowerCase();
+  if (!word) return null;
+  return LANG_MAP[word] ?? (ALL_LANGS.includes(word) ? word : null);
+}
+
+// One ``` fence of a comment body: the info string of its opening line (the
+// "ts" of ```ts, possibly empty) and the code between the markers.
+export interface CommentFence {
+  info: string;
+  code: string;
+}
+
+// Extract the ``` fences from a comment body with exactly the rules the
+// client's liftFences (client/markdown.ts) uses to find them — NUL strip and
+// newline normalization first, /^\s*```/ opens and closes, an unclosed fence
+// runs to the end of the text — so fence i here is fence i there.
+export function extractCommentFences(body: string): CommentFence[] {
+  const lines = String(body ?? '')
+    .replace(/\u0000/g, '')
+    .replace(/\r\n?/g, '\n')
+    .split('\n');
+  const fences: CommentFence[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const open = /^\s*```(.*)$/.exec(lines[i]);
+    if (!open) {
+      i++;
+      continue;
+    }
+    i++;
+    const code: string[] = [];
+    while (i < lines.length && !/^\s*```/.test(lines[i])) {
+      code.push(lines[i]);
+      i++;
+    }
+    if (i < lines.length) i++;
+    fences.push({ info: open[1], code: code.join('\n') });
+  }
+  return fences;
+}
+
+function fenceToken(token: ThemedToken): FenceToken {
+  const s = styleAttr(token);
+  return s ? { t: token.content, s } : { t: token.content };
+}
+
+// Tokenize every ``` fence of a comment body for client-side rendering (see
+// CommentFences in types.ts). Returns null when no fence could be highlighted
+// — callers then leave the field off the stored comment entirely — and skips
+// the Shiki import in that case, so a fence-less body posted from a
+// short-lived CLI process (add-comment, resolve-comment) stays as cheap as
+// before, same policy as bakeHighlight.
+export async function highlightFences(body: string): Promise<CommentFences | null> {
+  const fences = extractCommentFences(body);
+  const langs = fences.map((f) => langForFenceInfo(f.info));
+  if (!langs.some((lang) => lang !== null)) return null;
+  const hl = await fileHighlighter();
+  const out: CommentFences = fences.map((f, i) => {
+    const lang = langs[i];
+    if (!lang) return null;
+    try {
+      const tokenLines = hl.codeToTokensBase(f.code, {
+        lang: lang as never,
+        theme: THEME,
+      });
+      return { lines: tokenLines.map((line) => line.map(fenceToken)) };
+    } catch {
+      return null;
+    }
+  });
+  return out.some((f) => f !== null) ? out : null;
 }
 
 export interface HighlightSources {

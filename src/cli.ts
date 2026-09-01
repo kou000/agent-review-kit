@@ -217,7 +217,7 @@ async function main(): Promise<void> {
         console.error('error: comment id を指定してください。例: agent-review-kit resolve-comment comment_xxx --status fixed');
         process.exit(1);
       }
-      resolveComment({
+      await resolveComment({
         id,
         status: flagStr(flags, 'status'),
         message: flagStr(flags, 'message'),
@@ -229,7 +229,7 @@ async function main(): Promise<void> {
     }
     case 'add-comment':
       rejectUnknownFlags(flags, ['body', 'file', 'line', 'start-line', 'end-line', 'side']);
-      addComment({
+      await addComment({
         body: flagStr(flags, 'body'),
         file: flagStr(flags, 'file'),
         line: flagNum(flags, 'line'),

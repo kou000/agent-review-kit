@@ -1195,6 +1195,39 @@ test('POST /api/comments は images を各コメント形（diff・全体・返�
   );
 });
 
+test('POST /api/comments は ```lang フェンスをトークン化して fences に保存する', async () => {
+  const res = await fetch(`${baseUrl}/api/comments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ body: '直して\n```ts\nconst x = 1\n```' }),
+  });
+  assert.equal(res.status, 201);
+  const comment = ((await res.json()) as {
+    comment: { fences?: Array<null | { lines: Array<Array<{ t: string; s?: string }>> }> };
+  }).comment;
+  assert.ok(comment.fences);
+  assert.equal(comment.fences.length, 1);
+  const fence = comment.fences[0];
+  assert.ok(fence);
+  // トークンのテキストを連結するとフェンス本文が復元できる（クライアント側
+  // fenceHtml の検証と同じ不変条件）。
+  assert.deepEqual(
+    fence.lines.map((line) => line.map((tok) => tok.t).join('')),
+    ['const x = 1']
+  );
+
+  // 言語なしフェンスだけの本文にはフィールドごと保存されない。
+  const plainRes = await fetch(`${baseUrl}/api/comments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ body: '```\nplain\n```' }),
+  });
+  assert.equal(plainRes.status, 201);
+  assert.ok(
+    !('fences' in ((await plainRes.json()) as { comment: Record<string, unknown> }).comment)
+  );
+});
+
 test('POST /api/comments は不正な画像 id・未アップロード id を 400 にする', async () => {
   for (const images of [['../etc/passwd'], ['img_notuploaded.png'], 'img_x.png']) {
     const res = await fetch(`${baseUrl}/api/comments`, {

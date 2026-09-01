@@ -1,3 +1,4 @@
+import { highlightFences } from '../highlight';
 import { reviewPaths } from '../paths';
 import { mutateComments, newCommentId, nowIso } from '../store';
 import { ReviewComment } from '../types';
@@ -17,7 +18,7 @@ export interface AddCommentOptions {
 // an AI badge but are NOT delivered by wait-comments: only the user's reply
 // to one flows back to the agent. Without --file the comment is an overall
 // (file-less) one.
-export function addComment(opts: AddCommentOptions): void {
+export async function addComment(opts: AddCommentOptions): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
   const body = opts.body?.trim();
   if (!body) {
@@ -58,6 +59,11 @@ export function addComment(opts: AddCommentOptions): void {
     process.exit(1);
   }
 
+  // Highlight any ``` fences in the body before taking the comments lock
+  // (highlighting is async, the store API is synchronous). A fence-less body
+  // never imports Shiki, so the common short-lived CLI post stays cheap.
+  const fences = await highlightFences(body);
+
   const now = nowIso();
   const comment: ReviewComment = {
     id: newCommentId(),
@@ -77,6 +83,7 @@ export function addComment(opts: AddCommentOptions): void {
     updatedAt: now,
     author: 'agent',
   };
+  if (fences) comment.fences = fences;
 
   const paths = reviewPaths(cwd);
   mutateComments(paths.comments, (comments) => comments.push(comment));
