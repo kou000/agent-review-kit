@@ -1,7 +1,7 @@
 import { api } from './api.js';
 import { bodySnippet, esc, fmtDate, isSafeImageDataUri, unescapeNl } from './dom.js';
 import { attachImagePaste, commentBodyHtml, commentImagesHtml } from './images.js';
-import { renderMarkdown, stripMarkdown } from './markdown.js';
+import { renderMarkdown, stripMarkdown, tokenLineHtml } from './markdown.js';
 import { intentFieldHtml, selectedIntent, syncIntentFields } from './intent.js';
 import { state } from './state.js';
 import { refresh } from './app.js';
@@ -136,6 +136,51 @@ export function threadState(top, replies) {
 
 export const THREAD_STATE_LABEL = { open: '未解決', check: '要確認', settled: '解決済み' };
 
+// The code the comment was written against, captured at comment time (see
+// CommentCodeSnapshot). Line anchors drift as fixes land, so this is the only
+// reliable record of what the comment pointed at — but it is bulky next to the
+// comment text, so it stays folded until the reader asks for it. Rendered from
+// escaped text only: comments.json is hand-editable, so nothing here is
+// trusted as markup, and no highlighting is attempted.
+function codeSnapshotHtml(c) {
+  const code = c.code;
+  if (!code || !Array.isArray(code.lines) || !code.lines.length) return '';
+  const before = Array.isArray(code.before) ? code.before : [];
+  const after = Array.isArray(code.after) ? code.after : [];
+  // Server-baked Shiki tokens, one entry per line of before+lines+after (see
+  // CommentCodeSnapshot.tokens). Applied per line: a line whose tokens don't
+  // reassemble its stored text renders as plain escaped text, and the rest of
+  // the block still gets its colours.
+  const tokens = Array.isArray(code.tokens) ? code.tokens : null;
+  // `before` ends at startLine - 1 and `after` starts at endLine + 1, so the
+  // whole block numbers contiguously from there. A comment with a non-numeric
+  // anchor (hand-edited file) renders without line numbers rather than with
+  // wrong ones.
+  let n = typeof c.startLine === 'number' ? c.startLine - before.length : null;
+  let row = 0;
+  const rows = [];
+  const push = function (text, cls) {
+    const num = n === null ? '' : String(n);
+    if (n !== null) n++;
+    const plain = String(text);
+    const highlighted = tokens ? tokenLineHtml(tokens[row], plain) : null;
+    row++;
+    rows.push('<tr class="' + cls + '"><td class="n">' + esc(num) +
+      '</td><td class="t">' + (highlighted === null ? esc(plain) : highlighted) + '</td></tr>');
+  };
+  before.forEach(function (t) { push(t, 'ctx'); });
+  code.lines.forEach(function (t) { push(t, 'hit'); });
+  after.forEach(function (t) { push(t, 'ctx'); });
+  const range = typeof c.startLine === 'number'
+    ? ' ' + (c.startLine === c.endLine ? 'L' + c.startLine : 'L' + c.startLine + '-L' + c.endLine)
+    : '';
+  const sideText = c.side === 'old' ? '（変更前）' : '';
+  return '<details class="code-snapshot">' +
+    '<summary title="コメントを書いた時点で表示されていたコード（その後の修正では変化しない）">' +
+    'コメント当時のコード' + sideText + esc(range) + '</summary>' +
+    '<table>' + rows.join('') + '</table></details>';
+}
+
 export function commentCard(c: any, isReply?: boolean) {
   const div = document.createElement('div');
   div.className = 'comment-card' + (isReply ? ' reply-card' : '') +
@@ -170,6 +215,9 @@ export function commentCard(c: any, isReply?: boolean) {
     '<span>' + posText + '</span>' +
     '<span>' + esc(fmtDate(c.createdAt)) + '</span>' +
     '</div>' +
+    // The snapshot belongs to the thread, not to each message, so it renders
+    // once on the top-level card even though replies carry an inherited copy.
+    (isReply ? '' : codeSnapshotHtml(c)) +
     '<div class="body">' + bodyRendered.html + '</div>' +
     // Images the user pasted into the comment form (stored ids, served from
     // /api/images/<id>; only ids matching the strict shape render).

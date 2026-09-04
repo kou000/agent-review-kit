@@ -8,34 +8,81 @@ import { clearSelectionHighlight, selectionRange } from './selection.js';
 
 /* ---------- comment form ---------- */
 
-// The exact text the review is showing for new-side lines start..end of a
-// file, reconstructed from the embedded diff data (full newLines when
-// present, hunk rows otherwise). Returns null when any line is not part of
-// the rendered diff — manual edit is only offered on content the user can
-// actually see. \r is stripped so a CRLF file compares cleanly server-side.
-function newSideText(filePath, startLine, endLine) {
-  var f = null;
+// How many lines around a commented range are stored with the comment (see
+// CommentCodeSnapshot). Enough to recognize the spot after the diff has moved
+// on, small enough that it stays cheap in comments.json and in the agent's
+// context.
+var CODE_CONTEXT_LINES = 5;
+
+function findFile(filePath) {
   for (var i = 0; i < DIFF.files.length; i++) {
-    if (DIFF.files[i].path === filePath) { f = DIFF.files[i]; break; }
+    if (DIFF.files[i].path === filePath) return DIFF.files[i];
   }
-  if (!f || f.status === 'deleted' || f.status === 'binary') return null;
-  var out = [];
-  if (f.newLines) {
-    if (endLine > f.newLines.length) return null;
-    for (var l = startLine; l <= endLine; l++) out.push(f.newLines[l - 1]);
-  } else {
-    var byLine = {};
-    f.hunks.forEach(function (h) {
-      h.rows.forEach(function (row) {
-        if (row.right) byLine[row.right.line] = row.right.text;
-      });
+  return null;
+}
+
+// The text the review is showing for `side` of a file, as a { line: text }
+// map. The new side prefers the embedded full-file content (the same data
+// context expansion uses); otherwise both sides come from the hunk rows, so
+// only what the diff actually renders is available. \r is stripped so a CRLF
+// file compares cleanly server-side. Returns null for a file the page has no
+// text for at all.
+function sideLines(filePath, side) {
+  var f = findFile(filePath);
+  if (!f || f.status === 'binary') return null;
+  var strip = function (s) { return String(s).replace(/\r$/, ''); };
+  var byLine = {};
+  if (side === 'new' && f.newLines) {
+    for (var n = 0; n < f.newLines.length; n++) byLine[n + 1] = strip(f.newLines[n]);
+    return byLine;
+  }
+  f.hunks.forEach(function (h) {
+    h.rows.forEach(function (row) {
+      var cell = side === 'new' ? row.right : row.left;
+      if (cell) byLine[cell.line] = strip(cell.text);
     });
-    for (var l2 = startLine; l2 <= endLine; l2++) {
-      if (!(l2 in byLine)) return null;
-      out.push(byLine[l2]);
-    }
+  });
+  return byLine;
+}
+
+// The exact text the review is showing for new-side lines start..end of a
+// file. Returns null when any line is not part of the rendered diff — manual
+// edit is only offered on content the user can actually see.
+function newSideText(filePath, startLine, endLine) {
+  var f = findFile(filePath);
+  if (!f || f.status === 'deleted' || f.status === 'binary') return null;
+  var byLine = sideLines(filePath, 'new');
+  if (!byLine) return null;
+  var out = [];
+  for (var l = startLine; l <= endLine; l++) {
+    if (!(l in byLine)) return null;
+    out.push(byLine[l]);
   }
-  return out.map(function (s) { return String(s).replace(/\r$/, ''); }).join('\n');
+  return out.join('\n');
+}
+
+// The code snapshot to store with a comment on lines start..end: the selected
+// lines plus the contiguous CODE_CONTEXT_LINES around them that the page can
+// show. Returns null when the range itself is not fully rendered — a partial
+// snapshot would misrepresent what was commented on. Context stops at the
+// first gap so the line numbering stays exact.
+function captureCode(filePath, side, startLine, endLine) {
+  var byLine = sideLines(filePath, side);
+  if (!byLine) return null;
+  var lines = [];
+  for (var l = startLine; l <= endLine; l++) {
+    if (!(l in byLine)) return null;
+    lines.push(byLine[l]);
+  }
+  var before = [];
+  for (var b = startLine - 1; b >= startLine - CODE_CONTEXT_LINES && b in byLine; b--) {
+    before.unshift(byLine[b]);
+  }
+  var after = [];
+  for (var a = endLine + 1; a <= endLine + CODE_CONTEXT_LINES && a in byLine; a++) {
+    after.push(byLine[a]);
+  }
+  return { before: before, lines: lines, after: after };
 }
 
 export function findRowFor(file, side, line) {
@@ -82,6 +129,12 @@ export function showCommentForm() {
     ? newSideText(r.file, r.startLine, r.endLine)
     : null;
 
+  // What the diff is showing for this range right now, stored with the comment
+  // so it stays readable after later fixes shift the anchor (see
+  // CommentCodeSnapshot). null = the range isn't fully rendered, so nothing to
+  // store.
+  const codeSnapshot = captureCode(r.file, r.side, r.startLine, r.endLine);
+
   const wrap = document.createElement('div');
   wrap.className = 'comment-form';
   wrap.innerHTML =
@@ -125,6 +178,7 @@ export function showCommentForm() {
       body: body,
       intent: selectedIntent(wrap),
       images: images,
+      code: codeSnapshot,
     }).then(function () {
       cancelForm();
       refresh();

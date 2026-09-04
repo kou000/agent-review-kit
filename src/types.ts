@@ -109,6 +109,32 @@ export interface HtmlTarget {
   contextAfter?: string;
 }
 
+// A snapshot of the code a diff comment was written against, captured by the
+// browser from the rendered diff at comment time and never recomputed. Line
+// anchors drift: as fixes land the review is regenerated and the comment's
+// startLine/endLine no longer point at the same code, so the text itself is
+// the only durable record of what was being pointed at. `lines` are the
+// commented lines; `before`/`after` are the contiguous lines that surrounded
+// them on screen, so the reader sees the neighborhood and not just the
+// selection. Numbering follows from the comment's own anchor: `before` ends at
+// startLine - 1, `after` starts at endLine + 1. Omitted when the range was not
+// fully part of the rendered diff (nothing to snapshot), for overall/document
+// comments (no anchor), and for older comments.json files.
+export interface CommentCodeSnapshot {
+  before: string[];
+  lines: string[];
+  after: string[];
+  // Shiki tokens for the whole block (before + lines + after, concatenated),
+  // one entry per line, computed server-side when the comment is created —
+  // the same trick CommentFences uses, so the browser never needs Shiki. The
+  // text above stays the source of truth: the client renders a token line only
+  // when its token texts reassemble that line exactly, and falls back to
+  // escaped plain text otherwise. `wait-comments` strips this field before
+  // delivery (colour tokens are of no use to an agent and would only cost it
+  // context). Omitted when the file's language is unknown or Shiki failed.
+  tokens?: FenceToken[][];
+}
+
 export interface ReviewComment {
   id: string;
   // An "overall" comment is not tied to any file or line: file/side and all
@@ -144,6 +170,11 @@ export interface ReviewComment {
   // comment is created (and recomputed when the body is edited). Omitted =
   // no highlightable fences (backward compatible). See CommentFences.
   fences?: CommentFences;
+  // The code this comment was written against, as it looked at comment time.
+  // See CommentCodeSnapshot. Replies inherit it from their thread's top-level
+  // comment, alongside the anchor, so a reply delivered on its own still says
+  // which code it is about. Omitted = no snapshot (backward compatible).
+  code?: CommentCodeSnapshot;
   // A reply to another comment. When set, this comment's anchor (file/side/all
   // line numbers) is copied from its parent, and parentId always points at a
   // top-level comment (threads are one level deep). Omitted/null = top-level.

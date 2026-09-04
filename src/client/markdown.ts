@@ -115,33 +115,46 @@ function normalize(text) {
  * unstyled. */
 const FENCE_STYLE_RE = /^color:#[0-9a-fA-F]{3,8}(;font-style:italic)?(;font-weight:bold)?(;text-decoration:underline)?$/;
 
+/* Inner HTML of ONE server-highlighted line, built from the stored Shiki
+ * tokens (FenceToken[] — see ../types.ts). Nothing is taken on faith: token
+ * text is esc()'d, a style reaches a style attribute only when it matches
+ * FENCE_STYLE_RE, and the token texts must reassemble `text` exactly. Any
+ * mismatch (hand-edited comments.json, tokens out of step with the text)
+ * returns null so the caller falls back to plain escaped text — the
+ * highlighted view can never show different code than the source it is
+ * stored beside.
+ *
+ * Shared by comment fences (fenceHtml) and comment code snapshots
+ * (CommentCodeSnapshot.tokens), which store the same token shape.
+ */
+export function tokenLineHtml(tokens, text) {
+  if (!Array.isArray(tokens)) return null;
+  let plain = '';
+  let html = '';
+  for (let j = 0; j < tokens.length; j++) {
+    const tok = tokens[j];
+    if (!tok || typeof tok.t !== 'string') return null;
+    plain += tok.t;
+    const span = esc(tok.t);
+    html += typeof tok.s === 'string' && FENCE_STYLE_RE.test(tok.s)
+      ? '<span style="' + tok.s + '">' + span + '</span>'
+      : span;
+  }
+  return plain === text ? html : null;
+}
+
 // Inner HTML of one highlighted fence, built from the server-supplied tokens
-// stored on the comment (see CommentFences in ../types.ts). Nothing is taken
-// on faith: token text is esc()'d, a style is used only when it matches
-// FENCE_STYLE_RE, and the token texts must reassemble exactly the fence's
-// own lines — a mismatch (hand-edited comments.json, fences out of step with
-// the body) returns null and the caller falls back to plain escaped text, so
-// the highlighted view can never show different code than the source.
+// stored on the comment (see CommentFences in ../types.ts). All-or-nothing:
+// one bad line drops the whole fence to plain escaped text, so a fence never
+// renders half-coloured.
 function fenceHtml(fence, bodyLines) {
   if (!fence || !Array.isArray(fence.lines) || fence.lines.length !== bodyLines.length) {
     return null;
   }
   const out = [];
   for (let i = 0; i < fence.lines.length; i++) {
-    const tokens = fence.lines[i];
-    if (!Array.isArray(tokens)) return null;
-    let text = '';
-    let html = '';
-    for (let j = 0; j < tokens.length; j++) {
-      const tok = tokens[j];
-      if (!tok || typeof tok.t !== 'string') return null;
-      text += tok.t;
-      const span = esc(tok.t);
-      html += typeof tok.s === 'string' && FENCE_STYLE_RE.test(tok.s)
-        ? '<span style="' + tok.s + '">' + span + '</span>'
-        : span;
-    }
-    if (text !== bodyLines[i]) return null;
+    const html = tokenLineHtml(fence.lines[i], bodyLines[i]);
+    if (html === null) return null;
     out.push(html);
   }
   return out.join('\n');
