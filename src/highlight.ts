@@ -236,6 +236,36 @@ export async function highlightFences(body: string): Promise<CommentFences | nul
   return out.some((f) => f !== null) ? out : null;
 }
 
+/**
+ * Tokenize a comment's code snapshot (see CommentCodeSnapshot) for
+ * client-side rendering, the same way highlightFences does for a comment's
+ * ``` fences. `lines` is the whole block — context before, the commented
+ * lines, context after — tokenized in one pass so constructs that span the
+ * boundary (template literals, block comments) stay coloured correctly, and
+ * the result is parallel to that concatenation. Returns null when the file's
+ * language is unknown, Shiki throws, or the token lines don't line up with
+ * the input; callers then leave the field off and the browser renders escaped
+ * plain text.
+ */
+export async function highlightSnapshot(
+  filePath: string,
+  lines: string[]
+): Promise<FenceToken[][] | null> {
+  const lang = langForPath(filePath);
+  if (!lang) return null;
+  const hl = await fileHighlighter();
+  try {
+    const tokenLines = hl.codeToTokensBase(lines.join('\n'), {
+      lang: lang as never,
+      theme: THEME,
+    });
+    if (tokenLines.length !== lines.length) return null;
+    return tokenLines.map((line) => line.map(fenceToken));
+  } catch {
+    return null;
+  }
+}
+
 export interface HighlightSources {
   // Full old-side content per file path (b-side path key), when readable.
   oldByPath: Map<string, string[] | null>;

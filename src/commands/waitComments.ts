@@ -563,10 +563,16 @@ const IMAGES_NOTE =
   'imagePaths はユーザーがコメントに添付した画像ファイルの絶対パス。' +
   '内容の確認が必要なコメントについてのみ、Read ツールでそのパスを読み込んで画像として参照すること。';
 
-// The delivered JSON for one "received" batch. Comments carry pasted images
-// as stored ids (see ReviewComment.images); the agent-facing payload swaps
-// them for absolute file paths so the agent's context only ever holds a path
-// and it Reads the file when it actually needs the pixels — never base64.
+// The delivered JSON for one "received" batch. Two fields are reshaped on the
+// way out; comments.json itself is never rewritten, these are copies.
+//   images — stored ids (see ReviewComment.images) become absolute file paths,
+//     so the agent's context only ever holds a path and it Reads the file when
+//     it actually needs the pixels, never base64.
+//   code.tokens — the snapshot's Shiki colouring (see CommentCodeSnapshot) is
+//     dropped. It exists so the browser can paint the snapshot without Shiki;
+//     to an agent it is noise that would cost several times the code's own
+//     size in context. The plain before/lines/after text is what gets
+//     delivered.
 function deliveredPayload(
   received: ReviewComment[],
   paths: ReviewPaths,
@@ -575,9 +581,16 @@ function deliveredPayload(
   const note = buildDeliveryNote(settings);
   const hasImages = received.some((c) => c.images !== undefined && c.images.length > 0);
   const comments = received.map((c) => {
-    if (!c.images || c.images.length === 0) return c as unknown as Record<string, unknown>;
-    const { images, ...rest } = c;
-    return { ...rest, imagePaths: images.map((id) => path.join(paths.imagesDir, id)) };
+    let out = c as unknown as Record<string, unknown>;
+    if (c.images && c.images.length > 0) {
+      const { images, ...rest } = c;
+      out = { ...rest, imagePaths: images.map((id) => path.join(paths.imagesDir, id)) };
+    }
+    if (c.code && c.code.tokens) {
+      const { tokens, ...code } = c.code;
+      out = { ...out, code };
+    }
+    return out;
   });
   return {
     status: 'received',

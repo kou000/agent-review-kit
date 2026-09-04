@@ -13,7 +13,12 @@ import {
   runGitGrep,
   runGitLsFiles,
 } from './gitDiff';
-import { bakeDiffHighlight, highlightFences, highlightFile } from './highlight';
+import {
+  bakeDiffHighlight,
+  highlightFences,
+  highlightFile,
+  highlightSnapshot,
+} from './highlight';
 import { documentHtmlPath, findDocument } from './htmlDocument';
 import {
   COMMENT_IMAGE_ID_RE,
@@ -51,6 +56,7 @@ import {
 } from './store';
 import {
   COMMENT_STATUSES,
+  CommentCodeSnapshot,
   CommentFences,
   CommentIntent,
   CommentStatus,
@@ -322,6 +328,40 @@ function validateImages(v: unknown, imagesDir: string): { images?: string[] } | 
     out.push(id);
   }
   return out.length ? { images: out } : {};
+}
+
+// Caps on a stored code snapshot (see CommentCodeSnapshot). A drag over a
+// whole hunk is well under these; the caps only stop a crafted request from
+// ballooning comments.json.
+const MAX_CODE_LINES = 400;
+const MAX_CODE_LINE = 2000;
+
+function codeLines(v: unknown): string[] | null {
+  if (!Array.isArray(v)) return null;
+  const out: string[] = [];
+  for (const line of v) {
+    if (typeof line !== 'string' || line.length > MAX_CODE_LINE) return null;
+    out.push(line);
+  }
+  return out;
+}
+
+/**
+ * Validate the optional `code` of a diff comment post (see
+ * CommentCodeSnapshot). Returns a spreadable fragment — `{}` when the field is
+ * absent, malformed, or over the caps. Deliberately never an error: the
+ * snapshot is a reading aid, and losing the user's comment over it would be a
+ * far worse outcome than saving the comment without one.
+ */
+function validateCode(v: unknown): { code?: CommentCodeSnapshot } {
+  if (v === undefined || v === null || typeof v !== 'object' || Array.isArray(v)) return {};
+  const b = v as Record<string, unknown>;
+  const before = codeLines(b.before);
+  const lines = codeLines(b.lines);
+  const after = codeLines(b.after);
+  if (!before || !lines || !after || lines.length === 0) return {};
+  if (before.length + lines.length + after.length > MAX_CODE_LINES) return {};
+  return { code: { before, lines, after } };
 }
 
 /**
@@ -1138,6 +1178,11 @@ async function handle(
           ...fences,
           parentId: topId,
         };
+        // The code snapshot rides along with the anchor for the same reason:
+        // a reply delivered on its own (its parent already answered) still
+        // tells the agent which code the thread is about, even after later
+        // fixes moved the line numbers.
+        if (anchor.code) comment.code = anchor.code;
         // HTML-review threads: replies inherit the document anchor too, so a
         // reply delivered by wait-comments is self-describing.
         if (anchor.documentId) {
@@ -1208,6 +1253,17 @@ async function handle(
       return;
     }
     const fences = await fenceFragment(input.body);
+    // Only an anchored comment has code to snapshot; an overall comment
+    // (file === null) points at nothing in particular.
+    const code = input.file === null ? {} : validateCode(body.code);
+    // Colour the snapshot here, at write time, so the browser can render it
+    // without Shiki (same policy as the comment body's fences). The whole
+    // block is tokenized in one pass; failure just leaves the field off.
+    if (code.code && input.file !== null) {
+      const block = [...code.code.before, ...code.code.lines, ...code.code.after];
+      const tokens = await highlightSnapshot(input.file, block);
+      if (tokens) code.code.tokens = tokens;
+    }
     const now = nowIso();
     const comment: ReviewComment = {
       id: newCommentId(),
@@ -1218,6 +1274,7 @@ async function handle(
       ...intent,
       ...images,
       ...fences,
+      ...code,
     };
     const accepted = mutateComments(paths.comments, (comments) => {
       if (loadFinished(paths.finished)) return false;

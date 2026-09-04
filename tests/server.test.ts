@@ -371,6 +371,116 @@ test('既存 diff コメント投稿は回帰なく動作する', async () => {
   assert.equal(data.comment.file, 'a.ts');
 });
 
+test('diff コメントは code スナップショット（当時のコードと前後行）を保存する', async () => {
+  const res = await fetch(`${baseUrl}/api/comments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      file: 'snap.ts',
+      side: 'new',
+      startLine: 10,
+      endLine: 11,
+      startDiffLine: 20,
+      endDiffLine: 21,
+      body: 'ここ',
+      code: { before: ['b1', 'b2'], lines: ['hit1', 'hit2'], after: ['a1'] },
+    }),
+  });
+  assert.equal(res.status, 201);
+  const { comment } = (await res.json()) as {
+    comment: { id: string; code?: { before: string[]; lines: string[]; after: string[] } };
+  };
+  assert.deepEqual(comment.code?.before, ['b1', 'b2']);
+  assert.deepEqual(comment.code?.lines, ['hit1', 'hit2']);
+  assert.deepEqual(comment.code?.after, ['a1']);
+
+  // 返信はアンカーと一緒に code も引き継ぐ（返信だけ配達されても対象が分かる）
+  const replyRes = await fetch(`${baseUrl}/api/comments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ parentId: comment.id, body: 'やっぱりこう' }),
+  });
+  assert.equal(replyRes.status, 201);
+  const reply = (await replyRes.json()) as { comment: { code?: { lines: string[] } } };
+  assert.deepEqual(reply.comment.code?.lines, ['hit1', 'hit2']);
+});
+
+test('code スナップショットは拡張子から言語を引いて Shiki トークンを焼き込む', async () => {
+  const post = async (file: string): Promise<Record<string, unknown> | undefined> => {
+    const res = await fetch(`${baseUrl}/api/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        file,
+        side: 'new',
+        startLine: 2,
+        endLine: 2,
+        startDiffLine: 2,
+        endDiffLine: 2,
+        body: 'x',
+        code: { before: ['const a = 1;'], lines: ['const b = 2;'], after: [] },
+      }),
+    });
+    assert.equal(res.status, 201);
+    const data = (await res.json()) as { comment: { code?: Record<string, unknown> } };
+    return data.comment.code;
+  };
+
+  const code = await post('hl.ts');
+  const tokens = code?.tokens as { t: string; s?: string }[][];
+  // before + lines + after と平行な 1 行 1 エントリ。
+  assert.equal(tokens.length, 2);
+  // トークンを連結すると元の行に戻る（クライアント側の一致チェックの前提）。
+  assert.equal(tokens[0].map((t) => t.t).join(''), 'const a = 1;');
+  assert.equal(tokens[1].map((t) => t.t).join(''), 'const b = 2;');
+  assert.ok(tokens[0].some((t) => typeof t.s === 'string' && t.s.startsWith('color:#')));
+
+  // 言語が引けない拡張子ではトークンなし（素のテキスト表示にフォールバック）。
+  const plain = await post('hl.unknownext');
+  assert.ok(plain && !('tokens' in plain));
+});
+
+test('不正・過大な code はコメントを落とさずフィールドだけ省かれる', async () => {
+  const post = async (code: unknown): Promise<Record<string, unknown>> => {
+    const res = await fetch(`${baseUrl}/api/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        file: 'snap.ts',
+        side: 'new',
+        startLine: 1,
+        endLine: 1,
+        startDiffLine: 1,
+        endDiffLine: 1,
+        body: 'x',
+        code,
+      }),
+    });
+    assert.equal(res.status, 201);
+    const data = (await res.json()) as { comment: Record<string, unknown> };
+    return data.comment;
+  };
+
+  assert.ok(!('code' in (await post({ before: [], lines: 'not-an-array', after: [] }))));
+  assert.ok(!('code' in (await post({ before: [], lines: [], after: [] }))));
+  assert.ok(!('code' in (await post('nope'))));
+  const huge = new Array(401).fill('x');
+  assert.ok(!('code' in (await post({ before: [], lines: huge, after: [] }))));
+  const longLine = 'x'.repeat(2001);
+  assert.ok(!('code' in (await post({ before: [], lines: [longLine], after: [] }))));
+});
+
+test('全体コメントには code を送っても保存されない', async () => {
+  const res = await fetch(`${baseUrl}/api/comments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ body: '全体', code: { before: [], lines: ['x'], after: [] } }),
+  });
+  assert.equal(res.status, 201);
+  const data = (await res.json()) as { comment: Record<string, unknown> };
+  assert.ok(!('code' in data.comment));
+});
+
 test('intent は diff コメント・全体コメント・返信・ドキュメントコメントに保存される', async () => {
   const post = async (payload: Record<string, unknown>): Promise<{ id: string; intent?: string }> => {
     const res = await fetch(`${baseUrl}/api/comments`, {

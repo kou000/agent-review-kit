@@ -335,3 +335,40 @@ test('画像なしバッチには imagesNote が乗らない', async () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('配達時に code.tokens を落とし、素のテキストは残す（comments.json は不変）', async () => {
+  const tmp = makeTmpRepo();
+  try {
+    const paths = reviewPaths(tmp);
+    const c = diffComment('t1');
+    c.code = {
+      before: ['const a = 1;'],
+      lines: ['const b = 2;'],
+      after: ['const c = 3;'],
+      tokens: [
+        [{ t: 'const', s: 'color:#ff7b72' }, { t: ' a = 1;' }],
+        [{ t: 'const', s: 'color:#ff7b72' }, { t: ' b = 2;' }],
+        [{ t: 'const', s: 'color:#ff7b72' }, { t: ' c = 3;' }],
+      ],
+    };
+    saveComments(paths.comments, [c]);
+
+    const lines = await captureLog(() => waitComments({ timeout: 2, cwd: tmp }));
+    const result = JSON.parse(lines[0]) as {
+      comments: { id: string; code?: Record<string, unknown> }[];
+    };
+    const delivered = result.comments.find((x) => x.id === 't1');
+    assert.deepEqual(delivered?.code, {
+      before: ['const a = 1;'],
+      lines: ['const b = 2;'],
+      after: ['const c = 3;'],
+    });
+    assert.ok(!('tokens' in delivered!.code!));
+
+    // 落とすのは stdout 用のコピーだけで、保存側はハイライトを保持する。
+    const stored = loadComments(paths.comments).find((x) => x.id === 't1');
+    assert.equal(stored?.code?.tokens?.length, 3);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

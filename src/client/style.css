@@ -500,6 +500,56 @@ tr.widget-row td {
 .comment-card .body {
   padding: 8px 10px;
 }
+
+/* コメント当時のコード（折りたたみ）。既定は閉じた状態で、summary クリックで
+   展開する。行番号はコメントのアンカー由来なので、その後の修正で差分側の行が
+   ずれてもここは当時のまま。 */
+.comment-card .code-snapshot {
+  margin: 8px 10px 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  font-size: 12px;
+}
+.comment-card .code-snapshot > summary {
+  padding: 5px 8px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+.comment-card .code-snapshot > summary:hover { color: var(--fg); }
+.comment-card .code-snapshot table {
+  width: 100%;
+  border-collapse: collapse;
+  border-top: 1px solid var(--border);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  line-height: 1.5;
+}
+/* スレッドは差分表の tr.widget-row の中にあり、その td 規則（上下ボーダー）が
+   ここまで降りてくるので明示的に打ち消す。 */
+.comment-card .code-snapshot td.n {
+  width: 1%;
+  padding: 0 8px;
+  text-align: right;
+  color: var(--muted);
+  background: var(--header-bg);
+  border: 0;
+  border-right: 1px solid var(--border);
+  white-space: nowrap;
+  user-select: none;
+  vertical-align: top;
+}
+.comment-card .code-snapshot td.t {
+  padding: 0 8px;
+  border: 0;
+  background: none;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.comment-card .code-snapshot tr.hit td.n,
+.comment-card .code-snapshot tr.hit td.t {
+  background: var(--select-bg);
+}
 .comment-card .agent-response {
   margin: 0 10px 8px;
   padding: 8px 10px;
