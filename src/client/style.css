@@ -1046,6 +1046,22 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   border-bottom: 1px solid var(--border);
   margin-bottom: 6px;
 }
+/* ファイル数の見出しの直下に置く差分サマリ: 合計の追加/削除行数と比較元 ref。
+   見出しの下線のすぐ下に来るので margin-top で行間を詰めている。 */
+.diff-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  padding: 0 4px;
+  margin: -2px 0 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.diff-summary-counts { display: inline-flex; gap: 6px; font-weight: 600; }
+.diff-summary-add { color: var(--success); }
+.diff-summary-del { color: var(--danger); }
+.diff-summary-base { overflow-wrap: anywhere; }
 .tree-dir {
   color: var(--muted);
   padding: 2px 4px;

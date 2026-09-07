@@ -149,6 +149,55 @@ function buildSidebarShell() {
   return sidebar;
 }
 
+/* ---------- 差分サマリ（合計変更行数と比較元 ref） ---------- */
+
+// 差分全体の追加・削除行数。行の kind をそのまま数えるので、side-by-side で
+// 左右に並ぶ変更行（左 del / 右 add）もそれぞれ 1 行として数えられる。
+function diffLineTotals() {
+  let added = 0;
+  let deleted = 0;
+  DIFF.files.forEach(function (f) {
+    (f.hunks || []).forEach(function (h) {
+      h.rows.forEach(function (r) {
+        if (r.left && r.left.kind === 'del') deleted++;
+        if (r.right && r.right.kind === 'add') added++;
+      });
+    });
+  });
+  return { added, deleted };
+}
+
+// 「+499 -95 / base: main」の 1 行。ファイル数の見出しの直下に置き、GitHub の
+// 差分ヘッダと同じく「規模」と「比較元」をファイル数と同じ場所で見せる。
+// 見出し自体は renderSidebarTree が textContent を書き換えるので、子要素では
+// なく兄弟要素として持つ。
+function buildDiffSummary() {
+  const totals = diffLineTotals();
+  const row = document.createElement('div');
+  row.className = 'diff-summary';
+
+  const add = document.createElement('span');
+  add.className = 'diff-summary-add';
+  add.textContent = '+' + totals.added;
+  const del = document.createElement('span');
+  del.className = 'diff-summary-del';
+  del.textContent = '-' + totals.deleted;
+  const counts = document.createElement('span');
+  counts.className = 'diff-summary-counts';
+  counts.title = '追加 ' + totals.added + ' 行 / 削除 ' + totals.deleted + ' 行';
+  counts.appendChild(add);
+  counts.appendChild(del);
+  row.appendChild(counts);
+
+  const base = document.createElement('span');
+  base.className = 'diff-summary-base';
+  base.textContent = DIFF.base ? 'base: ' + DIFF.base : 'base: HEAD (working tree)';
+  base.title = '比較元の ref（generate の --base）';
+  row.appendChild(base);
+
+  return row;
+}
+
 // File-tree-only sidebar for the standalone /commit and /snapshot pages:
 // jump navigation over the read-only file boxes. No viewed split, comment
 // list, or commits section — none of those apply there.
@@ -160,6 +209,7 @@ export function buildReadOnlySidebar() {
   heading.className = 'sidebar-title';
   heading.textContent = 'ファイル (' + DIFF.files.length + ')';
   sidebar.appendChild(heading);
+  sidebar.appendChild(buildDiffSummary());
 
   const treeWrap = document.createElement('div');
   treeWrap.className = 'tree';
@@ -177,6 +227,7 @@ export function buildSidebar() {
   heading.className = 'sidebar-title';
   heading.id = 'file-tree-title';
   sidebar.appendChild(heading);
+  sidebar.appendChild(buildDiffSummary());
 
   // Unviewed files render as the normal nested tree; viewed files move to a
   // flat "確認済み" section below it. Both are (re)filled by renderSidebarTree.
