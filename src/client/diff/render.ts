@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { copyPathButton, esc, fmtDate } from '../dom.js';
+import { copyPathButton, esc, fmtDate, openFileTabButton } from '../dom.js';
 import { attachImagePaste } from '../images.js';
 import { intentFieldHtml, selectedIntent, syncIntentFields } from '../intent.js';
 import { app, connState, DIFF, diffMeta, state } from '../state.js';
@@ -96,6 +96,8 @@ export function renderDiff() {
     appendCollapseToggle(header, box);
 
     header.appendChild(copyPathButton(file.path));
+    // 削除されたファイルは working tree に無いので /file/<path> が開けない。
+    if (file.status !== 'deleted') header.appendChild(openFileTabButton(file.path));
 
     // 確認済み (Viewed) toggle: collapses this file's body (via the shared
     // 'collapsed' class) and moves it to the "確認済み" section of the tree.
@@ -195,6 +197,7 @@ function renderReadOnlyFiles(frag, emptyText) {
       esc(statusLabel(file.status)) + '</span><span class="file-name">' + title + '</span>';
     appendCollapseToggle(header, box);
     header.appendChild(copyPathButton(file.path));
+    if (file.status !== 'deleted') header.appendChild(openFileTabButton(file.path));
     box.appendChild(header);
 
     if (file.status === 'binary' || !file.hunks.length) {

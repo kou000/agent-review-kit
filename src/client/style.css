@@ -1294,7 +1294,7 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 /* Label is 📋 while idle and swaps to ✓ / ✕ for a moment after a click; the
    emoji is a touch wider than those glyphs, so fix a min-width and center the
    text to keep the file header from shifting during the flash. */
-.copy-path-btn {
+.copy-path-btn, .open-file-btn {
   flex: 0 0 auto;
   min-width: 28px;
   padding: 1px 6px;
@@ -1303,7 +1303,20 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   text-align: center;
   color: var(--muted);
 }
-.copy-path-btn:hover { color: var(--fg); }
+.copy-path-btn:hover, .open-file-btn:hover { color: var(--fg); }
+/* 帯の「別タブで開く」。<a> なので button の既定枠線・背景を自前で足し、
+   隣の 📋（button）と同じ見た目にそろえる。 */
+.open-file-btn {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--header-bg);
+  text-decoration: none;
+}
+.open-file-btn:hover {
+  background: var(--btn-hover-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+}
 .copy-path-btn.copied {
   color: var(--success);
   border-color: var(--success);
