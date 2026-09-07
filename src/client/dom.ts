@@ -92,6 +92,23 @@ export function copyPathButton(path) {
   return btn;
 }
 
+// Small link in a file's diff header (帯) that opens the standalone
+// /file/<path> page for that file in a new tab: the whole current file, not
+// just the changed hunks. Deleted files have no working-tree content, so
+// callers skip them. Uses an <a> (not a button) so 中クリック / 右クリックの
+// 「新しいタブで開く」 も普通に効く。
+export function openFileTabButton(path) {
+  const link = document.createElement('a');
+  link.className = 'open-file-btn';
+  link.href = '/file/' + encodeURIComponent(path);
+  link.target = '_blank';
+  link.rel = 'noopener';
+  link.textContent = '↗';
+  link.title = path + ' の全文を別タブで開く';
+  link.setAttribute('aria-label', 'このファイルを別タブで開く');
+  return link;
+}
+
 export function bodySnippet(s) {
   const t = String(s).replace(/\s+/g, ' ').trim();
   return t.length > 40 ? t.slice(0, 40) + '…' : t;
