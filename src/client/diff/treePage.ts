@@ -1,9 +1,9 @@
 import { api } from '../api.js';
-import { copyPathButton } from '../dom.js';
+import { copyPathButton, fileTabUrl } from '../dom.js';
 import { attachTreeSideResize, restoreTreeSideWidth } from '../resize.js';
 import { app, diffMeta } from '../state.js';
 import { appendEditorLink } from './editorLink.js';
-import { buildFileTable, renderRepoTree } from './repoView.js';
+import { buildFileTable, renderRepoTree, revealTreeFile } from './repoView.js';
 
 /* ---------- standalone repository tree page (/files) ---------- */
 
@@ -227,10 +227,10 @@ export function renderTreePage() {
       nameEl.textContent = f.path;
       nameEl.title = f.path;
       header.appendChild(copyPathButton(f.path));
-      // 「新しいタブで開く」: the standalone /file/<path> page for this file.
+      // 「新しいタブで開く」: another /files tab already showing this file.
       const open = document.createElement('a');
       open.className = 'file-open-tab';
-      open.href = '/file/' + encodeURIComponent(f.path);
+      open.href = fileTabUrl(f.path);
       open.target = '_blank';
       open.rel = 'noopener';
       open.title = f.path + ' を新しいタブで開く';
@@ -439,6 +439,19 @@ export function renderTreePage() {
     renderRepoTree(files, treeWrap, openInViewer);
     headingLabel.textContent = 'リポジトリのファイル (' + files.length + ')';
     if (!files.length) treeWrap.textContent = '追跡中のファイルがありません';
+    // ?file=<path> （帯やツリーの ↗ から来た場合）: そのファイルを右ペインに
+    // 開き、左ツリーもそこまで展開して選択済みにする。単独ファイルのページを
+    // 開くのと違い、隣のファイルにそのまま辿れる状態で着地する。
+    const wanted = new URLSearchParams(location.search).get('file');
+    if (wanted) {
+      const row = revealTreeFile(treeWrap, wanted);
+      // 一覧に無いパスでも開こうとする: /api/file 側の 404 メッセージが
+      // 「なぜ開けないか」を右ペインに出す（ここで黙って捨てない）。
+      openInViewer(wanted);
+      if (row && typeof row.scrollIntoView === 'function') {
+        row.scrollIntoView({ block: 'center' });
+      }
+    }
   }).catch(function (err) {
     treeWrap.textContent = '取得に失敗しました: ' + errorText(err);
   });

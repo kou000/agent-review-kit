@@ -22,6 +22,8 @@ export function docTargetText(c) {
 export function commentLocShort(c) {
   if (c.documentId) return docTargetText(c);
   if (c.file === null || c.file === undefined) return '全体';
+  // File-level comment: a file with no line anchor (see ReviewComment.file).
+  if (c.startLine === null || c.startLine === undefined) return c.file + ' 全体';
   const range = c.startLine === c.endLine
     ? 'L' + c.startLine
     : 'L' + c.startLine + '-' + c.endLine;
@@ -196,6 +198,8 @@ export function commentCard(c: any, isReply?: boolean) {
     posText = esc(docTargetText(c));
   } else if (c.file === null || c.file === undefined) {
     posText = 'レビュー全体';
+  } else if (c.startLine === null || c.startLine === undefined) {
+    posText = esc(c.file) + '（ファイル全体）';
   } else {
     const range = c.startLine === c.endLine ? 'L' + c.startLine : 'L' + c.startLine + '-L' + c.endLine;
     posText = esc(c.file) + ' ' + (c.side === 'new' ? '' : '(旧) ') + esc(range);
@@ -265,20 +269,28 @@ export function commentCard(c: any, isReply?: boolean) {
 
   const actions = document.createElement('div');
   actions.className = 'actions';
-  // One-click fix request on an unhandled AI finding: posts a canned reply
-  // as the user, which rides the normal reply pipeline (wait-comments only
-  // delivers user comments). The canned text is a self-contained
-  // instruction, so the consumer needs no knowledge of this button.
-  if (!isReply && isAgentComment(c) && (c.status === 'open' || c.status === 'seen')) {
+  // One-click fix request: posts a canned reply as the user, which rides the
+  // normal reply pipeline (wait-comments only delivers user comments). The
+  // canned text is a self-contained instruction, so the consumer needs no
+  // knowledge of this button. Shown on every unresolved card, not just AI
+  // findings and not just the head of a thread: the usual moment for it is
+  // right after reading the agent's last answer — which, in a long thread,
+  // is the bottom card, not the top one. Posting from a reply lands in the
+  // same thread (the server normalizes parentId to the top-level comment).
+  if (c.status !== 'resolved') {
     const fixBtn = document.createElement('button');
     fixBtn.className = 'primary';
     fixBtn.textContent = '🔧 修正を依頼';
-    fixBtn.title = '返信を書かずに、この指摘の修正をエージェントに依頼する';
+    fixBtn.title = !isReply && isAgentComment(c)
+      ? '返信を書かずに、この指摘の修正をエージェントに依頼する'
+      : '返信を書かずに、このスレッドのやりとりどおりの修正をエージェントに依頼する';
     fixBtn.addEventListener('click', function () {
       fixBtn.disabled = true;
       api('POST', '/api/comments', {
         parentId: c.id,
-        body: '上記の指摘の通り修正してください',
+        body: !isReply && isAgentComment(c)
+          ? '上記の指摘の通り修正してください'
+          : '上記のやりとりの通り修正してください',
         intent: 'fix',
       })
         .then(refresh)

@@ -96,6 +96,19 @@ export function renderDiff() {
     appendCollapseToggle(header, box);
 
     header.appendChild(copyPathButton(file.path));
+    // 💬: comment on the file as a whole. Line comments cover "this line is
+    // wrong"; this covers what no single line owns — "this file should be
+    // split", "why is this file touched at all", a question about the file.
+    const fileCommentBtn = document.createElement('button');
+    fileCommentBtn.type = 'button';
+    fileCommentBtn.className = 'file-comment-btn';
+    fileCommentBtn.textContent = '💬';
+    fileCommentBtn.title = 'このファイル全体にコメント（行に紐づかない指摘・質問）';
+    fileCommentBtn.setAttribute('aria-label', 'このファイル全体にコメント');
+    fileCommentBtn.addEventListener('click', function () {
+      toggleFileCommentForm(box, file.path);
+    });
+    header.appendChild(fileCommentBtn);
     // 削除されたファイルは working tree に無いので /file/<path> が開けない。
     if (file.status !== 'deleted') header.appendChild(openFileTabButton(file.path));
 
@@ -142,6 +155,13 @@ export function renderDiff() {
     updateViewedButton(viewBtn, isViewed(file.path));
 
     box.appendChild(header);
+
+    // Where renderComments() puts this file's file-level threads: under the
+    // header, above the diff, so they read as being about the whole file.
+    // Stays empty (and invisible) while the file has none.
+    const fileComments = document.createElement('div');
+    fileComments.className = 'file-comments';
+    box.appendChild(fileComments);
 
     if (file.status === 'binary' || !file.hunks.length) {
       const p = document.createElement('div');
@@ -277,6 +297,75 @@ export function renderSnapshotPage() {
 
 // A fresh section is created on every renderDiff (which wipes #app). It holds
 // the list of file:null comments (filled by renderComments) plus a post form.
+// The 💬 form for a file-level comment (no line anchor), opened from the file
+// header and toggled off by a second click. It posts `file` with no side and
+// no line numbers — the shape the server reads as "the whole file" (see
+// validateCommentInput). Modelled on the overall-comment form; the difference
+// is where it lives and that it closes after a successful post.
+function toggleFileCommentForm(box, filePath) {
+  const open = box.querySelector('.file-comment-form');
+  if (open) {
+    open.remove();
+    return;
+  }
+  // A collapsed box (chevron or 確認済み) hides everything but the header, so
+  // the form would open invisibly. Expanding keeps the 確認済み mark itself.
+  setCollapsed(box, false);
+
+  const form = document.createElement('div');
+  form.className = 'file-comment-form comment-form';
+  form.innerHTML =
+    '<div class="form-meta"></div>' +
+    '<textarea placeholder="このファイル全体へのコメント（Ctrl+Enterで送信 / 画像はペーストで添付）"></textarea>' +
+    intentFieldHtml() +
+    '<div class="buttons">' +
+    '<button class="primary submit">コメントを追加</button>' +
+    '<button class="cancel">キャンセル</button>' +
+    '</div>';
+  form.querySelector('.form-meta').textContent = filePath + ' 全体にコメント';
+  // Above the file's existing file-level threads, so the newest draft is the
+  // first thing under the header.
+  const list = box.querySelector('.file-comments');
+  box.insertBefore(form, list);
+  syncIntentFields(form);
+
+  const textarea: any = form.querySelector('textarea');
+  const attachments = attachImagePaste(form, textarea);
+  textarea.focus();
+
+  function submit() {
+    const images = attachments.ids();
+    if (attachments.busy()) {
+      alert('画像をアップロード中です。完了までお待ちください。');
+      return;
+    }
+    // An image alone is a valid comment; the server still requires a body.
+    const body = textarea.value.trim() || (images.length ? '（画像添付）' : '');
+    if (!body) return;
+    (form.querySelector('.submit') as any).disabled = true;
+    api('POST', '/api/comments', {
+      file: filePath,
+      body: body,
+      intent: selectedIntent(form),
+      images: images,
+    }).then(function () {
+      // Remove the form (and its textarea) before refreshing: a still-mounted
+      // draft makes isEditingDraft() defer the refresh forever.
+      form.remove();
+      refresh();
+    }).catch(function (err) {
+      alert('コメントの保存に失敗しました: ' + err);
+      (form.querySelector('.submit') as any).disabled = false;
+    });
+  }
+
+  form.querySelector('.submit').addEventListener('click', submit);
+  form.querySelector('.cancel').addEventListener('click', function () { form.remove(); });
+  textarea.addEventListener('keydown', function (e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') submit();
+  });
+}
+
 function buildOverallSection() {
   const sec = document.createElement('section');
   sec.className = 'overall-section';

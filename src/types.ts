@@ -138,7 +138,10 @@ export interface CommentCodeSnapshot {
 export interface ReviewComment {
   id: string;
   // An "overall" comment is not tied to any file or line: file/side and all
-  // line numbers are null. A line/range comment has all of them set.
+  // line numbers are null. A line/range comment has all of them set. A
+  // "file-level" comment sits between the two: `file` names a file but side
+  // and every line number are null, because the anchor is the whole file (the
+  // UI renders it under the file header, not inside the diff table).
   file: string | null;
   side: 'old' | 'new' | null;
   startLine: number | null;

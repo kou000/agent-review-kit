@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { copyPathButton, esc } from '../dom.js';
+import { copyPathButton, esc, fileTabUrl } from '../dom.js';
 import { attachPinResize } from '../resize.js';
 import { DIFF, state } from '../state.js';
 import { addPin, removePin } from './pins.js';
@@ -84,6 +84,41 @@ export function openRepoFile(filePath) {
   });
 }
 
+// The direct child of `scope` matching `selector` and `match` — direct only,
+// so a name that repeats at a deeper level can never be picked up instead.
+function directChild(scope, selector, match) {
+  const kids = scope.children;
+  for (let i = 0; i < kids.length; i++) {
+    const el: any = kids[i];
+    if (el.matches && el.matches(selector) && match(el)) return el;
+  }
+  return null;
+}
+
+// Expand the directories leading to `filePath` in a tree built by
+// renderRepoTree and return that file's row (null when the path isn't in the
+// tree). A directory's children render lazily on its first expand, so the row
+// does not exist until every ancestor has been opened — hence a click per
+// level rather than one querySelector.
+export function revealTreeFile(container, filePath) {
+  const parts = String(filePath).split('/');
+  let scope = container;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const name = parts[i];
+    const dir = directChild(scope, '.tree-dir', function (el) {
+      return el.dataset.name === name;
+    });
+    if (!dir) return null;
+    const children = dir.nextElementSibling;
+    if (!children) return null;
+    if (children.hidden) dir.click();
+    scope = children;
+  }
+  return directChild(scope, '.tree-file', function (el) {
+    return el.dataset.path === filePath;
+  });
+}
+
 // Nested tree of every repository file (tracked + untracked, ignored
 // excluded), for the sidebar's「リポジトリのファイル」
 // section and the standalone /files page. Directories start collapsed and
@@ -109,6 +144,9 @@ export function renderRepoTree(files, container, onOpenFile?) {
       const dEl = document.createElement('div');
       dEl.className = 'tree-dir repo-dir';
       dEl.style.paddingLeft = (4 + depth * 12) + 'px';
+      // Exact name for revealTreeFile — the label carries a caret and a
+      // slash, so the text is not a reliable key.
+      dEl.dataset.name = name;
       dEl.textContent = '▸ ' + name + '/';
       parent.appendChild(dEl);
       const children = document.createElement('div');
@@ -136,10 +174,10 @@ export function renderRepoTree(files, container, onOpenFile?) {
       label.title = inDiff[f.path] ? f.path + '（差分に含まれるファイル）' : f.path;
       fEl.appendChild(label);
       // 「新しいタブで開く」 link: pin panels vanish on the page's auto reload,
-      // so offer a standalone /file/<path> tab as a stable alternative.
+      // so offer a stable /files tab with this file open instead.
       const open = document.createElement('a');
       open.className = 'repo-file-open';
-      open.href = '/file/' + encodeURIComponent(f.path);
+      open.href = fileTabUrl(f.path);
       open.target = '_blank';
       open.rel = 'noopener';
       open.title = f.path + ' を新しいタブで開く';

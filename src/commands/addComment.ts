@@ -17,7 +17,8 @@ export interface AddCommentOptions {
 // comments.json (no server needed). Agent comments are shown in the UI with
 // an AI badge but are NOT delivered by wait-comments: only the user's reply
 // to one flows back to the agent. Without --file the comment is an overall
-// (file-less) one.
+// (file-less) one; with --file but no line it is a file-level comment, shown
+// under that file's header.
 export async function addComment(opts: AddCommentOptions): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
   const body = opts.body?.trim();
@@ -40,11 +41,13 @@ export async function addComment(opts: AddCommentOptions): Promise<void> {
     } else if (opts.startLine !== undefined && opts.endLine !== undefined) {
       startLine = opts.startLine;
       endLine = opts.endLine;
-    } else {
-      console.error('error: --file には --line または --start-line と --end-line を指定してください');
+    } else if (opts.side !== undefined) {
+      // --side without a line is ambiguous: it names a column of the diff but
+      // no row. A file-level comment has no side at all.
+      console.error('error: --side を指定する場合は --line または --start-line と --end-line も指定してください');
       process.exit(1);
     }
-    if (startLine > endLine) {
+    if (startLine !== null && endLine !== null && startLine > endLine) {
       console.error('error: --start-line は --end-line 以下にしてください');
       process.exit(1);
     }
@@ -53,7 +56,9 @@ export async function addComment(opts: AddCommentOptions): Promise<void> {
       process.exit(1);
     }
     file = opts.file;
-    side = (opts.side as 'old' | 'new' | undefined) ?? 'new';
+    // A file-level comment (no line) keeps side null: its anchor is the whole
+    // file, and a side would claim a position it doesn't have.
+    side = startLine === null ? null : (opts.side as 'old' | 'new' | undefined) ?? 'new';
   } else if (opts.line !== undefined || opts.startLine !== undefined || opts.endLine !== undefined) {
     console.error('error: 行番号を指定する場合は --file も指定してください');
     process.exit(1);
@@ -74,9 +79,10 @@ export async function addComment(opts: AddCommentOptions): Promise<void> {
     // Not tied to a position in the diff text. 0 puts the comment on the same
     // footing as one made on an expanded context row: the client resolves the
     // row from file/side/line, and falls back to the orphan section when the
-    // line is outside the rendered diff.
-    startDiffLine: file ? 0 : null,
-    endDiffLine: file ? 0 : null,
+    // line is outside the rendered diff. A file-level comment has no row to
+    // resolve at all, so it stays null like an overall comment.
+    startDiffLine: startLine === null ? null : 0,
+    endDiffLine: startLine === null ? null : 0,
     body,
     status: 'open',
     createdAt: now,
