@@ -223,6 +223,31 @@ export function buildDiffTable(file, interactive) {
   return table;
 }
 
+// A full-width row inserted between diff rows (comment thread / comment
+// form). The table is a split view — columns are [old num, old code, new num,
+// new code] — so the row goes in the half that matches the comment's side
+// instead of spanning all four columns: a comment written on the right side
+// shows up on the right. The other half gets an empty cell so the column
+// widths stay put. side === 'old' puts it left, anything else right.
+export function widgetRow(extraClass, side) {
+  const tr = document.createElement('tr');
+  tr.className = 'widget-row ' + extraClass;
+  const td = document.createElement('td');
+  td.className = 'widget-cell';
+  td.colSpan = 2;
+  const pad = document.createElement('td');
+  pad.className = 'widget-pad';
+  pad.colSpan = 2;
+  if (side === 'old') {
+    tr.appendChild(td);
+    tr.appendChild(pad);
+  } else {
+    tr.appendChild(pad);
+    tr.appendChild(td);
+  }
+  return { tr: tr, td: td };
+}
+
 export function numCell(file, side, cell, interactive) {
   const td = document.createElement('td');
   td.className = 'num';

@@ -103,6 +103,7 @@ body {
    非表示中でも新規コメントは投稿できる。 */
 body.comments-hidden tr.thread-row,
 body.comments-hidden .orphan-section,
+body.comments-hidden .file-comments,
 body.comments-hidden .overall-list {
   display: none;
 }
@@ -285,6 +286,27 @@ body.comments-hidden .overall-list {
   background: var(--success);
   border-color: var(--success);
   color: #fff;
+}
+
+/* 💬 ファイル全体コメントのボタン。帯の 📋 の隣（左寄せの塊）に置く。
+   ここから開くフォームと、投稿済みのファイル全体スレッドの置き場所は、どちらも
+   帯の直下（差分表の上）。行に紐づかないコメントなので差分表の中には入らない。 */
+.file-comment-btn {
+  flex: 0 0 auto;
+  min-width: 28px;
+  padding: 1px 6px;
+  line-height: 1.3;
+  font-size: 12px;
+  text-align: center;
+  color: var(--muted);
+}
+.file-comment-btn:hover { color: var(--fg); }
+/* 中身が無いファイルでは余白も出ないよう、空のときは畳む。 */
+.file-comments:not(:empty),
+.file-comment-form {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--header-bg);
 }
 
 /* 📌 pin button: sits at the right end of the file header, after 確認済み. */
@@ -477,6 +499,14 @@ tr.widget-row td {
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans JP", sans-serif;
+}
+/* コメント行（スレッド／投稿フォーム）は差分の左右どちらか半分だけを使う。
+   アンカーが変更前なら左、変更後なら右。反対側は列幅を保つための空セルで、
+   中身のある側との境目だけ縦線を引く。 */
+tr.widget-row td.widget-pad { padding: 0; }
+tr.widget-row td.widget-cell + td.widget-pad,
+tr.widget-row td.widget-pad + td.widget-cell {
+  border-left: 1px solid var(--border);
 }
 
 .comment-card {

@@ -5,6 +5,7 @@ import { intentFieldHtml, selectedIntent, syncIntentFields } from '../intent.js'
 import { DIFF, state } from '../state.js';
 import { refresh } from '../app.js';
 import { clearSelectionHighlight, selectionRange } from './selection.js';
+import { widgetRow } from './table.js';
 
 /* ---------- comment form ---------- */
 
@@ -112,10 +113,11 @@ export function showCommentForm() {
   const anchorRow = findRowFor(r.file, r.side, r.endLine);
   if (!anchorRow) return;
 
-  const tr = document.createElement('tr');
-  tr.className = 'widget-row comment-form-row';
-  const td = document.createElement('td');
-  td.colSpan = 4;
+  // The form opens in the half of the split view the selection is on, so the
+  // saved thread later appears in the same place (see widgetRow).
+  const w = widgetRow('comment-form-row', r.side);
+  const tr = w.tr;
+  const td = w.td;
 
   const rangeText = r.startLine === r.endLine
     ? 'L' + r.startLine
@@ -149,7 +151,6 @@ export function showCommentForm() {
     '<button class="cancel">キャンセル</button>' +
     '</div>';
   td.appendChild(wrap);
-  tr.appendChild(td);
   anchorRow.after(tr);
   state.openForm = tr;
   syncIntentFields(wrap);

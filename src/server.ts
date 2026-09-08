@@ -285,6 +285,24 @@ function validateCommentInput(b: Record<string, unknown>): CommentInput | string
   }
 
   if (typeof b.file !== 'string' || !b.file) return 'file is required';
+
+  // File-level comment: a file with no position at all — the anchor is the
+  // whole file, so it renders under the file header instead of inside the
+  // diff table. `side` is what tells the two apart: send a side and the full
+  // line anchor is required, exactly as before.
+  const anchorKeys = ['side', 'startLine', 'endLine', 'startDiffLine', 'endDiffLine'] as const;
+  if (anchorKeys.every((k) => b[k] === undefined || b[k] === null)) {
+    return {
+      file: b.file,
+      side: null,
+      startLine: null,
+      endLine: null,
+      startDiffLine: null,
+      endDiffLine: null,
+      body,
+    };
+  }
+
   if (b.side !== 'old' && b.side !== 'new') return 'side must be "old" or "new"';
   const nums = ['startLine', 'endLine', 'startDiffLine', 'endDiffLine'] as const;
   for (const k of nums) {

@@ -48,6 +48,7 @@ Commands:
                            自動で dismissed になる（手順の詳細は my-interactive-review スキル）
     --body <text>          コメント本文（必須）
     --file <path>          対象ファイル。省略時はレビュー全体へのコメント
+                           行を指定しなければファイル全体へのコメント
     --line <n>             対象行（単一行）
     --start-line <n>       対象範囲の開始行（--end-line とセット）
     --end-line <n>         対象範囲の終了行

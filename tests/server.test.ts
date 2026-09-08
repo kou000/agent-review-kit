@@ -167,6 +167,63 @@ test('documentId コメントへの返信は documentId/htmlTarget を継承す�
   assert.equal(reply.parentId, parent.id);
 });
 
+test('file だけのコメント（ファイル全体）は 201 で side/行がすべて null になる', async () => {
+  const res = await fetch(`${baseUrl}/api/comments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ file: 'README.md', body: 'このファイル全体への指摘' }),
+  });
+  assert.equal(res.status, 201);
+  const c = ((await res.json()) as {
+    comment: {
+      file: string;
+      side: null;
+      startLine: null;
+      endLine: null;
+      startDiffLine: null;
+      endDiffLine: null;
+    };
+  }).comment;
+  assert.equal(c.file, 'README.md');
+  assert.equal(c.side, null);
+  assert.equal(c.startLine, null);
+  assert.equal(c.endLine, null);
+  assert.equal(c.startDiffLine, null);
+  assert.equal(c.endDiffLine, null);
+});
+
+test('side を送るなら行アンカーは必須のまま（file + side だけは 400）', async () => {
+  const res = await fetch(`${baseUrl}/api/comments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ file: 'README.md', side: 'new', body: 'x' }),
+  });
+  assert.equal(res.status, 400);
+});
+
+test('ファイル全体コメントへの返信は file を継承し、行アンカーは null のまま', async () => {
+  const created = await fetch(`${baseUrl}/api/comments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ file: 'README.md', body: '親（ファイル全体）' }),
+  });
+  const parent = ((await created.json()) as { comment: { id: string } }).comment;
+
+  const replyRes = await fetch(`${baseUrl}/api/comments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ parentId: parent.id, body: '返信です' }),
+  });
+  assert.equal(replyRes.status, 201);
+  const reply = ((await replyRes.json()) as {
+    comment: { file: string; side: null; startLine: null; parentId: string };
+  }).comment;
+  assert.equal(reply.file, 'README.md');
+  assert.equal(reply.side, null);
+  assert.equal(reply.startLine, null);
+  assert.equal(reply.parentId, parent.id);
+});
+
 test('POST /api/comments/<id>/resolve は大元のコメントの未解決の返信もまとめて resolve する', async () => {
   const post = async (payload: Record<string, unknown>): Promise<{ id: string }> => {
     const res = await fetch(`${baseUrl}/api/comments`, {

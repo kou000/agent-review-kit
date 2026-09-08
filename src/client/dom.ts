@@ -92,19 +92,28 @@ export function copyPathButton(path) {
   return btn;
 }
 
-// Small link in a file's diff header (帯) that opens the standalone
-// /file/<path> page for that file in a new tab: the whole current file, not
-// just the changed hunks. Deleted files have no working-tree content, so
-// callers skip them. Uses an <a> (not a button) so 中クリック / 右クリックの
-// 「新しいタブで開く」 も普通に効く。
+// Where every 「このファイルを別タブで開く」 affordance points: the /files
+// browser with that file already open in its viewer and the left tree
+// expanded down to it (see renderTreePage / revealTreeFile). The standalone
+// /file/<path> page still exists and still works — it just isn't what these
+// links choose, because arriving with the tree in place is what makes the
+// neighbouring files reachable.
+export function fileTabUrl(path) {
+  return '/files?file=' + encodeURIComponent(path);
+}
+
+// Small link in a file's diff header (帯) that opens that file in a new tab:
+// the whole current file, not just the changed hunks. Deleted files have no
+// working-tree content, so callers skip them. Uses an <a> (not a button) so
+// 中クリック / 右クリックの「新しいタブで開く」 も普通に効く。
 export function openFileTabButton(path) {
   const link = document.createElement('a');
   link.className = 'open-file-btn';
-  link.href = '/file/' + encodeURIComponent(path);
+  link.href = fileTabUrl(path);
   link.target = '_blank';
   link.rel = 'noopener';
   link.textContent = '↗';
-  link.title = path + ' の全文を別タブで開く';
+  link.title = path + ' の全文を別タブで開く（左にファイルツリー付き）';
   link.setAttribute('aria-label', 'このファイルを別タブで開く');
   return link;
 }
