@@ -223,6 +223,15 @@ export function applySettings(settings) {
   state.readOnlyMode = !!settings.readOnlyMode;
   syncIntentFields();
   if (state.modeBadge) state.modeBadge.hidden = !state.readOnlyMode;
+  // 読み取り専用はエージェントに変更をさせないモードなので、リポジトリ状態を
+  // 変える push 依頼も止める。サーバーはこのモード中の投稿を intent: question
+  // に強制するため、押せてしまうと「質問」として届いて依頼が成立しない。
+  if (state.pushRequestBtn) {
+    state.pushRequestBtn.disabled = state.readOnlyMode;
+    state.pushRequestBtn.title = state.readOnlyMode
+      ? '読み取り専用モード中は push を依頼できません'
+      : PUSH_REQUEST_TITLE;
+  }
 }
 
 export function updateBranchLabel(branch) {
@@ -325,6 +334,23 @@ export function setupTopbarControls() {
   inner.appendChild(state.commentsToggleBtn);
   updateCommentsToggle();
 
+  // push 依頼ボタン。レビュー終了の直前に行う操作なので終了ボタンの左隣に
+  // 置く。専用 API は持たず、file: null の全体コメント（intent: fix）として
+  // 投稿するだけ。wait-comments で通常のコメントと同じ経路で届き、全体
+  // コメント欄に依頼の記録が残り、エージェントが push 後に resolve する。
+  // 文書レビュー（publish-html）のページには対象ブランチの概念が無いので出さない。
+  if (!DOC) {
+    const pushBtn = document.createElement('button');
+    pushBtn.id = 'push-request-btn';
+    pushBtn.type = 'button';
+    pushBtn.textContent = 'push を依頼';
+    pushBtn.title = PUSH_REQUEST_TITLE;
+    pushBtn.disabled = state.readOnlyMode;
+    pushBtn.addEventListener('click', requestPush);
+    inner.appendChild(pushBtn);
+    state.pushRequestBtn = pushBtn;
+  }
+
   const finishBtn = document.createElement('button');
   finishBtn.id = 'finish-btn';
   finishBtn.type = 'button';
@@ -348,6 +374,32 @@ export function setupTopbarControls() {
   // Click anywhere outside closes the panel.
   document.addEventListener('click', function (e) {
     if (state.settingsPanel && !state.settingsPanel.contains(e.target)) closeSettingsPanel();
+  });
+}
+
+// Ask the agent to push the current branch. Posted as an overall comment
+// (file: null) so it travels through wait-comments like any other comment
+// and stays visible in the overall-comments section until resolved.
+const PUSH_REQUEST_PREFIX = '【push依頼】';
+const PUSH_REQUEST_TITLE = '現在のブランチの push をエージェントに依頼する（全体コメントとして送信）';
+function requestPush() {
+  if (state.readOnlyMode) return;
+  const msg =
+    'エージェントに push を依頼しますか？\n' +
+    '全体コメントとして送信され、エージェントが現在のブランチを push します。';
+  if (!confirm(msg)) return;
+  const btn = state.pushRequestBtn;
+  if (btn) btn.disabled = true;
+  api('POST', '/api/comments', {
+    body: PUSH_REQUEST_PREFIX + '現在のブランチを push してください。',
+    intent: 'fix',
+  }).then(function () {
+    refresh();
+  }).catch(function (err) {
+    alert('push 依頼の送信に失敗しました: ' + err);
+  }).then(function () {
+    // 送信中に読み取り専用へ切り替わっていたら無効のままにする。
+    if (btn) btn.disabled = state.readOnlyMode;
   });
 }
 
