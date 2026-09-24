@@ -88,6 +88,10 @@ body {
 }
 #settings-btn { font-size: 14px; padding: 2px 8px; }
 #finish-btn { color: #f85149; border-color: rgba(248, 81, 73, 0.4); }
+/* push 依頼はレビュー終了（赤）と隣り合うので、青系で「終わらせるボタン」と
+   見分けが付くようにする。 */
+#push-request-btn { color: #58a6ff; border-color: rgba(88, 166, 255, 0.4); white-space: nowrap; }
+#push-request-btn:disabled { opacity: 0.6; }
 
 /* 全コメント表示/非表示トグル（topbar）。非表示中は mode-badge と同じ
    注意色で「隠している」状態を示す。 */

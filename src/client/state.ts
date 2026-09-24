@@ -49,6 +49,7 @@ export const state: any = {
   commentsHidden: false,
   commentsToggleBtn: null, // topbar の「コメントを隠す/表示」ボタン
   modeBadge: null,
+  pushRequestBtn: null, // topbar の「push を依頼」ボタン（読み取り専用中は無効化）
   branchLabel: null,
   settingsPanel: null,
   // ---- HTML document review (/doc/<id>) ----
