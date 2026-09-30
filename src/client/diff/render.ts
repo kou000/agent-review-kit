@@ -10,6 +10,7 @@ import {
   refresh,
   renderBadge,
   updateBranchLabel,
+  updateProjectDirLabel,
 } from '../app.js';
 import { appendCollapseToggle, setCollapsed } from './collapse.js';
 import { renderComments } from './comments.js';
@@ -473,6 +474,7 @@ export function diffRefresh() {
     renderBadge({ unresolved: unresolved });
     applySettings(status.settings);
     updateBranchLabel(status.branch);
+    updateProjectDirLabel(status.projectDir);
     const json = JSON.stringify(cs);
     if (json !== state.lastCommentsJson) {
       state.lastCommentsJson = json;
