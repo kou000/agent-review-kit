@@ -234,6 +234,15 @@ export function applySettings(settings) {
   }
 }
 
+// 同じリポジトリの worktree を複数レビューしているとき、どのタブがどの
+// ディレクトリかを見分けるために表示する。長いパスは CSS（direction: rtl）で
+// 左側を省略するので、先頭の「/」が右端へ回らないよう LRM で挟む。
+export function updateProjectDirLabel(projectDir) {
+  if (!state.projectDirLabel || !projectDir) return;
+  state.projectDirLabel.textContent = '\u200E' + projectDir + '\u200E';
+  state.projectDirLabel.title = 'レビュー対象ディレクトリ: ' + projectDir;
+}
+
 export function updateBranchLabel(branch) {
   if (!state.branchLabel || !branch) return;
   state.branchLabel.textContent = '⎇ ' + branch;
@@ -313,6 +322,10 @@ export function setupTopbarControls() {
 
   // conn-state carries margin-left:auto, so everything appended after it
   // (badge, gear) sits at the right edge of the topbar.
+  state.projectDirLabel = document.createElement('span');
+  state.projectDirLabel.id = 'project-dir-label';
+  inner.appendChild(state.projectDirLabel);
+
   state.branchLabel = document.createElement('span');
   state.branchLabel.id = 'branch-label';
   inner.appendChild(state.branchLabel);

@@ -9,6 +9,7 @@ import {
   renderBadge,
   setupTopbarControls,
   updateBranchLabel,
+  updateProjectDirLabel,
 } from '../app.js';
 import {
   closeDocForm,
@@ -174,6 +175,7 @@ export function docRefresh() {
     renderBadge({ unresolved: unresolved });
     applySettings(status.settings);
     updateBranchLabel(status.branch);
+    updateProjectDirLabel(status.projectDir);
     const json = JSON.stringify(cs);
     if (json !== state.lastCommentsJson) {
       state.lastCommentsJson = json;
