@@ -90,6 +90,9 @@ body {
   min-width: 0;
   max-width: 40ch;
 }
+/* パスのコピーボタン。topbar の gap（12px）だとパスと離れて見えるので寄せる。
+   「コピーしました」表示中に幅が変わって右隣がずれても一瞬なので許容する。 */
+#project-dir-copy-btn { margin-left: -6px; white-space: nowrap; }
 #mode-badge {
   background: rgba(210, 153, 34, 0.2);
   color: #d29922;
