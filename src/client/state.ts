@@ -51,6 +51,8 @@ export const state: any = {
   modeBadge: null,
   pushRequestBtn: null, // topbar の「push を依頼」ボタン（読み取り専用中は無効化）
   projectDirLabel: null, // topbar のレビュー対象ディレクトリ（worktree の見分け用）
+  projectDirCopyBtn: null, // その右のパスコピーボタン（パス取得前は非表示）
+  projectDir: '',
   branchLabel: null,
   settingsPanel: null,
   // ---- HTML document review (/doc/<id>) ----

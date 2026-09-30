@@ -1,7 +1,7 @@
 /* agent-review-kit review UI — entry module (compiled to ES modules, no bundler) */
 
 import { api } from './api.js';
-import { bodySnippet } from './dom.js';
+import { bodySnippet, copyText } from './dom.js';
 import { stripMarkdown } from './markdown.js';
 import { syncIntentFields } from './intent.js';
 import { restorePersistedWidths } from './resize.js';
@@ -241,6 +241,39 @@ export function updateProjectDirLabel(projectDir) {
   if (!state.projectDirLabel || !projectDir) return;
   state.projectDirLabel.textContent = '\u200E' + projectDir + '\u200E';
   state.projectDirLabel.title = 'レビュー対象ディレクトリ: ' + projectDir;
+  state.projectDir = projectDir;
+  if (state.projectDirCopyBtn) state.projectDirCopyBtn.hidden = false;
+}
+
+// パスをコピーした直後に「コピーしました」を出しておく時間。
+const PROJECT_DIR_COPY_FLASH_MS = 1500;
+
+// 長いパスは左側が省略されて全体を選択できないので、コピーボタンを横に置く。
+// 見た目はファイル帯の 📋（copyPathButton）にそろえるが、パスは最初の
+// ポーリングまで分からないので、クリック時に state.projectDir を読む。
+function createProjectDirCopyBtn() {
+  const btn = document.createElement('button');
+  btn.id = 'project-dir-copy-btn';
+  btn.type = 'button';
+  btn.className = 'copy-path-btn';
+  btn.textContent = '📋';
+  btn.title = 'パスをコピー';
+  btn.setAttribute('aria-label', 'パスをコピー');
+  btn.hidden = true;
+  btn.addEventListener('click', function () {
+    if (!state.projectDir) return;
+    copyText(state.projectDir).then(function (ok) {
+      btn.textContent = ok ? 'コピーしました' : '✕';
+      btn.title = ok ? 'コピーしました' : 'コピーできませんでした';
+      btn.classList.toggle('copied', ok);
+      setTimeout(function () {
+        btn.textContent = '📋';
+        btn.title = 'パスをコピー';
+        btn.classList.remove('copied');
+      }, PROJECT_DIR_COPY_FLASH_MS);
+    });
+  });
+  return btn;
 }
 
 export function updateBranchLabel(branch) {
@@ -325,6 +358,8 @@ export function setupTopbarControls() {
   state.projectDirLabel = document.createElement('span');
   state.projectDirLabel.id = 'project-dir-label';
   inner.appendChild(state.projectDirLabel);
+  state.projectDirCopyBtn = createProjectDirCopyBtn();
+  inner.appendChild(state.projectDirCopyBtn);
 
   state.branchLabel = document.createElement('span');
   state.branchLabel.id = 'branch-label';
