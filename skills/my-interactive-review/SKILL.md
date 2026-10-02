@@ -118,7 +118,14 @@ Codex では `serve` と `wait-comments` をそれぞれ長時間実行できる
 
    （jq が無い環境でも動くよう node で読む。`node -p` の数値出力は色コードが混ざることがあるため `String()` で包む）
 
-   未起動なら、`agent-review-kit serve` をバックグラウンドで起動する。Codex では「Codex でのバックグラウンド実行」に従い、短く yield して返された `session_id` を `serve` 用として保持する。ポートは 5179 から空きを自動選択して `server.json` に記録される。起動出力または `server.json` から実ポートを取得する。
+   未起動なら、`agent-review-kit serve` をバックグラウンドで起動する。Codex では「Codex でのバックグラウンド実行」に従い、短く yield して返された `session_id` を `serve` 用として保持する。Claude Code では `run_in_background` を使わず、setsid nohup で切り離して起動する（Claude Code 2.1.285 以降、`run_in_background` の Bash は timeout（最大 2 時間）で強制停止され、レビューページが開けなくなるため。コメントの配達は serve ではなく `wait-comments` が行うので、切り離しても届く）:
+
+   ```bash
+   mkdir -p ~/.review-hub/logs
+   setsid nohup agent-review-kit serve > ~/.review-hub/logs/ark-$(basename "$(pwd)").log 2>&1 < /dev/null &
+   ```
+
+   ポートは 5179 から空きを自動選択して `server.json` に記録される。起動出力（切り離した場合はログ）または `server.json` から実ポートを取得する。
 
    **注意: `projectDir` の一致確認を省略しない。** 別プロジェクトの serve が同じポートで生きていると、curl が成功してしまい、ユーザーが別プロジェクトの diff にコメントを書く事故になる。
 
@@ -128,7 +135,7 @@ Codex では `serve` と `wait-comments` をそれぞれ長時間実行できる
 4. コメントを待つ。**レビュー開始後の最初の1回だけ** `--resume` を付ける。前のエージェントセッションが受信済みのまま中断した `seen` コメントも、新規 `open` コメントと一緒に回収できる:
 
    ```bash
-   agent-review-kit wait-comments --timeout 0 --resume
+   agent-review-kit wait-comments --timeout 6600 --resume
    ```
 
    Codex ではこのコマンドを追跡可能なターミナルセッションとして起動し、`wait-comments` 用の `session_id` を保持する。出力を回収するときは、そのセッションへ空入力の `write_stdin` を送る。受信すると `{"status": "received", "note": "...", "settings": {...}, "comments": [...]}` が stdout に返り、該当する `open` コメントは `seen` になる。`settings` は受信時点の設定で、**このバッチの処理方針はここに従う**（「設定（settings）の扱い」参照）。`note` は設定に応じて同乗する処理指示（無いこともある）。**付いていたら必ず従う**。
@@ -136,7 +143,7 @@ Codex では `serve` と `wait-comments` をそれぞれ長時間実行できる
    受信した waiter の終了結果を回収して `activeWaitSessionId` をクリアし、コメントを処理キューへ追加する。その後、`--resume` を外した新しい waiter を**1本だけ**開始し、その新しい session id を保存する:
 
    ```bash
-   agent-review-kit wait-comments --timeout 0
+   agent-review-kit wait-comments --timeout 6600
    ```
 
    `--resume` を2回目以降にも付けると、現在対応中の `seen` コメントが重複配達されるため禁止する。新しい待機はサブエージェントの作業中も生かしておき、完了通知またはセッション出力を後で回収する。CLI が `another wait-comments process is already running` を返したら再試行で増やさない。現在のタスクが保持する既存 session id を使い、所有していない waiter なら PID を kill せず、前のタスクの終了を確認してから最初の `--resume` をやり直す。
@@ -296,12 +303,12 @@ diff ではなく、実装プラン・設計書・調査結果などの任意HTM
    agent-review-kit publish-html --input <path> --document-id <id> --title "<タイトル>"
    ```
 
-3. サーバーが未起動なら手順2と同じ確認方法で `agent-review-kit serve` をバックグラウンド起動する。
+3. サーバーが未起動なら手順2と同じ確認方法で `agent-review-kit serve` をバックグラウンド起動する（Claude Code では手順2と同じく setsid nohup で切り離す）。
 4. ユーザーに `http://localhost:<実ポート>/doc/<id>` を案内する。「要素を選択してコメント」ボタンで要素クリック、または文章をドラッグ選択してコメントできることを添える。
 5. コメントを待つ:
 
    ```bash
-   agent-review-kit wait-comments --document-id <id> --timeout 0
+   agent-review-kit wait-comments --document-id <id> --timeout 6600
    ```
 
    常にバックグラウンドで常駐させ、完了通知（バックグラウンドタスクの終了）で受信を判定する（`ps`/`pgrep` での生存確認はしない）。二重起動もしない（「注意」の項目と同じ）。
@@ -342,7 +349,7 @@ HTMLレビューでも、修正はサブエージェントに委譲し、メイ�
 
 - コメントごとに別のメインエージェントセッションを起動しない。このセッションがループの主体。受信・トリアージ・回答・resolve はメインセッションが行い、コード修正はサブエージェントが行う。
 - 修正前に必ず現在の git diff を確認し、修正後に必ずテストまたは型チェックを実行する。
-- `wait-comments --timeout 0` は**常にバックグラウンドで常駐させる**。サブエージェントの完了待ちの間もコメント受信を止めない。受信して返ってきたら（内容のトリアージ後に）すぐ再度バックグラウンドで起動し直し、レビュー中は監視が途切れないようにする。
+- `wait-comments --timeout 6600` は**常にバックグラウンドで起動しておく**（Claude Code では `run_in_background` の Bash で、Bash の timeout は `7200000`）。サブエージェントの完了待ちの間もコメント受信を止めない。受信して返ってきたら（内容のトリアージ後に）すぐ再度バックグラウンドで起動し直し、レビュー中は監視が途切れないようにする。110 分で自分から終わるので、`{"status":"timeout"}` が返ったら起動し直す（失敗ではない）。`--timeout 0` は使わない（Claude Code 2.1.285 以降は 2 時間で強制停止され、以降コメントが黙って配達されなくなる）。
 - **wait-comments を二重に起動しない。** 再起動時は前のプロセスが終了していることを確認する。2本生きていると、新規コメントが stdout を誰も読まない側に消費され（`seen` 化だけされて）握り潰される。
 - **waiter の起動コマンドには必ず監視対象ディレクトリへの明示的な `cd` を含める。** ark のコメントスコープは実行ディレクトリで決まるため、直前のコマンドの cwd（別リポジトリでの git 操作など）を暗黙に継承すると、無関係なスコープを監視する waiter ができてコメントを取りこぼす。起動後に `readlink /proc/<pid>/cwd` で監視先を確認するとより確実。
 - **wait-comments の終了判定はバックグラウンドタスクの完了通知、または Codex のターミナルセッション結果で行う。`ps`/`pgrep` でプロセスの生存確認をしない。** wait-comments は open コメントを1バッチ受信すると stdout に書いて即終了する設計で、この「終了」がバックグラウンドタスクの完了通知として届く。したがって「バックグラウンドで起動 → 完了通知が来たら受信済み＝終了済み → トリアージ → 再起動」というイベント駆動のサイクルで回せばよく、プロセス一覧での生存確認は不要。むしろ LLM の推論ループでプロセス状態をポーリングするのは高コスト（毎回コンテキスト再読込＋推論）で誤りやすく、避ける。どうしても確認する場合は `pgrep -af "[w]ait-comments"` のように**先頭文字をブラケットで囲って自己マッチを除外する**こと。`pgrep -f wait-comments` は検索コマンド自身のシェルプロセス（コマンドライン文字列に "wait-comments" を含む）にヒットし、実際には動いていないのに「動いている」と誤検出する。
