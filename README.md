@@ -253,6 +253,7 @@ agent-review-kit resolve-comment comment_xxx --status fixed --message "修正後
 status: `open` / `seen` / `fixed` / `answered` / `wontfix` / `resolved` / `dismissed`（AI指摘の見送り）。
 解決済みとして扱われるのは `resolved` だけで、`wontfix` / `dismissed` は「対応しない判断の記録」なので**解決済みにはならず、画面では「要確認」として残る**（ただしエージェント側の作業待ちではないので `unresolved` には含まれない）。
 `--message` は `agentResponse` としてコメントに保存され、画面にインライン表示される。
+既に `agentResponse` があるコメントに再度 `--message` を送っても前の返信は上書きされず、同じスレッドに `author: agent` の返信（`body` は空、本文は `agentResponse`）が追加される（出力 JSON の `reply`）。
 `--snapshot <id>` はスナップショット（後述）の差分ページ `/snapshot/<id>` へのリンク、
 `--commit <sha>` は `/commit/<sha>` へのリンクを返信に添える。
 `--image <path>`（png/jpg/jpeg/gif/webp、複数回指定可）は画像を base64 data URI に
@@ -454,7 +455,7 @@ HTMLレビューのコメントは `file` / `side` / 行番号 が全て `null` 
 - `code`: コメントを書いた時点のコードのスナップショット。`lines` がコメント対象の行、`before` / `after` はその前後の連続する最大5行（画面に出ていた範囲まで）。行番号はコメントの `startLine` / `endLine` から辿れる（`before` は `startLine - 1` で終わり、`after` は `endLine + 1` から始まる）。**修正が進むと `startLine`〜`endLine` は現在のファイルの別の場所を指すようになるが、`code` は当時のまま変化しない** — 画面ではコメントカードの折りたたみ「コメント当時のコード」として表示される。行コメント以外（全体コメント・ドキュメントコメント）と、差分に描画されていない行へのコメントでは省略される。
 - `code.tokens`: 上のスナップショットの Shiki ハイライト。`before` + `lines` + `after` を連結したものと平行に、1行1エントリのトークン配列（`fences` と同じ `{ "t": トークン文字列, "s": インラインスタイル }` の形）。ブラウザに Shiki を持ち込まないためにサーバー側で焼き込んでいる（`CommentFences` と同じ方式）。素のテキストが常に正で、**トークンを連結して元の行と一致しない行は素のテキスト表示に落ちる**ので、`comments.json` を手で書き換えても「保存内容と違うコードが色付きで表示される」ことはない。`wait-comments` の配達時にはこのフィールドだけが落とされる（色情報はエージェントの役に立たず、コードそのものの数倍のコンテキストを食うため。落とすのは stdout 用のコピーで、`comments.json` は書き換えない）。
 - `images`: ユーザーがフォームにペーストした添付画像の id 配列（実体はブランチの `images/<id>` にファイル保存、画面は `/api/images/<id>` で表示）。`wait-comments` の配達時は絶対パスの `imagePaths` に差し替えられる（comments.json 上は `images` のまま）。
-- `author`: `user`（省略時のデフォルト） / `agent`（`add-comment` で投稿された AI 指摘）。`agent` のコメントは `wait-comments` に配達されない。
+- `author`: `user`（省略時のデフォルト） / `agent`（`add-comment` で投稿された AI 指摘と、`resolve-comment` が追加した返信）。`agent` のコメントは `wait-comments` に配達されない。
 - `deleted`: 論理削除フラグ。`true` のコメントは画面・集計・配達すべてから除外される（データは残る）。
 - `manualEdit`: 手動修正（`POST /api/edit`）の自動記録フラグ。`true` のコメントは通知専用で、**画面・集計（未解決数など）には一切出ない**が、`wait-comments` の配達には含まれる（エージェントに「ファイルが手で変わった」ことを伝えるため）。
 - `agentResponse.snapshot` / `agentResponse.commit`: 返信に添えられた差分ページ（`/snapshot/<id>` / `/commit/<sha>`）への参照。

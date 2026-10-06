@@ -306,6 +306,46 @@ export function newCommentId(): string {
   return `comment_${Date.now().toString(36)}${rand}`;
 }
 
+// The fields a reply inherits from its thread. parentId is normalized to the
+// top-level comment (threads are one level deep) and the anchor is copied
+// from that comment. The code snapshot and the document anchor come along so
+// that a reply delivered on its own (its parent already answered) still says
+// which code or document element the thread is about. Shared by user replies
+// (POST /api/comments) and agent replies appended by resolve-comment.
+export type ReplyAnchor = Pick<
+  ReviewComment,
+  | 'file'
+  | 'side'
+  | 'startLine'
+  | 'endLine'
+  | 'startDiffLine'
+  | 'endDiffLine'
+  | 'parentId'
+  | 'code'
+  | 'documentId'
+  | 'htmlTarget'
+>;
+
+export function replyAnchor(comments: ReviewComment[], parent: ReviewComment): ReplyAnchor {
+  const topId = parent.parentId ?? parent.id;
+  const top = comments.find((c) => c.id === topId) ?? parent;
+  const anchor: ReplyAnchor = {
+    file: top.file,
+    side: top.side,
+    startLine: top.startLine,
+    endLine: top.endLine,
+    startDiffLine: top.startDiffLine,
+    endDiffLine: top.endDiffLine,
+    parentId: topId,
+  };
+  if (top.code) anchor.code = top.code;
+  if (top.documentId) {
+    anchor.documentId = top.documentId;
+    anchor.htmlTarget = top.htmlTarget ?? null;
+  }
+  return anchor;
+}
+
 export function newSnapshotId(): string {
   const rand = Math.random().toString(36).slice(2, 8);
   return `snap_${Date.now().toString(36)}${rand}`;

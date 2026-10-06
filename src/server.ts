@@ -53,6 +53,7 @@ import {
   newCommentId,
   nowIso,
   reconcileViewed,
+  replyAnchor,
   saveFinished,
   saveMemo,
 } from './store';
@@ -1204,18 +1205,12 @@ async function handle(
         if (loadFinished(paths.finished)) return { kind: 'finished' } as const;
         const parent = comments.find((c) => c.id === parentId);
         if (!parent) return { kind: 'missing-parent' } as const;
-        // Copy the anchor from the top-level comment of the thread.
-        const topId = parent.parentId ?? parent.id;
-        const anchor = comments.find((c) => c.id === topId) ?? parent;
         const now = nowIso();
+        // Anchor, parentId, code snapshot and document anchor all come from
+        // the top-level comment of the thread (see replyAnchor).
         const comment: ReviewComment = {
           id: newCommentId(),
-          file: anchor.file,
-          side: anchor.side,
-          startLine: anchor.startLine,
-          endLine: anchor.endLine,
-          startDiffLine: anchor.startDiffLine,
-          endDiffLine: anchor.endDiffLine,
+          ...replyAnchor(comments, parent),
           body: replyBody,
           status: 'open',
           createdAt: now,
@@ -1223,19 +1218,7 @@ async function handle(
           ...intent,
           ...images,
           ...fences,
-          parentId: topId,
         };
-        // The code snapshot rides along with the anchor for the same reason:
-        // a reply delivered on its own (its parent already answered) still
-        // tells the agent which code the thread is about, even after later
-        // fixes moved the line numbers.
-        if (anchor.code) comment.code = anchor.code;
-        // HTML-review threads: replies inherit the document anchor too, so a
-        // reply delivered by wait-comments is self-describing.
-        if (anchor.documentId) {
-          comment.documentId = anchor.documentId;
-          comment.htmlTarget = anchor.htmlTarget ?? null;
-        }
         comments.push(comment);
         return { kind: 'created', comment } as const;
       });

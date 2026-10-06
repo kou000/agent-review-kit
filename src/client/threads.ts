@@ -222,7 +222,9 @@ export function commentCard(c: any, isReply?: boolean) {
     // The snapshot belongs to the thread, not to each message, so it renders
     // once on the top-level card even though replies carry an inherited copy.
     (isReply ? '' : codeSnapshotHtml(c)) +
-    '<div class="body">' + bodyRendered.html + '</div>' +
+    // An agent reply appended by resolve-comment has no body (its text is the
+    // agentResponse below), so skip the empty padded block.
+    (bodyRendered.html ? '<div class="body">' + bodyRendered.html + '</div>' : '') +
     // Images the user pasted into the comment form (stored ids, served from
     // /api/images/<id>; only ids matching the strict shape render).
     commentImagesHtml(remainingImages);

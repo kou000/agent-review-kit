@@ -3,8 +3,14 @@ import { highlightFences } from '../highlight';
 import { encodeImageToDataUri } from '../image';
 import { reviewPaths } from '../paths';
 import { findSnapshot } from '../snapshot';
-import { mutateComments, nowIso } from '../store';
-import { COMMENT_STATUSES, CommentFences, CommentStatus } from '../types';
+import { mutateComments, newCommentId, nowIso, replyAnchor } from '../store';
+import {
+  AgentResponse,
+  COMMENT_STATUSES,
+  CommentFences,
+  CommentStatus,
+  ReviewComment,
+} from '../types';
 
 export interface ResolveOptions {
   id: string;
@@ -95,12 +101,34 @@ export async function resolveComment(opts: ResolveOptions): Promise<void> {
     const now = nowIso();
     comment.status = status;
     comment.updatedAt = now;
+    let reply: ReviewComment | undefined;
     if (opts.message) {
-      comment.agentResponse = { message: opts.message, updatedAt: now };
-      if (commitSha) comment.agentResponse.commit = commitSha;
-      if (snapshotId) comment.agentResponse.snapshot = snapshotId;
-      if (imageDataUris) comment.agentResponse.images = imageDataUris;
-      if (messageFences) comment.agentResponse.fences = messageFences;
+      const response: AgentResponse = { message: opts.message, updatedAt: now };
+      if (commitSha) response.commit = commitSha;
+      if (snapshotId) response.snapshot = snapshotId;
+      if (imageDataUris) response.images = imageDataUris;
+      if (messageFences) response.fences = messageFences;
+      if (comment.agentResponse) {
+        // An earlier agent answer is never overwritten: a second message
+        // (e.g. a correction) becomes a new agent reply in the same thread.
+        // The message lives on the reply's agentResponse, not its body, so it
+        // renders like any other agent answer (commit/snapshot links, images,
+        // fences, toast). Its status follows the target's, except that an
+        // agent message is never open/seen work: those would count toward
+        // the unresolved badge and be dismissed at finish.
+        reply = {
+          id: newCommentId(),
+          ...replyAnchor(comments, comment),
+          body: '',
+          status: status === 'open' || status === 'seen' ? 'answered' : status,
+          createdAt: now,
+          updatedAt: now,
+          author: 'agent',
+          agentResponse: response,
+        };
+      } else {
+        comment.agentResponse = response;
+      }
     }
     // Settling a top-level comment (any status but open/seen) settles its
     // whole thread: replies still open/seen, plus replies only answered/fixed
@@ -123,11 +151,16 @@ export async function resolveComment(opts: ResolveOptions): Promise<void> {
         }
       }
     }
-    return comment;
+    // Appended after the cascade so the new reply keeps the status set above.
+    if (reply) comments.push(reply);
+    return { comment, reply };
   });
   if (!updated) {
     console.error(`error: comment not found: ${opts.id}`);
     process.exit(1);
   }
-  console.log(JSON.stringify({ status: 'updated', comment: updated }, null, 2));
+  const { comment, reply } = updated;
+  console.log(
+    JSON.stringify({ status: 'updated', comment, ...(reply && { reply }) }, null, 2)
+  );
 }
