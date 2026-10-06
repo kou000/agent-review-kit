@@ -36,7 +36,8 @@ Commands:
     --resume               初回待機用。前のセッションが受信済みの status: seen も返す
   resolve-comment <id>     コメントの状態を更新する
     --status <status>      open|seen|fixed|answered|wontfix|resolved|dismissed（デフォルト: resolved）
-    --message <text>       agentResponse として保存する返信メッセージ
+    --message <text>       agentResponse として保存する返信メッセージ。既に返信済みの
+                           コメントでは上書きせず、スレッドに agent の返信を追加する
     --commit <sha>         修正コミットの sha。返信に /commit/<sha> へのリンクを添える（--message 必須）
     --snapshot <id>        修正スナップショットの id。返信に /snapshot/<id> へのリンクを添える（--message 必須）
     --image <path>         返信にインライン表示する画像ファイル（png/jpg/jpeg/gif/webp）。
