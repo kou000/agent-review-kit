@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import { test } from 'node:test';
 import { waitComments } from '../src/commands/waitComments';
 import { reviewPaths } from '../src/paths';
-import { loadComments, loadSettings, mutateSettings, saveComments } from '../src/store';
+import { loadComments, loadSettings, mutateSettings, saveComments, saveMemo } from '../src/store';
 import { ReviewComment } from '../src/types';
 
 // The developer's real ~/.agent-review/.env must not leak into the tests
@@ -368,6 +368,24 @@ test('配達時に code.tokens を落とし、素のテキストは残す（comm
     // 落とすのは stdout 用のコピーだけで、保存側はハイライトを保持する。
     const stored = loadComments(paths.comments).find((x) => x.id === 't1');
     assert.equal(stored?.code?.tokens?.length, 3);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('自分用メモ（memo.json）の内容は配達されない', async () => {
+  const tmp = makeTmpRepo();
+  try {
+    const paths = reviewPaths(tmp);
+    const memo = 'MEMO-SECRET-エージェントに見せない';
+    saveMemo(paths.memo, memo);
+    saveComments(paths.comments, [diffComment('m1')]);
+
+    const lines = await captureLog(() => waitComments({ timeout: 2, cwd: tmp }));
+    const result = JSON.parse(lines[0]) as { status: string; comments: ReviewComment[] };
+    assert.equal(result.status, 'received');
+    assert.deepEqual(result.comments.map((c) => c.id), ['m1']);
+    assert.ok(lines.every((l) => !l.includes(memo)));
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

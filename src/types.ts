@@ -209,6 +209,15 @@ export interface ViewedFile {
   viewed: Record<string, string>;
 }
 
+// Personal memo on the diff page, one per review branch
+// (branches/<slug>/memo.json). For the reviewer only: it lives outside
+// comments.json and settings.json, the files wait-comments delivers from, so
+// it never reaches the agent.
+export interface MemoFile {
+  text: string;
+  updatedAt?: string;
+}
+
 export interface ReviewState {
   base: string | null;
   generatedAt: string;
