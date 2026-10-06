@@ -167,6 +167,11 @@ export function isEditingDraft() {
   // Pasted-but-unsent images are a draft too: a re-render would rebuild the
   // form and silently drop the attachments (see attachImagePaste).
   if (document.querySelector('.comment-form.has-images, .reply-form.has-images')) return true;
+  // The personal memo (diff page) defers only while focused: it is usually
+  // non-empty, so the non-empty rule above would stall refresh indefinitely.
+  // Unsaved memo text is covered by its own autosave (see diff/memo.ts).
+  const active = document.activeElement;
+  if (active && active.classList.contains('memo-textarea')) return true;
   return false;
 }
 

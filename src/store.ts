@@ -6,6 +6,7 @@ import {
   DEFAULT_SETTINGS,
   FinishState,
   HtmlDocumentIndex,
+  MemoFile,
   ReviewComment,
   ReviewSettings,
   ReviewState,
@@ -159,6 +160,28 @@ export function mutateViewed(
     const next = fn(loadViewed(viewedFile));
     saveViewed(viewedFile, next);
     return next;
+  });
+}
+
+// Personal memo (memo.json). A missing file reads as an empty memo; a
+// hand-edited file with a non-string text is treated the same way.
+export function loadMemo(file: string): MemoFile {
+  const raw = readJson<Partial<MemoFile>>(file, {});
+  const memo: MemoFile = { text: typeof raw.text === 'string' ? raw.text : '' };
+  if (typeof raw.updatedAt === 'string') memo.updatedAt = raw.updatedAt;
+  return memo;
+}
+
+/**
+ * Full replace of the memo text, under the same directory lock as
+ * comments.json (same pattern as mutateViewed). Returns the persisted memo.
+ */
+export function saveMemo(memoFile: string, text: string): MemoFile {
+  fs.mkdirSync(path.dirname(memoFile), { recursive: true });
+  return withFileLock(path.dirname(memoFile), () => {
+    const memo: MemoFile = { text, updatedAt: nowIso() };
+    writeJsonAtomic(memoFile, memo);
+    return memo;
   });
 }
 

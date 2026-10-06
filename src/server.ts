@@ -41,6 +41,7 @@ import {
   loadComments,
   loadDocumentIndex,
   loadFinished,
+  loadMemo,
   loadSettings,
   loadSnapshotIndex,
   loadState,
@@ -53,6 +54,7 @@ import {
   nowIso,
   reconcileViewed,
   saveFinished,
+  saveMemo,
 } from './store';
 import {
   COMMENT_STATUSES,
@@ -185,6 +187,11 @@ const MAX_EDIT_TEXT = 1024 * 1024;
 // How much of the hand-edited code is quoted inside the auto-recorded
 // 【手動修正】comment before it is truncated.
 const MAX_EDIT_QUOTE = 3000;
+
+// Cap on the personal memo (PUT /api/memo). Same order as MAX_EDIT_TEXT: it is
+// typed into a browser textarea. Over the cap is rejected, not truncated, so
+// a save never silently drops part of the memo.
+const MAX_MEMO_TEXT = 1024 * 1024;
 
 // Cap on a manually edited document body (POST /api/documents/:id/edit),
 // matching publish-html's MAX_HTML_BYTES.
@@ -831,6 +838,28 @@ async function handle(
     }
     const viewed = mutateViewed(paths.viewed, () => map);
     json(res, 200, { viewed });
+    return;
+  }
+
+  // Personal memo on the diff page. Stored in memo.json, which wait-comments
+  // never reads, so the memo is never delivered to the agent.
+  if (method === 'GET' && p === '/api/memo') {
+    json(res, 200, loadMemo(paths.memo));
+    return;
+  }
+
+  // Full replace of the memo text (the client autosaves after typing stops).
+  if (method === 'PUT' && p === '/api/memo') {
+    const body = await readBody(req);
+    if (typeof body.text !== 'string') {
+      json(res, 400, { error: 'text must be a string' });
+      return;
+    }
+    if (body.text.length > MAX_MEMO_TEXT) {
+      json(res, 400, { error: `text too long (max ${MAX_MEMO_TEXT} chars)` });
+      return;
+    }
+    json(res, 200, saveMemo(paths.memo, body.text));
     return;
   }
 

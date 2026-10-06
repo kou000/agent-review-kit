@@ -14,6 +14,7 @@ import {
 } from '../app.js';
 import { appendCollapseToggle, setCollapsed } from './collapse.js';
 import { renderComments } from './comments.js';
+import { buildMemoColumn, loadMemo } from './memo.js';
 import { togglePin } from './pins.js';
 import { buildFileTable } from './repoView.js';
 import { buildReadOnlySidebar, buildSidebar, renderSidebarTree, treeOrder } from './sidebar.js';
@@ -60,7 +61,10 @@ export function renderDiff() {
   }
 
   // Overall (not tied to a file/line) comments section, always present.
+  // Its right column is the personal memo; the saved memo is fetched once and
+  // applied to whichever memo textarea is mounted when it arrives.
   frag.appendChild(buildOverallSection());
+  loadMemo();
 
   if (!DIFF.files.length) {
     const empty = document.createElement('div');
@@ -367,10 +371,13 @@ function toggleFileCommentForm(box, filePath) {
   });
 }
 
+// 左列が全体コメント（一覧 + 投稿フォーム）、右列が自分用メモ。狭い画面では
+// CSS でメモを上、全体コメントを下に積む。
 function buildOverallSection() {
   const sec = document.createElement('section');
   sec.className = 'overall-section';
   sec.innerHTML =
+    '<div class="overall-main">' +
     '<h2>全体コメント</h2>' +
     '<p class="hint">ファイルや行に紐づかない、レビュー全体への指摘・質問。</p>' +
     '<div class="overall-list"></div>' +
@@ -378,10 +385,12 @@ function buildOverallSection() {
     '<textarea placeholder="レビュー全体へのコメント（Ctrl+Enterで送信 / 画像はペーストで添付）"></textarea>' +
     intentFieldHtml() +
     '<div class="buttons"><button class="primary overall-submit">コメントを追加</button></div>' +
+    '</div>' +
     '</div>';
+  sec.appendChild(buildMemoColumn());
 
   const form = sec.querySelector('.overall-form');
-  const textarea = sec.querySelector('textarea');
+  const textarea = form.querySelector('textarea');
   const btn: any = sec.querySelector('.overall-submit');
   syncIntentFields(form);
   const attachments = attachImagePaste(form, textarea);

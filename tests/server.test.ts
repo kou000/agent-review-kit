@@ -668,6 +668,55 @@ test('GET /snapshot/<id> は Shiki のハイライト（inline color span）を�
   assert.ok(body.includes('"html":'));
 });
 
+/* ---------- personal memo (自分用メモ) ---------- */
+
+test('GET /api/memo はファイルが無いとき空テキストを返す', async () => {
+  const res = await fetch(`${baseUrl}/api/memo`);
+  assert.equal(res.status, 200);
+  const data = (await res.json()) as { text: string; updatedAt?: string };
+  assert.equal(data.text, '');
+  assert.equal(data.updatedAt, undefined);
+});
+
+test('PUT /api/memo で保存したテキストを GET で取得できる', async () => {
+  const text = '自分用メモ\n2 行目';
+  const put = await fetch(`${baseUrl}/api/memo`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  });
+  assert.equal(put.status, 200);
+  const putData = (await put.json()) as { text: string; updatedAt?: string };
+  assert.equal(putData.text, text);
+  assert.ok(putData.updatedAt);
+
+  const get = await fetch(`${baseUrl}/api/memo`);
+  const getData = (await get.json()) as { text: string; updatedAt?: string };
+  assert.equal(getData.text, text);
+  assert.equal(getData.updatedAt, putData.updatedAt);
+  // settings.json（エージェントに渡る）ではなく memo.json に保存される。
+  assert.ok(fs.existsSync(reviewPaths(tmp).memo));
+});
+
+test('PUT /api/memo は text が文字列でなければ 400 で、保存内容は変わらない', async () => {
+  await fetch(`${baseUrl}/api/memo`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: 'keep' }),
+  });
+  for (const body of [{}, { text: 123 }, { text: null }, { text: ['a'] }]) {
+    const res = await fetch(`${baseUrl}/api/memo`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    assert.equal(res.status, 400);
+  }
+  const get = await fetch(`${baseUrl}/api/memo`);
+  const getData = (await get.json()) as { text: string };
+  assert.equal(getData.text, 'keep');
+});
+
 /* ---------- viewed ("確認済み") state ---------- */
 
 test('reconcileViewed は現在ハッシュと一致するエントリだけ残す', () => {
