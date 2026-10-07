@@ -333,6 +333,8 @@ export interface DiffCell {
   // (github-dark, inline styles). The client renders it verbatim after the
   // +/-/space prefix span. Omitted when the file's language is unsupported or
   // highlighting failed, in which case the client falls back to escaped text.
+  // A modified del/add line also carries word-del / word-add spans around its
+  // changed ranges (bakeWordDiff), set even for unhighlighted languages.
   html?: string;
 }
 

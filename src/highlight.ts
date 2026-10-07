@@ -1,5 +1,6 @@
 import type { createHighlighter, Highlighter, ThemedToken } from 'shiki';
 import { CommentFences, FenceToken, FileDiff } from './types';
+import { CharRange, wordDiff } from './wordDiff';
 
 // Shiki 3.x is ESM-only (no CommonJS entry). With module:commonjs, TypeScript
 // downlevels a plain `import('shiki')` to `require('shiki')`, which throws
@@ -271,20 +272,23 @@ export interface HighlightSources {
   oldByPath: Map<string, string[] | null>;
 }
 
-// Bake per-line highlighted HTML into every diff cell of every file, in place.
-// `newLines` (already embedded on the file) supplies new-side context; `sources`
-// supplies old-side context. Cells whose line number is within the full content
-// use the full-file-context line; otherwise they fall back to single-line
-// highlighting so nothing is left unstyled.
+// Bake per-line highlighted HTML into every diff cell of every file, in place,
+// then overlay intra-line change emphasis (bakeWordDiff) on modified lines.
 export async function bakeHighlight(
   files: FileDiff[],
   sources: HighlightSources
 ): Promise<void> {
   // Only pull in Shiki when there is at least one highlightable file, keeping
   // the no-highlightable-diff path free of the (heavier) highlighter init.
-  const needed = files.some((f) => langForPath(f.path));
-  if (!needed) return;
+  if (files.some((f) => langForPath(f.path))) await bakeSyntax(files, sources);
+  bakeWordDiff(files);
+}
 
+// `newLines` (already embedded on the file) supplies new-side context; `sources`
+// supplies old-side context. Cells whose line number is within the full content
+// use the full-file-context line; otherwise they fall back to single-line
+// highlighting so nothing is left unstyled.
+async function bakeSyntax(files: FileDiff[], sources: HighlightSources): Promise<void> {
   const { createHighlighter } = await importShiki();
   const hl = await createHighlighter({ themes: [THEME], langs: ALL_LANGS });
 
@@ -328,12 +332,90 @@ export async function bakeHighlight(
   }
 }
 
+// Width in source UTF-16 units of an HTML entity body (the part between & and
+// ;). Numeric references outside the BMP stand for a surrogate pair.
+function entityWidth(body: string): number {
+  if (body[0] !== '#') return 1;
+  const cp = body[1] === 'x' || body[1] === 'X' ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
+  return cp > 0xffff ? 2 : 1;
+}
+
+const ENTITY_RE = /&(#[xX][0-9a-fA-F]+|#[0-9]+|[A-Za-z][A-Za-z0-9]*);/y;
+
+// Wrap source-text ranges of a line's inner HTML in <span class="cls">. `html`
+// is Shiki output (lineHtml) or escaped plain text: tags are copied through,
+// and every other character advances the source offset, an entity like &lt;
+// counting as one source character. The wrapper never spans a tag — it is
+// closed before each tag and reopened at the next in-range character — so the
+// result stays balanced however the ranges cut across Shiki's token spans.
+export function overlayRanges(html: string, ranges: CharRange[], cls: string): string {
+  if (!ranges.length) return html;
+  let out = '';
+  let pos = 0;
+  let r = 0;
+  let wrapped = false;
+  let i = 0;
+  while (i < html.length) {
+    if (html[i] === '<') {
+      const end = html.indexOf('>', i);
+      const stop = end < 0 ? html.length : end + 1;
+      if (wrapped) out += '</span>';
+      wrapped = false;
+      out += html.slice(i, stop);
+      i = stop;
+      continue;
+    }
+    let piece = html[i];
+    let width = 1;
+    if (piece === '&') {
+      ENTITY_RE.lastIndex = i;
+      const m = ENTITY_RE.exec(html);
+      if (m) {
+        piece = m[0];
+        width = entityWidth(m[1]);
+      }
+    }
+    while (r < ranges.length && ranges[r][1] <= pos) r++;
+    const inRange = r < ranges.length && ranges[r][0] <= pos;
+    if (inRange !== wrapped) out += inRange ? `<span class="${cls}">` : '</span>';
+    wrapped = inRange;
+    out += piece;
+    i += piece.length;
+    pos += width;
+  }
+  if (wrapped) out += '</span>';
+  return out;
+}
+
+// Emphasize what changed inside each modified line: a row pairing a deleted
+// line with an added line gets its changed ranges (wordDiff) wrapped in
+// word-del / word-add spans, on top of the Shiki markup when the cell has it
+// and on escaped text otherwise. Rows wordDiff declines (rewritten lines,
+// overlong lines) are left as they are.
+export function bakeWordDiff(files: FileDiff[]): void {
+  for (const f of files) {
+    for (const hunk of f.hunks) {
+      for (const { left, right } of hunk.rows) {
+        if (left?.kind !== 'del' || right?.kind !== 'add') continue;
+        const d = wordDiff(left.text, right.text);
+        if (!d) continue;
+        if (d.left.length) {
+          left.html = overlayRanges(left.html ?? escapeHtml(left.text), d.left, 'word-del');
+        }
+        if (d.right.length) {
+          right.html = overlayRanges(right.html ?? escapeHtml(right.text), d.right, 'word-add');
+        }
+      }
+    }
+  }
+}
+
 // Bake highlighting for a standalone diff page (/commit, /snapshot) whose files
 // come straight from a patch. New-side context comes from `newLines` when the
 // route embedded it (embedNewSideFromTree — also feeds context expansion);
 // there is no old-side source, so old-side cells use single-line highlighting.
-// Either way these pages get the same Shiki (github-dark) coloring as the main
-// review page.
+// Either way these pages get the same Shiki (github-dark) coloring and
+// intra-line change emphasis as the main review page.
 export async function bakeDiffHighlight(files: FileDiff[]): Promise<void> {
   await bakeHighlight(files, { oldByPath: new Map() });
 }
