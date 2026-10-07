@@ -9,6 +9,9 @@
   --add-num-bg: rgba(46, 160, 67, 0.3);
   --del-bg: rgba(248, 81, 73, 0.15);
   --del-num-bg: rgba(248, 81, 73, 0.3);
+  /* intra-line emphasis of the changed words inside a modified line */
+  --add-word-bg: rgba(46, 160, 67, 0.4);
+  --del-word-bg: rgba(248, 81, 73, 0.4);
   --hunk-bg: rgba(56, 139, 253, 0.15);
   --hunk-fg: #8b949e;
   --select-bg: rgba(187, 128, 9, 0.25);
@@ -495,6 +498,9 @@ td.code.add { background: var(--add-bg); }
 td.num.add { background: var(--add-num-bg); }
 td.code.del { background: var(--del-bg); }
 td.num.del { background: var(--del-num-bg); }
+/* Changed ranges of a paired del/add line (baked by bakeWordDiff). */
+td.code.add .word-add { background: var(--add-word-bg); border-radius: 2px; }
+td.code.del .word-del { background: var(--del-word-bg); border-radius: 2px; }
 tr.hunk td {
   background: var(--hunk-bg);
   color: var(--hunk-fg);
