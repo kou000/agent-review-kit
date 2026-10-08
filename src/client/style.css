@@ -1032,6 +1032,21 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   border-left: 2px solid var(--border);
 }
 .comment-card.reply-card { max-width: 780px; }
+
+/* Long threads: the replies between the top card and the latest reply fold
+   behind one quiet text-link toggle (see threadFold.ts). */
+.thread-fold-toggle {
+  display: block;
+  margin: 2px 0;
+  padding: 2px 0;
+  background: none;
+  border: none;
+  font-size: 12px;
+  color: var(--accent);
+  cursor: pointer;
+}
+.thread-fold-toggle:hover { text-decoration: underline; background: none; }
+.thread-fold-middle[hidden] { display: none; }
 .comment-card.reply-card .meta { color: var(--accent); }
 
 /* ---------- reply form ---------- */
