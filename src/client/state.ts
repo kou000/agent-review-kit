@@ -42,6 +42,10 @@ export const state: any = {
   resolvedListOpen: false,
   // Persisted thread-collapse toggles; loaded from localStorage in threads.ts.
   threadCollapse: {},
+  // Long threads whose middle replies the reader expanded ({ [topId]: true }).
+  // In-memory only, like resolvedListOpen: survives the polling re-render, and
+  // a page reload folds them again.
+  threadFoldOpen: {},
   toastStack: null,
   lastCommentsJson: '',
   // 全コメント非表示トグル（diff ページ）。localStorage 復元は app.ts の

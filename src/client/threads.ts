@@ -4,6 +4,7 @@ import { attachImagePaste, commentBodyHtml, commentImagesHtml } from './images.j
 import { renderMarkdown, stripMarkdown, tokenLineHtml } from './markdown.js';
 import { intentFieldHtml, selectedIntent, syncIntentFields } from './intent.js';
 import { state } from './state.js';
+import { threadFoldLabel, threadFoldPlan } from './threadFold.js';
 import { refresh } from './app.js';
 
 /* ---------- comment threads ---------- */
@@ -423,7 +424,7 @@ export function renderThread(container, list) {
     if (replies.length) {
       const nest = document.createElement('div');
       nest.className = 'reply-thread';
-      replies.forEach(function (r) { nest.appendChild(commentCard(r, true)); });
+      appendReplies(nest, top, replies);
       body.appendChild(nest);
     }
     appendReplyUI(body, top);
@@ -446,6 +447,41 @@ export function renderThread(container, list) {
     block.appendChild(body);
     container.appendChild(block);
   });
+}
+
+// Long threads keep only the top card and the latest reply in view; the
+// replies between them sit behind a one-line toggle (see threadFold.ts). The
+// toggle only flips a class, and its state lives in state.threadFoldOpen so
+// the 3s polling re-render keeps an expanded thread expanded.
+function appendReplies(nest, top, replies) {
+  const plan = threadFoldPlan(top, replies, !!state.threadFoldOpen[top.id]);
+  if (!plan.foldable) {
+    replies.forEach(function (r) { nest.appendChild(commentCard(r, true)); });
+    return;
+  }
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'thread-fold-toggle';
+  const hidden = document.createElement('div');
+  hidden.className = 'thread-fold-middle';
+  plan.middle.forEach(function (r) { hidden.appendChild(commentCard(r, true)); });
+  function sync(open) {
+    const p = threadFoldPlan(top, replies, open);
+    hidden.hidden = p.folded;
+    toggle.textContent = threadFoldLabel(p);
+    toggle.title = p.folded ? '間のやりとりを展開する' : '最初と最新以外のやりとりを折りたたむ';
+    toggle.setAttribute('aria-expanded', p.folded ? 'false' : 'true');
+  }
+  toggle.addEventListener('click', function () {
+    const open = !state.threadFoldOpen[top.id];
+    if (open) state.threadFoldOpen[top.id] = true;
+    else delete state.threadFoldOpen[top.id];
+    sync(open);
+  });
+  sync(!!state.threadFoldOpen[top.id]);
+  nest.appendChild(toggle);
+  nest.appendChild(hidden);
+  nest.appendChild(commentCard(plan.last, true));
 }
 
 // `top` is the top-level comment of the thread. Replies POST only parentId +
