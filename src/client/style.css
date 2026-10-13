@@ -1033,10 +1033,11 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 }
 .comment-card.reply-card { max-width: 780px; }
 
-/* Long threads: the replies between the top card and the latest reply fold
-   behind one quiet text-link toggle (see threadFold.ts). */
+/* Long threads: the replies between the top card and the latest replies fold
+   behind a row of quiet text-link toggles (see threadFold.ts). */
+.thread-fold-actions { display: flex; flex-wrap: wrap; gap: 0 16px; }
+.thread-fold-actions:empty { display: none; }
 .thread-fold-toggle {
-  display: block;
   margin: 2px 0;
   padding: 2px 0;
   background: none;

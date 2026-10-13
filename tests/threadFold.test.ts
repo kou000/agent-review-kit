@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   THREAD_FOLD_MIN_MESSAGES,
+  THREAD_FOLD_TAIL,
   messageCount,
-  threadFoldLabel,
+  threadFoldActions,
   threadFoldPlan,
 } from '../src/client/threadFold';
 
@@ -15,8 +16,11 @@ function msg(id: string, answered = false) {
   };
 }
 
-test('threshold is 4 messages', () => {
+const ids = (list: { id: string }[]) => list.map((c) => c.id);
+
+test('threshold is 4 messages and the last 2 replies always stay visible', () => {
   assert.equal(THREAD_FOLD_MIN_MESSAGES, 4);
+  assert.equal(THREAD_FOLD_TAIL, 2);
 });
 
 test('counts an agentResponse as its own message', () => {
@@ -26,45 +30,97 @@ test('counts an agentResponse as its own message', () => {
 });
 
 test('short threads are not folded', () => {
-  const plan = threadFoldPlan(msg('t'), [msg('r1'), msg('r2')], false);
+  const plan = threadFoldPlan(msg('t'), [msg('r1'), msg('r2')], null);
   assert.equal(plan.totalMessages, 3);
   assert.equal(plan.foldable, false);
   assert.equal(plan.folded, false);
   assert.equal(plan.hiddenMessages, 0);
+  assert.deepEqual(threadFoldActions(plan), []);
 });
 
-test('a thread with only one reply is never folded (nothing between first and last)', () => {
-  const plan = threadFoldPlan(msg('t', true), [msg('r1', true)], false);
-  assert.equal(plan.totalMessages, 4);
+test('a thread with two replies is never folded (both are the visible tail)', () => {
+  const plan = threadFoldPlan(msg('t', true), [msg('r1', true), msg('r2', true)], null);
+  assert.equal(plan.totalMessages, 6);
   assert.equal(plan.foldable, false);
+  assert.deepEqual(ids(plan.tail), ['r1', 'r2']);
 });
 
-test('folds the replies between the first card and the latest reply', () => {
-  const replies = [msg('r1', true), msg('r2'), msg('r3', true)];
-  const plan = threadFoldPlan(msg('t', true), replies, false);
-  assert.equal(plan.totalMessages, 7);
-  assert.equal(plan.foldable, true);
+test('folds the replies before the latest two, keeping the one before the latest visible', () => {
+  const replies = [msg('r1', true), msg('r2'), msg('r3'), msg('r4', true)];
+  const plan = threadFoldPlan(msg('t', true), replies, null);
+  assert.equal(plan.totalMessages, 8);
   assert.equal(plan.folded, true);
-  assert.deepEqual(plan.middle.map((c) => c.id), ['r1', 'r2']);
+  assert.deepEqual(ids(plan.middle), ['r1', 'r2']);
+  assert.deepEqual(ids(plan.hidden), ['r1', 'r2']);
+  assert.deepEqual(ids(plan.tail), ['r3', 'r4']);
   assert.equal(plan.hiddenMessages, 3);
-  assert.equal(threadFoldLabel(plan), '3 件のやりとりを表示');
+  assert.deepEqual(
+    threadFoldActions(plan).map((a) => [a.label, a.open]),
+    [
+      ['1 つ前のやりとりを表示', 'r2'],
+      ['3 件のやりとりをすべて表示', 'r1'],
+    ],
+  );
 });
 
-test('the latest reply stays visible when a new reply arrives', () => {
+test('reveals folded replies one at a time, newest first', () => {
+  const replies = [msg('r1'), msg('r2'), msg('r3'), msg('r4'), msg('r5')];
+  const plan = threadFoldPlan(msg('t'), replies, 'r3');
+  assert.equal(plan.folded, true);
+  assert.equal(plan.revealed, true);
+  assert.deepEqual(ids(plan.hidden), ['r1', 'r2']);
+  assert.deepEqual(
+    threadFoldActions(plan).map((a) => [a.label, a.open]),
+    [
+      ['1 つ前のやりとりを表示', 'r2'],
+      ['2 件のやりとりをすべて表示', 'r1'],
+      ['折りたたむ', null],
+    ],
+  );
+});
+
+test('with one reply left folded, only the one-step button is offered', () => {
+  const replies = [msg('r1'), msg('r2'), msg('r3'), msg('r4'), msg('r5')];
+  const plan = threadFoldPlan(msg('t'), replies, 'r2');
+  assert.deepEqual(ids(plan.hidden), ['r1']);
+  assert.deepEqual(
+    threadFoldActions(plan).map((a) => a.label),
+    ['1 つ前のやりとりを表示', '折りたたむ'],
+  );
+});
+
+test('the revealed range stays put when a new reply arrives', () => {
+  const replies = [msg('r1'), msg('r2'), msg('r3'), msg('r4')];
+  const before = threadFoldPlan(msg('t'), replies, 'r2');
+  assert.deepEqual(ids(before.hidden), ['r1']);
+  const after = threadFoldPlan(msg('t'), replies.concat(msg('r5')), 'r2');
+  assert.deepEqual(ids(after.hidden), ['r1']);
+  assert.deepEqual(ids(after.tail), ['r4', 'r5']);
+});
+
+test('the latest replies stay visible when a new reply arrives to a folded thread', () => {
   const replies = [msg('r1'), msg('r2'), msg('r3')];
-  const before = threadFoldPlan(msg('t'), replies, false);
-  assert.equal(before.last.id, 'r3');
-  const after = threadFoldPlan(msg('t'), replies.concat(msg('r4')), false);
+  const after = threadFoldPlan(msg('t'), replies.concat(msg('r4')), null);
   assert.equal(after.folded, true);
-  assert.equal(after.last.id, 'r4');
-  assert.deepEqual(after.middle.map((c) => c.id), ['r1', 'r2', 'r3']);
-  assert.ok(!after.middle.some((c) => c.id === 'r4'));
+  assert.deepEqual(ids(after.hidden), ['r1', 'r2']);
+  assert.deepEqual(ids(after.tail), ['r3', 'r4']);
 });
 
-test('expanded threads show everything and offer to fold again', () => {
-  const replies = [msg('r1'), msg('r2'), msg('r3')];
-  const plan = threadFoldPlan(msg('t'), replies, true);
+test('fully expanded threads show everything and offer to fold again', () => {
+  const replies = [msg('r1'), msg('r2'), msg('r3'), msg('r4')];
+  const plan = threadFoldPlan(msg('t'), replies, 'r1');
   assert.equal(plan.foldable, true);
   assert.equal(plan.folded, false);
-  assert.equal(threadFoldLabel(plan), '折りたたむ');
+  assert.deepEqual(plan.hidden, []);
+  assert.deepEqual(
+    threadFoldActions(plan).map((a) => [a.label, a.open]),
+    [['折りたたむ', null]],
+  );
+});
+
+test('an unknown revealed id (e.g. a deleted reply) falls back to fully folded', () => {
+  const replies = [msg('r1'), msg('r2'), msg('r3'), msg('r4')];
+  const plan = threadFoldPlan(msg('t'), replies, 'gone');
+  assert.deepEqual(ids(plan.hidden), ['r1', 'r2']);
+  assert.equal(plan.revealed, false);
 });
