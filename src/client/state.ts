@@ -42,7 +42,8 @@ export const state: any = {
   resolvedListOpen: false,
   // Persisted thread-collapse toggles; loaded from localStorage in threads.ts.
   threadCollapse: {},
-  // Long threads whose middle replies the reader expanded ({ [topId]: true }).
+  // Long threads whose folded replies the reader revealed, as the id of the
+  // oldest revealed reply ({ [topId]: replyId }; see threadFold.ts).
   // In-memory only, like resolvedListOpen: survives the polling re-render, and
   // a page reload folds them again.
   threadFoldOpen: {},
