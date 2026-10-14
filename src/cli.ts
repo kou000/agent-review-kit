@@ -55,12 +55,12 @@ Commands:
     --start-line <n>       対象範囲の開始行（--end-line とセット）
     --end-line <n>         対象範囲の終了行
     --side <old|new>       変更前/変更後どちらの行か（デフォルト: new）
-    --external-author <name>  PR/MR から取り込む指摘の投稿者。--external-url / --external-id とセット
-    --external-url <url>   取り込む指摘の PR/MR 上の URL（画面に元コメントへのリンクを出す）
-    --external-id <id>     取り込む指摘のスレッド ID。同じ ID が取り込み済みなら新しく作らず
+    --external-author <name>  PR/MR から取り込むコメントの投稿者。--external-url / --external-id とセット
+    --external-url <url>   取り込むコメントの PR/MR 上の URL（画面に元コメントへのリンクを出す）
+    --external-id <id>     取り込むコメントのスレッド ID。同じ ID が取り込み済みなら新しく作らず
                            既存のコメントを返す（status: exists）
   set-pr                   現在のブランチの PR/MR を登録する。差分ページのヘッダにリンクと
-                           「PR 指摘を取り込む」ボタンが出る
+                           「PRコメント取込」ボタンが出る
     --url <url>            PR/MR の URL（GitHub の /pull/<番号> か GitLab の /-/merge_requests/<番号>）
     --clear                登録を削除する
   snapshot begin           修正の適用前に working tree の状態を記録する

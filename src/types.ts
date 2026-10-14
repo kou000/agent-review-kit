@@ -219,7 +219,7 @@ export interface ExternalSource {
 
 // The PR/MR opened for the review branch (branches/<slug>/pr.json), set by
 // the agent with `set-pr` after it creates one. Shown as a link in the diff
-// page header, and the "PR 指摘を取り込む" button only appears while it is set.
+// page header, and the "PRコメント取込" button only appears while it is set.
 export interface PrLink {
   url: string;
   provider: PrProvider;
