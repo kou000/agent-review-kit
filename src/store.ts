@@ -7,6 +7,7 @@ import {
   FinishState,
   HtmlDocumentIndex,
   MemoFile,
+  PrLink,
   ReviewComment,
   ReviewSettings,
   ReviewState,
@@ -183,6 +184,20 @@ export function saveMemo(memoFile: string, text: string): MemoFile {
     writeJsonAtomic(memoFile, memo);
     return memo;
   });
+}
+
+// The branch's PR/MR link (pr.json). Missing file = none set.
+export function loadPr(file: string): PrLink | null {
+  return readJson<PrLink | null>(file, null);
+}
+
+export function savePr(file: string, pr: PrLink): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  writeJsonAtomic(file, pr);
+}
+
+export function clearPr(file: string): void {
+  fs.rmSync(file, { force: true });
 }
 
 export function loadState(file: string): ReviewState | null {

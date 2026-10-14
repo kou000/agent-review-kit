@@ -101,3 +101,34 @@ test('addComment skips the snapshot silently when the file is unreadable', async
   assert.equal(comments.length, 1);
   assert.equal(comments[0].code, undefined);
 });
+
+test('addComment records an imported PR comment and does not import the same thread twice', async () => {
+  const tmp = makeTmpRepo();
+  fs.mkdirSync(path.join(tmp, '.agent-review'), { recursive: true });
+  await generate({ cwd: tmp, quiet: true });
+
+  const external = {
+    externalAuthor: 'alice',
+    externalUrl: 'https://github.com/o/r/pull/7#discussion_r101',
+    externalId: '101',
+  };
+  const first = JSON.parse(
+    await captureLog(() => addComment({ cwd: tmp, file: 'main.tf', line: 3, body: '指摘', ...external }))
+  );
+  const second = JSON.parse(
+    await captureLog(() => addComment({ cwd: tmp, file: 'main.tf', line: 3, body: '指摘', ...external }))
+  );
+
+  assert.equal(first.status, 'created');
+  assert.equal(second.status, 'exists');
+  assert.equal(second.comment.id, first.comment.id);
+  const comments = loadComments(reviewPaths(tmp).comments);
+  assert.equal(comments.length, 1);
+  assert.equal(comments[0].author, 'agent');
+  assert.deepEqual(comments[0].external, {
+    provider: 'github',
+    author: 'alice',
+    url: 'https://github.com/o/r/pull/7#discussion_r101',
+    id: '101',
+  });
+});

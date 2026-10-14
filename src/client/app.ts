@@ -287,6 +287,21 @@ export function updateBranchLabel(branch) {
   state.branchLabel.title = 'レビュー対象ブランチ（コメント等はブランチ単位で管理されます）';
 }
 
+// ステータスのポーリングごとに PR/MR リンクと取り込みボタンを同期する。
+// pr.json は手で編集できるので、リンクにするのは https の URL だけ。
+export function updatePrLink(pr) {
+  const url = pr && typeof pr.url === 'string' && /^https:\/\//.test(pr.url) ? pr.url : null;
+  state.prUrl = url;
+  if (state.prImportBtn) state.prImportBtn.hidden = !url;
+  if (!state.prLink) return;
+  state.prLink.hidden = !url;
+  if (!url) return;
+  const label = pr.provider === 'gitlab' ? 'MR !' + pr.number : 'PR #' + pr.number;
+  state.prLink.textContent = label + ' ↗';
+  state.prLink.href = url;
+  state.prLink.title = 'このブランチの ' + (pr.provider === 'gitlab' ? 'MR' : 'PR') + ' を開く: ' + url;
+}
+
 function closeSettingsPanel() {
   if (state.settingsPanel) {
     state.settingsPanel.remove();
@@ -370,6 +385,17 @@ export function setupTopbarControls() {
   state.branchLabel.id = 'branch-label';
   inner.appendChild(state.branchLabel);
 
+  // PR/MR リンク。set-pr で登録されるまでは隠しておき、ステータスの
+  // ポーリング（updatePrLink）で表示を切り替える。
+  if (!DOC) {
+    state.prLink = document.createElement('a');
+    state.prLink.id = 'pr-link';
+    state.prLink.target = '_blank';
+    state.prLink.rel = 'noopener noreferrer';
+    state.prLink.hidden = true;
+    inner.appendChild(state.prLink);
+  }
+
   state.modeBadge = document.createElement('span');
   state.modeBadge.id = 'mode-badge';
   state.modeBadge.textContent = '読み取り専用';
@@ -393,6 +419,19 @@ export function setupTopbarControls() {
   // コメント欄に依頼の記録が残り、エージェントが push 後に resolve する。
   // 文書レビュー（publish-html）のページには対象ブランチの概念が無いので出さない。
   if (!DOC) {
+    // PR/MR のコメントの取込依頼。push 依頼と同じく全体コメントとして投稿する。
+    // 見解を返すだけでコードは変えない依頼なので intent: question で送り、
+    // 読み取り専用モード中も押せるようにしておく。
+    const importBtn = document.createElement('button');
+    importBtn.id = 'pr-import-btn';
+    importBtn.type = 'button';
+    importBtn.textContent = 'PRコメント取込';
+    importBtn.title = PR_IMPORT_TITLE;
+    importBtn.hidden = true;
+    importBtn.addEventListener('click', requestPrImport);
+    inner.appendChild(importBtn);
+    state.prImportBtn = importBtn;
+
     const pushBtn = document.createElement('button');
     pushBtn.id = 'push-request-btn';
     pushBtn.type = 'button';
@@ -453,6 +492,33 @@ function requestPush() {
   }).then(function () {
     // 送信中に読み取り専用へ切り替わっていたら無効のままにする。
     if (btn) btn.disabled = state.readOnlyMode;
+  });
+}
+
+// Ask the agent to import the PR/MR's review comments into this review and
+// reply to each with its view. Posted as an overall question comment, so the
+// agent answers without touching code; fixing a finding afterwards goes
+// through the usual 「🔧 修正を依頼」 button on that thread.
+const PR_IMPORT_PREFIX = '【PRコメント取込依頼】';
+const PR_IMPORT_TITLE =
+  'PR/MR のコメントを取り込み、各スレッドにエージェントの見解を返すよう依頼する（コードは変更しない）';
+function requestPrImport() {
+  if (!state.prUrl) return;
+  const msg =
+    'PR/MR のコメントの取込をエージェントに依頼しますか？\n' +
+    '全体コメントとして送信され、エージェントがコメントを取り込んで各スレッドに見解を返します。';
+  if (!confirm(msg)) return;
+  const btn = state.prImportBtn;
+  if (btn) btn.disabled = true;
+  api('POST', '/api/comments', {
+    body: PR_IMPORT_PREFIX + state.prUrl + ' のコメントを取り込み、各スレッドに見解を返してください。',
+    intent: 'question',
+  }).then(function () {
+    refresh();
+  }).catch(function (err) {
+    alert('取込依頼の送信に失敗しました: ' + err);
+  }).then(function () {
+    if (btn) btn.disabled = false;
   });
 }
 
