@@ -77,7 +77,7 @@ Codex では `serve` と `wait-comments` をそれぞれ長時間実行できる
   2. push する（`git push -u origin <ブランチ>`。upstream 設定済みなら `git push`）。force push はユーザーが明示した場合以外は行わない。
   3. 成功したら `resolve-comment <id> --status resolved --message "push しました: <ブランチ名> @ <短い sha>"` で返信して resolve する。失敗したら出力を添えて `--status answered` で返す（resolve しない）。
   ブラウザは `readOnlyMode: true` の間このボタンを無効化する（サーバーがこのモード中の投稿を `intent: question` に強制するため）。したがって push 依頼が届くのは読み取り専用 OFF のときだけで、届いた依頼の `intent` は常に `fix` になる。
-- 本文が `【PR指摘取り込み依頼】` で始まる全体コメント（`file: null`、`intent: "question"`。ヘッダの「PR 指摘を取り込む」ボタンから投稿される） — PR/MR のレビューコメントを取り込み、各スレッドに見解を返してほしいという依頼。**コードは変更しない**（だから `question` で届く）。サブエージェントに委譲せず、メインセッションが「PR/MR 指摘の取り込み」の手順で対応する。
+- 本文が `【PRコメント取込依頼】` で始まる全体コメント（`file: null`、`intent: "question"`。ヘッダの「PRコメント取込」ボタンから投稿される） — PR/MR のレビューコメントを取り込み、各スレッドに見解を返してほしいという依頼。**コードは変更しない**（だから `question` で届く）。サブエージェントに委譲せず、メインセッションが「PR/MR コメントの取込」の手順で対応する。
 - `manualEdit: true` のコメント（本文が `【手動修正】` で始まる） — ユーザーがブラウザの手動修正機能で直接書き換えた通知。**修正は適用済みで、コード対応は不要**（サブエージェント委譲もしない）。内容を確認したら `--status resolved` で resolve するだけでよい（snapshot は作らない。このコメントはブラウザには表示されないので、返信メッセージも不要）。対象が2種類ある:
   - diff レビュー（`file` あり）— working tree のファイルが変わっているので、以降そのファイルを扱うときは必ず読み直す。
   - HTML レビュー（`documentId` あり）— 保存済み文書（`.agent-review/branches/<ブランチ>/documents/<id>.html`）が変わっている。**この文書を `publish-html` で再公開すると手動編集が上書きされる**ため、以後この文書を更新する場合は保存済みの現在の内容を読み込み、それを基に編集して publish する。
@@ -293,11 +293,11 @@ Codex では `serve` と `wait-comments` をそれぞれ長時間実行できる
    - **修正完了時は2つ resolve する**: 届いた返信コメントを `--status fixed --message ... [--snapshot ...]` で resolve し、**親の AI 指摘も `--status fixed` で resolve する**（親が open のまま残ると未解決カウントに残り続ける）。
 5. ユーザーが返信しなかった AI 指摘は、「レビュー終了」ボタンの押下時にサーバーが一括で `dismissed`（見送り）にする。エージェント側での後始末は不要。
 
-## PR/MR 指摘の取り込み
+## PR/MR コメントの取込
 
 ### PR/MR の登録
 
-レビュー中のブランチで PR/MR を作成したら、その URL を登録する。差分ページのヘッダにリンクと「PR 指摘を取り込む」ボタンが出る:
+レビュー中のブランチで PR/MR を作成したら、その URL を登録する。差分ページのヘッダにリンクと「PRコメント取込」ボタンが出る:
 
 ```bash
 agent-review-kit set-pr --url <作成した PR/MR の URL>
@@ -305,7 +305,7 @@ agent-review-kit set-pr --url <作成した PR/MR の URL>
 
 ### 取り込み依頼への対応
 
-`【PR指摘取り込み依頼】` が届いたら、次の順で対応する。どの段階でもコードは変更しない。
+`【PRコメント取込依頼】` が届いたら、次の順で対応する。どの段階でもコードは変更しない。
 
 1. **取得する**。PR/MR の URL は依頼の本文か `agent-review-kit status` の `pr` にある。
    - GitHub:
@@ -314,9 +314,9 @@ agent-review-kit set-pr --url <作成した PR/MR の URL>
      - レビュー本文: `gh api repos/<owner>/<repo>/pulls/<番号>/reviews` の `body` が空でないもの。
      - 会話コメント: `gh api repos/<owner>/<repo>/issues/<番号>/comments`。
    - GitLab: `glab api --paginate projects/:id/merge_requests/<番号>/discussions`。`system: true` のノートは除く。
-2. **絞る**。GitHub / GitLab 上で resolve 済みのスレッドは取り込まない。bot の指摘の扱い（取り込むか・どこまで絞るか）は利用者のルールがあればそれに従い、無ければ取り込む。
+2. **絞る**。まず操作しているアカウントを調べ（GitHub: `gh api user --jq .login`、GitLab: `glab api user` の `username`）、先頭コメントをそのアカウントが書いたスレッドは取り込まない。そのアカウントが他人のスレッドに書いた返信は、そのスレッドの本文に文脈として残す。GitHub / GitLab 上で resolve 済みのスレッドも取り込まない。bot のコメントの扱い（取り込むか・どこまで絞るか）は利用者のルールがあればそれに従い、無ければ取り込む。
 3. **取り込む**。1 スレッドを 1 コメントにする。本文はスレッドの発言を時系列に `**@投稿者**: 本文` の形で並べる。
-   - 位置: GitHub は `path` と `line`（`side` が `RIGHT` なら new、`LEFT` なら old）。`line` が null（古い差分への指摘）なら `--file` だけのファイル全体コメントにする。GitLab は `position.new_line`（new）か `position.old_line`（old）。レビュー本文・会話コメント・位置の無いディスカッションは `--file` なしの全体コメントにする。
+   - 位置: GitHub は `path` と `line`（`side` が `RIGHT` なら new、`LEFT` なら old）。`line` が null（古い差分へのコメント）なら `--file` だけのファイル全体コメントにする。GitLab は `position.new_line`（new）か `position.old_line`（old）。レビュー本文・会話コメント・位置の無いディスカッションは `--file` なしの全体コメントにする。
    - 出典: `--external-author <先頭の投稿者>`、`--external-url <先頭コメントの URL>`、`--external-id <ID>` を付ける。ID は GitHub の行コメントなら先頭コメントの `id`、レビュー本文なら `review-<id>`、会話コメントなら `issue-<id>`、GitLab はディスカッションの `id`。
 
    ```bash
@@ -326,9 +326,9 @@ agent-review-kit set-pr --url <作成した PR/MR の URL>
 
    出力の `status` が `exists` なら前回取り込み済みなので、見解も返さず次へ進む。
 4. **見解を返す**。新しく取り込んだコメントごとにコードを調べ、`resolve-comment <id> --status answered --message "<見解>"` で返す。見解は結論を 1〜2 文で先に書く（妥当なので直すべき / 過去の決定どおりなので直さない / 判断が必要、など）。その後に根拠を書く。
-5. **依頼を閉じる**。依頼コメントを `--status resolved --message "新規 N 件を取り込み、見解を返しました（取り込み済み M 件は対象外）"` で resolve する。
+5. **依頼を閉じる**。依頼コメントを `--status resolved --message "新規 N 件を取り込み、見解を返しました（取り込み済み M 件・自分のスレッド K 件は対象外）"` で resolve する。
 
-取り込んだ指摘は AI 指摘と同じ扱いで、`wait-comments` には配達されない。ユーザーが見解を読んで「🔧 修正を依頼」を押すか返信すると、その返信が通常のコメントとして届く。以降は「AI レビューモード」の手順 4 と同じで、修正したら返信と親（取り込んだ指摘）の両方を resolve する。
+取り込んだコメントは AI 指摘と同じ扱いで、`wait-comments` には配達されない。ユーザーが見解を読んで「🔧 修正を依頼」を押すか返信すると、その返信が通常のコメントとして届く。以降は「AI レビューモード」の手順 4 と同じで、修正したら返信と親（取り込んだコメント）の両方を resolve する。
 
 PR/MR のスレッドへの返信は外部に公開される操作なので、ユーザーが明示的に指示したときだけ行う。
 

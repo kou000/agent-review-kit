@@ -419,13 +419,13 @@ export function setupTopbarControls() {
   // コメント欄に依頼の記録が残り、エージェントが push 後に resolve する。
   // 文書レビュー（publish-html）のページには対象ブランチの概念が無いので出さない。
   if (!DOC) {
-    // PR/MR の指摘の取り込み依頼。push 依頼と同じく全体コメントとして投稿する。
+    // PR/MR のコメントの取込依頼。push 依頼と同じく全体コメントとして投稿する。
     // 見解を返すだけでコードは変えない依頼なので intent: question で送り、
     // 読み取り専用モード中も押せるようにしておく。
     const importBtn = document.createElement('button');
     importBtn.id = 'pr-import-btn';
     importBtn.type = 'button';
-    importBtn.textContent = 'PR 指摘を取り込む';
+    importBtn.textContent = 'PRコメント取込';
     importBtn.title = PR_IMPORT_TITLE;
     importBtn.hidden = true;
     importBtn.addEventListener('click', requestPrImport);
@@ -499,24 +499,24 @@ function requestPush() {
 // reply to each with its view. Posted as an overall question comment, so the
 // agent answers without touching code; fixing a finding afterwards goes
 // through the usual 「🔧 修正を依頼」 button on that thread.
-const PR_IMPORT_PREFIX = '【PR指摘取り込み依頼】';
+const PR_IMPORT_PREFIX = '【PRコメント取込依頼】';
 const PR_IMPORT_TITLE =
-  'PR/MR のレビューコメントを取り込み、各スレッドにエージェントの見解を返すよう依頼する（コードは変更しない）';
+  'PR/MR のコメントを取り込み、各スレッドにエージェントの見解を返すよう依頼する（コードは変更しない）';
 function requestPrImport() {
   if (!state.prUrl) return;
   const msg =
-    'PR/MR の指摘の取り込みをエージェントに依頼しますか？\n' +
-    '全体コメントとして送信され、エージェントが指摘を取り込んで各スレッドに見解を返します。';
+    'PR/MR のコメントの取込をエージェントに依頼しますか？\n' +
+    '全体コメントとして送信され、エージェントがコメントを取り込んで各スレッドに見解を返します。';
   if (!confirm(msg)) return;
   const btn = state.prImportBtn;
   if (btn) btn.disabled = true;
   api('POST', '/api/comments', {
-    body: PR_IMPORT_PREFIX + state.prUrl + ' の指摘コメントを取り込み、各スレッドに見解を返してください。',
+    body: PR_IMPORT_PREFIX + state.prUrl + ' のコメントを取り込み、各スレッドに見解を返してください。',
     intent: 'question',
   }).then(function () {
     refresh();
   }).catch(function (err) {
-    alert('取り込み依頼の送信に失敗しました: ' + err);
+    alert('取込依頼の送信に失敗しました: ' + err);
   }).then(function () {
     if (btn) btn.disabled = false;
   });
