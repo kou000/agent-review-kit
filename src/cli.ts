@@ -4,6 +4,7 @@ import { generate } from './commands/generate';
 import { publishHtml } from './commands/publishHtml';
 import { resolveComment } from './commands/resolveComment';
 import { serve } from './commands/serve';
+import { setPr } from './commands/setPr';
 import { snapshotBegin, snapshotCreate, snapshotList, snapshotPath } from './commands/snapshot';
 import { status } from './commands/status';
 import { waitComments } from './commands/waitComments';
@@ -54,6 +55,14 @@ Commands:
     --start-line <n>       対象範囲の開始行（--end-line とセット）
     --end-line <n>         対象範囲の終了行
     --side <old|new>       変更前/変更後どちらの行か（デフォルト: new）
+    --external-author <name>  PR/MR から取り込む指摘の投稿者。--external-url / --external-id とセット
+    --external-url <url>   取り込む指摘の PR/MR 上の URL（画面に元コメントへのリンクを出す）
+    --external-id <id>     取り込む指摘のスレッド ID。同じ ID が取り込み済みなら新しく作らず
+                           既存のコメントを返す（status: exists）
+  set-pr                   現在のブランチの PR/MR を登録する。差分ページのヘッダにリンクと
+                           「PR 指摘を取り込む」ボタンが出る
+    --url <url>            PR/MR の URL（GitHub の /pull/<番号> か GitLab の /-/merge_requests/<番号>）
+    --clear                登録を削除する
   snapshot begin           修正の適用前に working tree の状態を記録する
   snapshot create          修正の patch を保存し、/snapshot/<id> で差分表示できるようにする
     --comment <id>         対象コメントの id（必須）
@@ -230,7 +239,17 @@ async function main(): Promise<void> {
       break;
     }
     case 'add-comment':
-      rejectUnknownFlags(flags, ['body', 'file', 'line', 'start-line', 'end-line', 'side']);
+      rejectUnknownFlags(flags, [
+        'body',
+        'file',
+        'line',
+        'start-line',
+        'end-line',
+        'side',
+        'external-author',
+        'external-url',
+        'external-id',
+      ]);
       await addComment({
         body: flagStr(flags, 'body'),
         file: flagStr(flags, 'file'),
@@ -238,7 +257,14 @@ async function main(): Promise<void> {
         startLine: flagNum(flags, 'start-line'),
         endLine: flagNum(flags, 'end-line'),
         side: flagStr(flags, 'side'),
+        externalAuthor: flagStr(flags, 'external-author'),
+        externalUrl: flagStr(flags, 'external-url'),
+        externalId: flagStr(flags, 'external-id'),
       });
+      break;
+    case 'set-pr':
+      rejectUnknownFlags(flags, ['url', 'clear']);
+      setPr({ url: flagStr(flags, 'url'), clear: flagBool(flags, 'clear') });
       break;
     case 'snapshot': {
       const sub = positional[0];

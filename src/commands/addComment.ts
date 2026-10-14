@@ -4,7 +4,8 @@ import { readOldSideContent } from '../gitDiff';
 import { highlightFences, highlightSnapshot } from '../highlight';
 import { reviewPaths } from '../paths';
 import { loadState, mutateComments, newCommentId, nowIso } from '../store';
-import { CommentCodeSnapshot, ReviewComment } from '../types';
+import { CommentCodeSnapshot, ExternalSource, ReviewComment } from '../types';
+import { parsePrUrl } from './setPr';
 
 // How many lines around the commented range to capture, mirroring the
 // browser's CODE_CONTEXT_LINES (src/client/diff/form.ts) so an agent-posted
@@ -74,7 +75,30 @@ export interface AddCommentOptions {
   startLine?: number;
   endLine?: number;
   side?: string;
+  // Set all three to import a PR/MR review comment (see ExternalSource).
+  externalAuthor?: string;
+  externalUrl?: string;
+  externalId?: string;
   cwd?: string;
+}
+
+// The --external-* flags as an ExternalSource: all three or none. The
+// provider comes from the comment URL, which points into the PR/MR.
+function externalSource(opts: AddCommentOptions): ExternalSource | undefined {
+  const author = opts.externalAuthor?.trim();
+  const url = opts.externalUrl?.trim();
+  const id = opts.externalId?.trim();
+  if (!author && !url && !id) return undefined;
+  if (!author || !url || !id) {
+    console.error('error: --external-author / --external-url / --external-id はすべて指定してください');
+    process.exit(1);
+  }
+  const parsed = parsePrUrl(url);
+  if (!parsed) {
+    console.error('error: --external-url には PR/MR 上のコメントの URL を指定してください');
+    process.exit(1);
+  }
+  return { provider: parsed.provider, author, url, id };
 }
 
 // Post an AI review finding as an agent-authored comment, straight into
@@ -90,6 +114,7 @@ export async function addComment(opts: AddCommentOptions): Promise<void> {
     console.error('error: --body <本文> を指定してください');
     process.exit(1);
   }
+  const external = externalSource(opts);
 
   let file: string | null = null;
   let side: 'old' | 'new' | null = null;
@@ -163,8 +188,26 @@ export async function addComment(opts: AddCommentOptions): Promise<void> {
   };
   if (fences) comment.fences = fences;
   if (code) comment.code = code;
+  if (external) comment.external = external;
 
   const paths = reviewPaths(cwd);
-  mutateComments(paths.comments, (comments) => comments.push(comment));
+  // An already-imported PR/MR thread is not posted again, so the import can
+  // be rerun and only adds the threads that are new since the last run.
+  const existing = mutateComments(paths.comments, (comments) => {
+    const found = external
+      ? comments.find(
+          (c) =>
+            !c.deleted &&
+            c.external?.provider === external.provider &&
+            c.external.id === external.id
+        )
+      : undefined;
+    if (!found) comments.push(comment);
+    return found;
+  });
+  if (existing) {
+    console.log(JSON.stringify({ status: 'exists', comment: existing }, null, 2));
+    return;
+  }
   console.log(JSON.stringify({ status: 'created', comment }, null, 2));
 }

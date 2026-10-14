@@ -10,7 +10,7 @@ import { resolveComment } from '../src/commands/resolveComment';
 import { reviewPaths } from '../src/paths';
 import { createServer } from '../src/server';
 import { createSnapshot } from '../src/snapshot';
-import { reconcileViewed } from '../src/store';
+import { clearPr, reconcileViewed, savePr } from '../src/store';
 
 let tmp: string;
 let server: http.Server;
@@ -1453,4 +1453,23 @@ test('POST /api/comments は不正な画像 id・未アップロード id を 40
     });
     assert.equal(res.status, 400, JSON.stringify(images));
   }
+});
+
+test('GET /api/status returns the PR/MR registered for the branch', async () => {
+  const paths = reviewPaths(tmp);
+  const pr = {
+    url: 'https://github.com/o/r/pull/3',
+    provider: 'github' as const,
+    number: 3,
+    setAt: '2026-10-14T00:00:00.000Z',
+  };
+  savePr(paths.pr, pr);
+  try {
+    const status = (await (await fetch(`${baseUrl}/api/status`)).json()) as { pr: unknown };
+    assert.deepEqual(status.pr, pr);
+  } finally {
+    clearPr(paths.pr);
+  }
+  const cleared = (await (await fetch(`${baseUrl}/api/status`)).json()) as { pr: unknown };
+  assert.equal(cleared.pr, null);
 });
