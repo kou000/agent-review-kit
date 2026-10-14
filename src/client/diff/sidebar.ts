@@ -9,6 +9,7 @@ import {
   threadState,
   THREAD_STATE_LABEL,
   threadStructure,
+  whoPillText,
 } from '../threads.js';
 import { focusComment } from '../app.js';
 import { setCollapsed } from './collapse.js';
@@ -475,8 +476,8 @@ function threadListItem(top, replies, state) {
 
   if (isAgentComment(top)) {
     const who = document.createElement('span');
-    who.className = 'who-pill';
-    who.textContent = 'AI';
+    who.className = 'who-pill' + (top.external ? ' external-pill' : '');
+    who.textContent = whoPillText(top);
     item.appendChild(who);
   }
   item.appendChild(pill);

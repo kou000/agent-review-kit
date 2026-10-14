@@ -42,6 +42,7 @@ import {
   loadDocumentIndex,
   loadFinished,
   loadMemo,
+  loadPr,
   loadSettings,
   loadSnapshotIndex,
   loadState,
@@ -173,6 +174,8 @@ export function buildStatus(paths: ReviewPaths): Record<string, unknown> {
     finished: finished?.finishedAt ?? null,
     snapshots: loadSnapshotIndex(paths.snapshotsIndex).snapshots.length,
     documents: loadDocumentIndex(paths.documentsIndex).documents.length,
+    // The branch's PR/MR (see PrLink), or null when none is set.
+    pr: loadPr(paths.pr),
   };
 }
 

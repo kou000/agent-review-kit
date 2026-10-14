@@ -26,6 +26,8 @@ export interface ReviewPaths {
   // Personal memo on the diff page (memo.json). Never read by wait-comments,
   // so nothing in it is ever delivered to the agent.
   memo: string;
+  // The PR/MR opened for this branch (pr.json, see PrLink).
+  pr: string;
   state: string;
   settings: string;
   finished: string;
@@ -111,6 +113,7 @@ export function reviewPaths(cwd: string = process.cwd()): ReviewPaths {
     comments: path.join(branchDir, 'comments.json'),
     viewed: path.join(branchDir, 'viewed.json'),
     memo: path.join(branchDir, 'memo.json'),
+    pr: path.join(branchDir, 'pr.json'),
     state: path.join(branchDir, 'state.json'),
     settings: path.join(branchDir, 'settings.json'),
     finished: path.join(branchDir, 'finished.json'),

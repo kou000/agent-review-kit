@@ -55,6 +55,9 @@ export const state: any = {
   commentsToggleBtn: null, // topbar の「コメントを隠す/表示」ボタン
   modeBadge: null,
   pushRequestBtn: null, // topbar の「push を依頼」ボタン（読み取り専用中は無効化）
+  prLink: null, // topbar の PR/MR リンク（set-pr で登録されたときだけ表示）
+  prImportBtn: null, // topbar の「PR 指摘を取り込む」ボタン（PR/MR 登録中だけ表示）
+  prUrl: null, // 登録中の PR/MR の URL（取り込み依頼の本文に入れる）
   projectDirLabel: null, // topbar のレビュー対象ディレクトリ（worktree の見分け用）
   projectDirCopyBtn: null, // その右のパスコピーボタン（パス取得前は非表示）
   projectDir: '',
