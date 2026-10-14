@@ -13,6 +13,28 @@ export function isAgentComment(c) {
   return (c.author || 'user') === 'agent';
 }
 
+// Text of the author pill. AI findings say "AI"; a comment imported from the
+// PR/MR names its reviewer instead, because someone on the PR wrote it.
+export function whoPillText(c) {
+  return c.external ? 'PR @' + c.external.author : 'AI';
+}
+
+// The author pill on a comment card. An imported comment links back to its
+// PR/MR comment; comments.json is hand-editable, so only an https URL is
+// turned into a link.
+function whoPillHtml(c) {
+  if (!isAgentComment(c)) return '';
+  if (!c.external) return '<span class="who-pill">AI</span>';
+  const text = esc(whoPillText(c));
+  const url = c.external.url;
+  if (typeof url !== 'string' || !/^https:\/\//.test(url)) {
+    return '<span class="who-pill external-pill">' + text + '</span>';
+  }
+  return '<a class="who-pill external-pill" href="' + esc(url) +
+    '" target="_blank" rel="noopener noreferrer" title="PR/MR の元コメントを開く">' +
+    text + ' ↗</a>';
+}
+
 export function docTargetText(c) {
   const t = c.htmlTarget;
   if (!t) return 'ドキュメント全体';
@@ -213,7 +235,7 @@ export function commentCard(c: any, isReply?: boolean) {
   const remainingImages = (c.images || []).filter(function (id) { return !bodyRendered.usedIds[id]; });
   let html =
     '<div class="meta">' +
-    (isAgentComment(c) ? '<span class="who-pill">AI</span>' : '') +
+    whoPillHtml(c) +
     '<span class="status-pill status-' + esc(c.status) + '">' + esc(c.status) + '</span>' +
     // 修正依頼 is the default, so only the answer-only choice is marked.
     (c.intent === 'question' ? '<span class="intent-pill">質問</span>' : '') +
@@ -405,8 +427,8 @@ export function renderThread(container, list) {
     summary.appendChild(caret);
     if (isAgentComment(top)) {
       const who = document.createElement('span');
-      who.className = 'who-pill';
-      who.textContent = 'AI';
+      who.className = 'who-pill' + (top.external ? ' external-pill' : '');
+      who.textContent = whoPillText(top);
       summary.appendChild(who);
     }
     summary.appendChild(pill);

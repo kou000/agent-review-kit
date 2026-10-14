@@ -184,6 +184,11 @@ export interface ReviewComment {
   parentId?: string | null;
   // See CommentAuthor. Omitted = 'user' (backward compatible).
   author?: CommentAuthor;
+  // A review comment imported from the PR/MR (see ExternalSource). Imported
+  // comments are posted with author 'agent', so they follow the AI-finding
+  // flow; this field only changes how they are labeled and deduplicates
+  // re-imports. Omitted = not imported.
+  external?: ExternalSource;
   // Soft delete. Deleted comments stay in comments.json (recoverable by
   // hand-editing) but are hidden from the UI, excluded from status counts and
   // never delivered by wait-comments. Omitted/false = live.
@@ -197,6 +202,29 @@ export interface ReviewComment {
 
 export interface CommentsFile {
   comments: ReviewComment[];
+}
+
+export type PrProvider = 'github' | 'gitlab';
+
+// Where an imported comment came from on the PR/MR. `id` is the provider's
+// id of the thread (GitHub: the first review comment's id; GitLab: the
+// discussion id) and is unique per branch, so importing the same thread twice
+// returns the existing comment instead of adding a duplicate.
+export interface ExternalSource {
+  provider: PrProvider;
+  author: string;
+  url: string;
+  id: string;
+}
+
+// The PR/MR opened for the review branch (branches/<slug>/pr.json), set by
+// the agent with `set-pr` after it creates one. Shown as a link in the diff
+// page header, and the "PRコメント取込" button only appears while it is set.
+export interface PrLink {
+  url: string;
+  provider: PrProvider;
+  number: number;
+  setAt: string;
 }
 
 // Persisted "確認済み" (GitHub "Viewed") state, one file per review branch
