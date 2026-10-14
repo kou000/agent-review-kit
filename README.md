@@ -62,6 +62,8 @@ mkdir -p ~/.agents/skills
 ln -s /path/to/agent-review-kit/skills/my-interactive-review ~/.agents/skills/my-interactive-review
 ```
 
+review-hub（後述）を使う場合は `skills/my-review-hub` も同じ方法でリンクする。
+
 ## Skill で使う（推奨）
 
 基本の使い方は CLI を直接叩くのではなく、Claude Code のセッションで `/my-interactive-review` スキルに任せる。スキルがレビューHTMLの生成・サーバー起動・コメント待機・修正・resolve のループをすべて回すので、ユーザーはブラウザでコメントを書くだけでよい。使い方は次の3パターン。
@@ -477,6 +479,14 @@ agent-review-kit generate --preserve-finished  # HTMLを更新（ブラウザは
 agent-review-kit status
 # ブラウザの「レビュー終了」を押す（または POST /api/finish）
 ```
+
+## review-hub（統合レビューシェル）
+
+`hub/` は、計画・差分レビュー・E2E 計画・E2E 結果などを 1 つのブラウザページにタブで並べる付属ツール。agent-review-kit のページを iframe で埋め込み、タブごとの承認ボタン（計画承認・E2E 実行承認・PR 作成承認など）を `wait-approval` でエージェントに返す。agent-review-kit 本体には手を入れず、`.agent-review/server.json` と `/api/status`・`/api/comments` だけを使う。
+
+- Node.js 標準ライブラリのみで、ビルドは不要（`node hub/bin/review-hub.js serve`）
+- 状態は `~/.review-hub/` に置き、対象リポジトリには書かない
+- CLI と HTTP API は [`hub/README.md`](hub/README.md)、エージェント向けの手順は同梱の Skill（`skills/my-review-hub/SKILL.md`）にある。Skill は `my-interactive-review` と同じ方法でリンクする
 
 ## 開発
 
