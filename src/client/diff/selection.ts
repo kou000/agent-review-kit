@@ -65,6 +65,12 @@ function beginSelection(td, extend) {
 }
 
 document.addEventListener('mousedown', function (e: any) {
+  const code = e.target.closest && e.target.closest('td.code-old, td.code-new');
+  const table = code && code.closest('table');
+  if (table) table.dataset.selectSide = code.classList.contains('code-old') ? 'old' : 'new';
+});
+
+document.addEventListener('mousedown', function (e: any) {
   const td = e.target.closest && e.target.closest('td.num[data-file]');
   if (!td) return;
   e.preventDefault();

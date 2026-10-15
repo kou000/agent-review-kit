@@ -275,7 +275,8 @@ export function numCell(file, side, cell, interactive) {
 
 export function codeCell(cell, changedKind) {
   const td = document.createElement('td');
-  td.className = 'code';
+  // code-old / code-new let a text selection stay on one side (see selection.ts).
+  td.className = 'code ' + (changedKind === 'del' ? 'code-old' : 'code-new');
   if (!cell) {
     td.className += ' empty';
     return td;

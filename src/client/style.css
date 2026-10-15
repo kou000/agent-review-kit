@@ -521,7 +521,11 @@ td.selected, td.num.selected { background: var(--select-bg) !important; }
    the single source of the line tint and show through unchanged. Unhighlighted
    fallback text inherits --fg. */
 
-.prefix { display: inline-block; width: 12px; color: var(--muted); }
+.prefix { display: inline-block; width: 12px; color: var(--muted); user-select: none; }
+/* A text selection started in one side's code stays on that side, so copying
+   several lines does not pick up the other side's code. */
+table[data-select-side="old"] td.code-new,
+table[data-select-side="new"] td.code-old { user-select: none; }
 
 tr.widget-row td {
   padding: 8px 12px;
