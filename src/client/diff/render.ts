@@ -198,7 +198,9 @@ export function renderDiff() {
 // tree). Collapse chevrons are included (same as the main diff); viewed/pin
 // buttons and comment wiring are not. Context expanders still appear when the
 // server embedded new-side content (newLines) for the page.
-function renderReadOnlyFiles(frag, emptyText) {
+// interactive: number cells take comment selection (the snapshot page, whose
+// comments go to the fix's thread as replies). The commit page stays display-only.
+function renderReadOnlyFiles(frag, emptyText, interactive) {
   if (!DIFF.files.length) {
     const empty = document.createElement('div');
     empty.className = 'empty-diff';
@@ -232,7 +234,7 @@ function renderReadOnlyFiles(frag, emptyText) {
       p.textContent = file.status === 'binary' ? 'バイナリファイル（表示できません）' : '内容の変更はありません';
       box.appendChild(p);
     } else {
-      box.appendChild(buildDiffTable(file, false));
+      box.appendChild(buildDiffTable(file, interactive === true));
     }
     frag.appendChild(box);
   });
@@ -256,7 +258,7 @@ export function renderCommitPage() {
     'commit ' + c.sha + ' — ' + c.author + ' — ' + fmtDate(c.date);
   frag.appendChild(banner);
 
-  renderReadOnlyFiles(frag, 'このコミットには差分がありません。');
+  renderReadOnlyFiles(frag, 'このコミットには差分がありません。', false);
 
   app.innerHTML = '';
   app.appendChild(frag);
@@ -278,7 +280,8 @@ export function renderSnapshotPage() {
   banner.className = 'commit-banner';
   banner.innerHTML =
     '<div class="commit-subject"></div><div class="commit-meta-line"></div>' +
-    '<div class="snapshot-comment"></div>';
+    '<div class="snapshot-comment"></div>' +
+    '<div class="snapshot-hint">行番号をクリック（Shift+クリックで範囲）すると、この修正へのコメントを対象コメントのスレッドに返信として送れます</div>';
   banner.querySelector('.commit-subject').textContent =
     s.title || ('修正スナップショット #' + s.seq);
   banner.querySelector('.commit-meta-line').textContent =
@@ -292,7 +295,7 @@ export function renderSnapshotPage() {
   }
   frag.appendChild(banner);
 
-  renderReadOnlyFiles(frag, 'このスナップショットには差分がありません。');
+  renderReadOnlyFiles(frag, 'このスナップショットには差分がありません。', true);
 
   app.innerHTML = '';
   app.appendChild(frag);
