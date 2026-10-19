@@ -24,7 +24,7 @@ export interface ResolveOptions {
 
 export async function resolveComment(opts: ResolveOptions): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
-  const status = (opts.status ?? 'resolved') as CommentStatus;
+  const status = (opts.status ?? 'answered') as CommentStatus;
   if (!COMMENT_STATUSES.includes(status)) {
     console.error(
       `error: invalid status "${opts.status}". valid: ${COMMENT_STATUSES.join(', ')}`
@@ -130,23 +130,25 @@ export async function resolveComment(opts: ResolveOptions): Promise<void> {
         comment.agentResponse = response;
       }
     }
-    // Settling a top-level comment (any status but open/seen) settles its
-    // whole thread: replies still open/seen, plus replies only answered/fixed
-    // (handled but not signed off), become resolved, so the user never has to
-    // resolve each reply of a long thread by hand. Replies deliberately parked
-    // as wontfix/dismissed — and replies already resolved — keep their status
-    // so the record of what was skipped or rejected survives.
+    // Updating a top-level comment carries its thread along:
+    // - resolved: the thread is closed — replies still open/seen, plus
+    //   replies only answered/fixed (handled but not signed off), become
+    //   resolved.
+    // - answered/fixed/wontfix/dismissed: only replies still open/seen take
+    //   the same status, so the user's pending replies stop looking like
+    //   agent work without the agent closing the thread. Replies already
+    //   answered/fixed/wontfix/dismissed/resolved keep their status.
+    // - open/seen: replies are left alone.
+    // Replies deliberately parked as wontfix/dismissed — and replies already
+    // resolved — never change, so the record of what was skipped or rejected
+    // survives.
     if (!comment.parentId && status !== 'open' && status !== 'seen') {
       for (const reply of comments) {
-        if (
-          reply.parentId === comment.id &&
-          !reply.deleted &&
-          (reply.status === 'open' ||
-            reply.status === 'seen' ||
-            reply.status === 'answered' ||
-            reply.status === 'fixed')
-        ) {
-          reply.status = 'resolved';
+        if (reply.parentId !== comment.id || reply.deleted) continue;
+        const pending = reply.status === 'open' || reply.status === 'seen';
+        const handled = reply.status === 'answered' || reply.status === 'fixed';
+        if (pending || (status === 'resolved' && handled)) {
+          reply.status = status;
           reply.updatedAt = now;
         }
       }

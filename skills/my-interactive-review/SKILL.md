@@ -75,10 +75,10 @@ Codex では `serve` と `wait-comments` をそれぞれ長時間実行できる
 - 本文が `【push依頼】` で始まる全体コメント（`file: null`、ブラウザ右上の「push を依頼」ボタンから投稿される） — 現在のブランチを push してほしいという依頼。コード修正ではないのでサブエージェントに委譲せず、メインセッションが次の順で対応する:
   1. `git status --short` で未コミットの変更を確認する。未コミットの変更がある場合は、勝手にコミットせず「コミットしてから push するか、コミット済み分だけ push するか」を `--status answered` の返信でユーザーに確認して止まる（ユーザーの返信は同じスレッドの `parentId` 付きコメントとして届く）。
   2. push する（`git push -u origin <ブランチ>`。upstream 設定済みなら `git push`）。force push はユーザーが明示した場合以外は行わない。
-  3. 成功したら `resolve-comment <id> --status resolved --message "push しました: <ブランチ名> @ <短い sha>"` で返信して resolve する。失敗したら出力を添えて `--status answered` で返す（resolve しない）。
+  3. 成功したら `resolve-comment <id> --status answered --message "push しました: <ブランチ名> @ <短い sha>"` で返信する（スレッドを閉じるのはユーザー）。失敗したら出力を添えて同じく `--status answered` で返す。
   ブラウザは `readOnlyMode: true` の間このボタンを無効化する（サーバーがこのモード中の投稿を `intent: question` に強制するため）。したがって push 依頼が届くのは読み取り専用 OFF のときだけで、届いた依頼の `intent` は常に `fix` になる。
 - 本文が `【PRコメント取込依頼】` で始まる全体コメント（`file: null`、`intent: "question"`。ヘッダの「PRコメント取込」ボタンから投稿される） — PR/MR のレビューコメントを取り込み、各スレッドに見解を返してほしいという依頼。**コードは変更しない**（だから `question` で届く）。サブエージェントに委譲せず、メインセッションが「PR/MR コメントの取込」の手順で対応する。
-- `manualEdit: true` のコメント（本文が `【手動修正】` で始まる） — ユーザーがブラウザの手動修正機能で直接書き換えた通知。**修正は適用済みで、コード対応は不要**（サブエージェント委譲もしない）。内容を確認したら `--status resolved` で resolve するだけでよい（snapshot は作らない。このコメントはブラウザには表示されないので、返信メッセージも不要）。対象が2種類ある:
+- `manualEdit: true` のコメント（本文が `【手動修正】` で始まる） — ユーザーがブラウザの手動修正機能で直接書き換えた通知。**修正は適用済みで、コード対応は不要**（サブエージェント委譲もしない）。内容を確認したら `--status answered` にするだけでよい（snapshot は作らない。このコメントはブラウザには表示されないので、返信メッセージも不要）。対象が2種類ある:
   - diff レビュー（`file` あり）— working tree のファイルが変わっているので、以降そのファイルを扱うときは必ず読み直す。
   - HTML レビュー（`documentId` あり）— 保存済み文書（`.agent-review/branches/<ブランチ>/documents/<id>.html`）が変わっている。**この文書を `publish-html` で再公開すると手動編集が上書きされる**ため、以後この文書を更新する場合は保存済みの現在の内容を読み込み、それを基に編集して publish する。
 
@@ -201,7 +201,7 @@ Codex では `serve` と `wait-comments` をそれぞれ長時間実行できる
    agent-review-kit resolve-comment <id> --status answered --message "判断できない理由と選択肢"
    ```
 
-   対応しない判断をユーザーと合意済みの場合は `--status wontfix` を使う（`wontfix` は判断の記録なので解決済みにはならず、画面では「要確認」として残る。ただしエージェント側の作業待ちではないので `unresolved` からは外れる）。
+   対応しない判断をユーザーと合意済みの場合も `--status answered` で返し、本文に「対応しない」ことと理由を書く。
 
 9. コードを修正し、まだ `finishing = false` の場合は、レビューHTMLを再生成する（コメントは保持される）:
 
@@ -326,7 +326,7 @@ agent-review-kit set-pr --url <作成した PR/MR の URL>
 
    出力の `status` が `exists` なら前回取り込み済みなので、見解も返さず次へ進む。
 4. **見解を返す**。新しく取り込んだコメントごとにコードを調べ、`resolve-comment <id> --status answered --message "<見解>"` で返す。見解は結論を 1〜2 文で先に書く（妥当なので直すべき / 過去の決定どおりなので直さない / 判断が必要、など）。その後に根拠を書く。
-5. **依頼を閉じる**。依頼コメントを `--status resolved --message "新規 N 件を取り込み、見解を返しました（取り込み済み M 件・自分のスレッド K 件は対象外）"` で resolve する。
+5. **依頼に返信する**。依頼コメントに `--status answered --message "新規 N 件を取り込み、見解を返しました（取り込み済み M 件・自分のスレッド K 件は対象外）"` で返信する（スレッドを閉じるのはユーザー）。
 
 取り込んだコメントは AI 指摘と同じ扱いで、`wait-comments` には配達されない。ユーザーが見解を読んで「🔧 修正を依頼」を押すか返信すると、その返信が通常のコメントとして届く。以降は「AI レビューモード」の手順 4 と同じで、修正したら返信と親（取り込んだコメント）の両方を resolve する。
 
@@ -361,7 +361,8 @@ diff ではなく、実装プラン・設計書・調査結果などの任意HTM
    ```bash
    agent-review-kit resolve-comment <id> --status fixed --message "..."
    agent-review-kit resolve-comment <id> --status answered --message "..."
-   agent-review-kit resolve-comment <id> --status wontfix --message "..."
+   # 対応しない判断も answered で返し、本文に対応しない理由を書く
+   agent-review-kit resolve-comment <id> --status answered --message "対応しません: <理由>"
    ```
 
 10. 未解決コメントが無くなるか、`wait-comments` が `finished` を返すまで手順5〜9を繰り返す。

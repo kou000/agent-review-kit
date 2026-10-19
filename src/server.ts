@@ -207,7 +207,7 @@ const MAX_DOC_EDIT_BYTES = 5 * 1024 * 1024;
 // instructions decay with context distance; text riding with the comment
 // does not).
 const MANUAL_EDIT_NOTE =
-  'このコメントは自動記録の通知でブラウザには表示されないため、返信は不要（内容を確認したら resolve のみ行うこと）。';
+  'このコメントは自動記録の通知でブラウザには表示されないため、返信は不要（内容を確認したら --status answered にするのみ行うこと）。';
 
 function targetStr(v: unknown, required: boolean): string | null | 'bad' {
   if (v === undefined || v === null) return required ? 'bad' : null;
