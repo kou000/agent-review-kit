@@ -1,6 +1,6 @@
 ---
 name: my-review-hub
-description: "計画・差分レビュー・E2E計画・E2E結果を 1 つのブラウザページ（タブ切替）に統合表示する review-hub の操作手順。agent-review-kit のページを iframe で束ね、タブごとの承認ボタン（計画承認・E2E実行承認・PR作成承認）を wait-approval で受け取る。ステータスバー（フェーズ進行・作業メモ）と中断ボタン、セッション再開手順（status / resume）も定義する。計画→実装→PR のように承認ゲートを挟むフロー系スキルから参照される。Use when a skill needs to show plans, diffs, or E2E results in one tabbed browser page, wait for a browser-side approval gate, or resume an interrupted review session."
+description: "計画・差分レビュー・E2E計画・E2E結果を 1 つのブラウザページ（タブ切替）に統合表示する review-hub の操作手順。agent-review-kit のページを iframe で束ね、タブごとの承認ボタン（計画承認・E2E実行承認・PR作成承認）を ark のコメント（【承認】）として wait-comments で受け取る。ステータスバー（フェーズ進行・作業メモ）と中断ボタン、セッション再開手順（status / resume）も定義する。計画→実装→PR のように承認ゲートを挟むフロー系スキルから参照される。Use when a skill needs to show plans, diffs, or E2E results in one tabbed browser page, wait for a browser-side approval gate, or resume an interrupted review session."
 allowed-tools: [Bash, Read, Write]
 ---
 
@@ -44,7 +44,7 @@ setsid nohup node $REVIEW_HUB_DIR/bin/review-hub.js serve > ~/.review-hub/logs/h
 ```
 
 hub はフェーズを跨いで常駐する。フロー完了後も止める必要はない（止める場合は `$RH stop`。
-また中断ボタンで hub ごと全停止する — 手順 6）。
+また中断ボタンでそのセッションのサーバが止まり、他に動いているセッションが無ければ hub も止まる — 手順 6）。
 
 ## 2. セッション開始と docspace ark
 
@@ -164,17 +164,33 @@ $RH add-tab --session TICKET-123 --id e2e-report --title "E2E結果" \
 - タブ追加後、ユーザーには **hub の URL を 1 本だけ案内**する（`$RH url --session <id>`）。
   ark の URL や `file://` パスを併記しない（迷いのもと）
 
-## 5. コメントと承認の並走待ち受け
+## 5. コメントと承認の待ち受け
 
-コメント対応（ark `wait-comments`）と承認（hub `wait-approval`）を**バックグラウンドで並走**させ、
+承認ボタンは push 依頼ボタンと同じく **ark のコメント**としてエージェントに届く。コメントも承認も
+ark `wait-comments` だけで待つ（**`wait-approval` は使わない**。承認専用の待ち受けは止まっていても
+誰も気づけず、承認が黙って失われるため）。スコープごとの waiter を**バックグラウンドで並走**させ、
 完了通知で先に返った方に反応する。ポーリング（ps/pgrep や短周期リトライ）はしない:
 
 ```bash
 # waiter はスコープごとに 1 本だけ。二重起動禁止（wait-comments は 2 本生きると片方が結果を握り潰す）
 cd <docspaceDir> && $ARK wait-comments --timeout 6600          # docspace 宛（全 doc）で 1 本
 cd <repoDir> && $ARK wait-comments --diff-only --timeout 6600         # 差分レビュー用に repo ごと 1 本
-$RH wait-approval --session TICKET-123 --tab plan --timeout 6600        # いま待っているゲート 1 本
 ```
+
+**承認コメント**: 本文が `【承認】` で始まるコメント（`【承認】「<ボタンのラベル>」が押されました（タブ: <タブ名>）`）。
+投稿先はタブ種別で決まる: ark-doc タブ → そのドキュメント宛（`documentId` 付き）、ark-diff タブ → その repo の
+ark の全体コメント、static タブ（E2E結果など）→ docspace の全体コメント。タブの ark が止まっていれば
+docspace の全体コメントに回る。届いたら:
+
+1. どのゲートの承認かをラベルで判断する（`$RH approve-status --session <id>` でも確認できる）
+2. `resolve-comment <id> --status answered --message "承認を受けて<次にやること>を開始します"` で受領を返す
+   （返信するまで未解決として残り、ユーザーには「受け取られていない」ように見える。
+   スレッドを閉じるのはユーザーなので `--status resolved` にはしない）
+3. 次フェーズへ進む（`set-status` でフェーズも更新する）
+
+hub の承認バーには承認コメントの配達状況（受信待ち / 受信済み）が出る。1 分以上未受信だと警告が出て、
+ユーザーは「承認を確認して」と言ってくる。そのときは waiter の棚卸し（下記）をして欠けたスコープを再起動する
+（再起動直後の wait-comments が未配達の承認コメントを返す）。
 
 - waiter は `run_in_background: true` の Bash で起動し、Bash の timeout は `7200000`（2 時間）にする
   （終了が完了通知になるため、serve と違って切り離さない）。**`--timeout 0` は使わない**:
@@ -186,7 +202,7 @@ $RH wait-approval --session TICKET-123 --tab plan --timeout 6600        # いま
   waiter を再起動する
 - **waiter の再起動は「発火したスコープだけ」ではなく全スコープの棚卸しで行う**。
   コメント対応を終えてターンを締める前に、生きているべき waiter を数え上げて突合する:
-  1. 必要本数 = docspace 1 本 + 差分レビュー中の repo ごとに 1 本 + いま待っている承認ゲート 1 本。
+  1. 必要本数 = docspace 1 本 + 差分レビュー中の repo ごとに 1 本（承認もこの中で届くので別に数えない）。
      ただし **`status` の `waiterScopes[]` で `allHidden: true` のスコープは除く**（ユーザーが
      そのスコープのタブを全部非表示にした = そこにはコメントしない意思表示。生きている waiter は kill してよい。
      Stop フックもそのスコープの waiter 不足を咎めない）。一部だけ非表示のスコープは 1 本必要
@@ -208,47 +224,46 @@ $RH wait-approval --session TICKET-123 --tab plan --timeout 6600        # いま
   # 各 wait-comments の実スコープ（cwd）を列挙。先頭文字のブラケットで棚卸しコマンド自身への自己マッチを除外する
   # bash ラッパと node 子が対で出るので node 側で数える
   for pid in $(pgrep -f '[w]ait-comments'); do echo "$pid $(readlink /proc/$pid/cwd 2>/dev/null)"; done
-  pgrep -f '[r]eview-hub.js wait-approval' >/dev/null && echo "wait-approval: alive" || echo "wait-approval: MISSING"
   ```
 
-  出力のスコープ一覧と「必要本数（docspace + レビュー中 repo/worktree ごと + 承認ゲート）」を
+  出力のスコープ一覧と「必要本数（docspace + レビュー中 repo/worktree ごと）」を
   突合し、欠けているスコープを再起動する。実行せずにターンを終えない
-- **承認が届いたら、そのゲートを待っていた他の waiter を kill してから**次フェーズへ進む
-  （例: 計画承認後、docspace の wait-comments を一度 kill して次フェーズで再起動）
 - waiter を kill するときは `kill $(pgrep -f '<パターン>')` を素で使わない。実行中のシェル自身の
   コマンドラインにもパターンが含まれるため、自分のシェルごと kill してしまう。
   コマンドラインが `node` で始まるプロセスだけに絞る:
   `for pid in $(pgrep -f '[w]ait-comments'); do tr '\0' ' ' < /proc/$pid/cmdline | grep -q '^node ' && kill $pid; done`
   （スコープを限定するなら `readlink /proc/$pid/cwd` も突合する）
-- `wait-approval` の返り値: 承認 `{"status":"approved","approvedAt":...,"note":...}` /
-  中断 `{"status":"interrupted","interruptedAt":...,"note":...}`（→ 手順 6）/
-  タイムアウト `{"status":"timeout"}`（→ 同じゲートで再起動する）
+- `wait-comments` の返り値: コメント（承認コメントを含む）`{"status":"received",...}` /
+  中断 `{"status":"interrupted",...}`（→ 手順 6）/ タイムアウト `{"status":"timeout"}`（→ 同じスコープで再起動する）
 - 承認済みかの確認だけなら `$RH approve-status --session <id> [--tab <id>]`
 
 ## 6. 中断と再開（中断ボタン・セッション再開手順）
 
-ステータスバーの**中断ボタン**は「サインアウト前に全部止める」ためのもの。押されると:
+ステータスバーの**中断ボタン**は「このチケットの作業を止める（サインアウト前など）」ためのもの。押されると:
 
-- 中断が記録され、`wait-approval` が `{"status":"interrupted", "note": <メモ>}` を返す
-  （wait-approval は session.json のファイル監視なので hub が止まっても正しく返る）
-- **レビュー関連のサーバがすべて停止する**: 全セッションの ark serve（docspace・作業リポ）
-  → hub サーバ自身の順。ブラウザには終了メッセージが固定表示される
+- 中断が記録され、**このセッションの ark serve（docspace・作業リポ）とそのスコープの wait-comments が停止する**。
+  稼働中の他セッション（同じホストで別の hub を立てている別チケットを含む）が使っている ark は止めない
+- hub サーバ自身は、止めても他セッションの表示が途切れない場合だけ終了する（別の hub プロセスが動いている、
+  または稼働中の他セッションが無い）。ブラウザには終了メッセージが固定表示される
+- 全チケットを一度に止めたいとき（サインアウト前など）は CLI の `$RH interrupt --session <id> --all`
+  （全セッションに中断を記録し、全 ark と同じホストの全 hub を止める）
+- 止められた wait-comments は `{"status":"interrupted", ...}` を返す。これがエージェントへの中断の通知
+  （メモは `$RH status --session <id>` の `interrupted.note` で読む）
 - メモは**ユーザー自身のための覚え書き**。再開後も保持され（`lastInterrupt`）、hub ページで
   未読なら一度だけ自動ポップアップ + ヘッダ右の「📝 中断メモ」ボタンでいつでも読み返せる。
   AI への引き継ぎはこのメモに頼らず、**AI 自身が `set-status --note` で残す**
 
 **interrupted を受け取ったら**（作業は続行しない）:
 
-1. 同じセッションの他の waiter（wait-comments / wait-approval）をすべて kill する
-   （ark serve は停止済み。wait-comments は接続断で死んでいることがあるが必ず確認して kill。
-   kill は手順 5 の `node` 始まりに絞る方法で行う）
+1. 同じセッションの他の waiter が残っていないか確認し、残っていれば kill する
+   （中断で hub が止めているのが通常。kill は手順 5 の `node` 始まりに絞る方法で行う）
 2. `set-status --note` で中断時点の状態を記録する（何が済んで・何が残っていて・次に何をするか）
 3. ユーザーに現状サマリを報告してターンを終える
 
 **セッションを再開するとき**（中断後・コンテキスト切れ後・新セッションでの引き継ぎ時）は、
 作業を始める前に必ず:
 
-1. hub サーバが止まっていれば起動する（手順 1。中断で hub ごと止まっているのが通常）
+1. hub サーバが止まっていれば起動する（手順 1。他に動いているセッションが無ければ中断で hub ごと止まっている）
 2. `$RH status --session <id>` の現況サマリ（フェーズ・作業メモ・承認状態・コメント件数・
    直近イベント）を読む（status は hub 未起動でも動くので 1 と 2 は逆でもよい）。
    件数は ark サイドバーと同じスレッド単位で、`unresolved`（未解決 = エージェントの作業待ち）と
@@ -260,7 +275,7 @@ $RH wait-approval --session TICKET-123 --tab plan --timeout 6600        # いま
 4. 中断状態なら `$RH resume --session <id>` で解除する（ステータスバーの中断表示が消える）
 5. 停止していた ark serve を再起動する（docspace / 作業リポで `$ARK serve` を手順 2 の
    setsid nohup の形で切り離して起動。ポートが変わっても hub が自動追従。doc は publish 済みのまま残っている）
-6. フェーズに応じた waiter（wait-comments / wait-approval）を再起動し、hub の URL を案内して
+6. フェーズに応じた waiter（スコープごとの wait-comments）を再起動し、hub の URL を案内して
    続きから進める
 
 ## 7. E2E サマリ doc の作り方（コメント可能な E2E 結果）

@@ -32,6 +32,7 @@
     approvalLabel: document.getElementById('approval-label'),
     approveBtn: document.getElementById('approve-btn'),
     approvedMark: document.getElementById('approved-mark'),
+    approvalReceipt: document.getElementById('approval-receipt'),
     frames: document.getElementById('frames'),
     empty: document.getElementById('empty'),
   };
@@ -295,6 +296,8 @@
     if (unresolvedTotal > 0) parts.push(`未解決 ${unresolvedTotal}件`);
     const pending = session.tabs.filter((t) => t.approval && !t.approval.approvedAt).map((t) => t.approval.label || t.title);
     if (pending.length > 0) parts.push(`承認待ち: ${pending.join(' / ')}`);
+    const unreceived = session.tabs.filter((t) => approvalUnreceived(t.approval)).map((t) => t.approval.label || t.title);
+    if (unreceived.length > 0) parts.push(`承認の未受信: ${unreceived.join(' / ')}`);
     if (!interrupted && st.updatedAt) parts.push(`更新 ${new Date(st.updatedAt).toLocaleString()}`);
     el.statusMeta.textContent = parts.join('　');
 
@@ -504,9 +507,30 @@
       el.approveBtn.hidden = approved;
       el.approvedMark.hidden = !approved;
       el.approvedMark.textContent = approved ? `✓ 承認済み (${new Date(tab.approval.approvedAt).toLocaleString()})` : '';
+      renderApprovalReceipt(tab.approval);
     } else {
       el.approvalBar.hidden = true;
     }
+  }
+
+  // 承認コメントがエージェントに配達されたか（hub が ark のコメント状態から判定）。
+  // 配達は待ち受けが生きていれば数秒で済むので、しばらく未受信なら待ち受け停止を疑う表示にする
+  const RECEIPT_STALE_MS = 60 * 1000;
+  function approvalUnreceived(approval) {
+    return Boolean(approval && approval.approvedAt && approval.received === false);
+  }
+  function renderApprovalReceipt(approval) {
+    const r = el.approvalReceipt;
+    if (!approval || !approval.approvedAt || typeof approval.received !== 'boolean') {
+      r.hidden = true;
+      return;
+    }
+    r.hidden = false;
+    const stale = approvalUnreceived(approval) && Date.now() - new Date(approval.approvedAt).getTime() > RECEIPT_STALE_MS;
+    r.classList.toggle('stale', stale);
+    if (approval.received) r.textContent = 'エージェント受信済み';
+    else if (stale) r.textContent = '⚠ エージェントが未受信です。待ち受けが止まっている可能性があるので、エージェントに「承認を確認して」と伝えてください';
+    else r.textContent = 'エージェントの受信待ち…';
   }
 
   el.approveBtn.addEventListener('click', () => {
@@ -524,19 +548,21 @@
   });
 
   el.interruptBtn.addEventListener('click', () => {
-    const note = window.prompt('作業を中断し、レビュー関連のサーバをすべて停止します（サインアウト前用）。\n自分用のメモ（任意・再開時に表示されます）:', '');
+    const note = window.prompt('このセッションの作業を中断し、レビュー用のサーバを停止します（他のチケットのセッションは止めません）。\n自分用のメモ（任意・再開時に表示されます）:', '');
     if (note === null) return; // キャンセル
     api(`/api/session/${encodeURIComponent(sessionId)}/interrupt`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(note ? { note } : {}),
     })
-      .then(() => {
-        // hub 自身もこの直後に停止するため、リロードせず終了メッセージで固定する
+      .then((res) => {
+        // このセッションのタブはつながらなくなる（hub もこの直後に止まることがある）ため、
+        // リロードせず終了メッセージで固定する
+        const others = res.otherActive && res.otherActive.length ? `\n（動いている他のセッション: ${res.otherActive.join(', ')}）` : '';
         const overlay = document.createElement('div');
         overlay.id = 'shutdown-overlay';
         overlay.textContent =
-          '⏸ 中断しました。レビュー関連のサーバはすべて停止しました。\nこのタブは閉じて大丈夫です。\n再開するときはエージェントに「再開して」と伝えてください。';
+          `⏸ 中断しました。このセッションのレビュー用サーバを停止しました。${others}\nこのタブは閉じて大丈夫です。\n再開するときはエージェントに「再開して」と伝えてください。`;
         document.body.appendChild(overlay);
       })
       .catch((err) => window.alert(`中断の記録に失敗しました: ${err.message}`));

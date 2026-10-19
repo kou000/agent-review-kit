@@ -1,7 +1,7 @@
 'use strict';
 
 // agent-review-kit (ark) 連携。ark は改修しない前提で、公開されている
-// <projectDir>/.agent-review/server.json と GET /api/status だけに依存する。
+// <projectDir>/.agent-review/server.json と HTTP API（/api/status・/api/comments）だけに依存する。
 // ark は再起動でポートが変わり得るため、URL 解決は毎回ファイルから行う。
 
 const fs = require('fs');
@@ -64,6 +64,71 @@ function fetchArkJson(port, apiPath) {
     req.on('error', () => settle(null));
     req.on('close', () => settle(null));
   });
+}
+
+function postArkJson(port, apiPath, payload) {
+  return new Promise((resolve) => {
+    const data = Buffer.from(JSON.stringify(payload));
+    const req = http.request(
+      {
+        host: '127.0.0.1',
+        port,
+        path: apiPath,
+        method: 'POST',
+        timeout: STATUS_TIMEOUT_MS,
+        headers: { 'Content-Type': 'application/json', 'Content-Length': data.length },
+      },
+      (res) => {
+        let body = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk) => {
+          body += chunk;
+        });
+        res.on('end', () => {
+          let parsed = null;
+          try {
+            parsed = JSON.parse(body);
+          } catch {
+            /* 非 JSON 応答はエラー扱い */
+          }
+          resolve({ statusCode: res.statusCode, body: parsed });
+        });
+      }
+    );
+    req.on('timeout', () => req.destroy(new Error('timeout')));
+    req.on('error', (err) => resolve({ statusCode: 0, body: { error: err.message } }));
+    req.end(data);
+  });
+}
+
+// 生きていて projectDir が一致する ark のポートを返す（取り違え防止）。無ければ null
+async function livePort(projectDir) {
+  const info = arkServerInfo(projectDir);
+  if (!info) return null;
+  const status = await fetchArkJson(info.port, '/api/status');
+  return status && status.projectDir === projectDir ? info.port : null;
+}
+
+// 承認をコメントとして ark に投稿する。wait-comments で通常のコメントと同じ経路で
+// エージェントに届き、resolve されるまで未解決として残る（承認の取りこぼしを見える化する）。
+// 返り値: { ok: true, commentId } / { ok: false, error }
+async function postArkComment(projectDir, payload) {
+  const port = await livePort(projectDir);
+  if (!port) return { ok: false, error: `ark が起動していません: ${projectDir}` };
+  const { statusCode, body } = await postArkJson(port, '/api/comments', payload);
+  if (statusCode === 201 && body && body.comment) return { ok: true, commentId: body.comment.id };
+  return { ok: false, error: `ark がコメントを受け付けませんでした (${statusCode}): ${(body && body.error) || ''}` };
+}
+
+// 承認コメントがエージェントに届いたか。wait-comments が配達すると open → seen になる。
+// 判定できない（ark 停止・コメント消失）ときは null
+async function commentReceived(projectDir, commentId) {
+  const port = await livePort(projectDir);
+  if (!port) return null;
+  const data = await fetchArkJson(port, '/api/comments');
+  if (!data || !Array.isArray(data.comments)) return null;
+  const c = data.comments.find((x) => x.id === commentId);
+  return c ? c.status !== 'open' : null;
 }
 
 // タブに対応するコメント件数。ark の /api/status の集計は ark サーバ（ブランチスコープ）
@@ -150,11 +215,8 @@ async function stopArkServer(projectDir) {
   }
 }
 
-// 渡されたセッション群の ark タブが参照する ark serve（docspace / 作業リポ）をすべて停止する。
-// static タブ（hub 配信）は対象外。中断＝サインアウト前の全停止用途なので、
-// 押されたセッションに限らず全セッション分を渡して止める
-async function stopArks(sessions) {
-  const dirs = [
+function arkDirs(sessions) {
+  return [
     ...new Set(
       sessions
         .flatMap((s) => s.tabs)
@@ -162,11 +224,94 @@ async function stopArks(sessions) {
         .map((t) => t.projectDir)
     ),
   ];
+}
+
+// 中断で止める ark スコープを決める。hub は同じホストで複数起動しても状態フォルダ
+// （~/.review-hub）を共有しているため、全セッション分を止めると別チケットの hub の
+// タブまで全部つながらなくなる。all でなければ、中断するセッションのスコープのうち
+// 稼働中の他セッションが使っていないものだけを止める。
+// 稼働中 = 中断されておらず、中断するセッションと共有していないスコープで ark が生きている
+// （共有スコープの ark は中断するセッションが立てたものかもしれず、放置された古い
+// セッションを稼働中と誤認するため数えない）
+// 返り値: { dirs: 止めるスコープ, otherActive: 稼働中の他セッション ID }
+async function planInterrupt(session, sessions, all) {
+  if (all) return { dirs: arkDirs(sessions), otherActive: [] };
+  const own = new Set(arkDirs([session]));
+  const keep = new Set();
+  const otherActive = [];
+  for (const s of sessions) {
+    if (s.id === session.id || s.interrupted) continue;
+    const dirs = arkDirs([s]);
+    const alive = await Promise.all(dirs.filter((d) => !own.has(d)).map(livePort));
+    if (!alive.some(Boolean)) continue;
+    otherActive.push(s.id);
+    for (const d of dirs) keep.add(d);
+  }
+  return { dirs: [...own].filter((d) => !keep.has(d)), otherActive };
+}
+
+// 指定スコープの ark serve と wait-comments を止める。static タブ（hub 配信）は対象外
+async function stopArks(dirs) {
   const results = [];
   for (const projectDir of dirs) {
     results.push({ projectDir, ...(await stopArkServer(projectDir)) });
   }
-  return results;
+  return { servers: results, waiters: stopWaiters(dirs) };
 }
 
-module.exports = { arkServerInfo, resolveArkTab, stopArkServer, stopArks };
+// node で動いているプロセスの { pid, argv, cwd }。/proc を使うので Linux 専用。読めない環境では空
+function nodeProcesses() {
+  let pids;
+  try {
+    pids = fs.readdirSync('/proc').filter((d) => /^\d+$/.test(d));
+  } catch {
+    return [];
+  }
+  const procs = [];
+  for (const pid of pids) {
+    try {
+      const argv = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0');
+      // bash ラッパ等のコマンドラインにも文字列が含まれるので、node 本体だけを対象にする
+      if (!/(^|\/)node$/.test(argv[0])) continue;
+      procs.push({ pid: Number(pid), argv, cwd: fs.readlinkSync(`/proc/${pid}/cwd`) });
+    } catch {
+      /* 途中で終了したプロセス・権限外は無視 */
+    }
+  }
+  return procs;
+}
+
+// 中断時に、そのスコープの wait-comments を SIGTERM で止める。wait-comments は SIGTERM で
+// {"status":"interrupted"} を出して終わるので、これがエージェントへの中断の通知になる
+// （承認をコメントに統一して wait-approval を常駐させなくなったため、中断を伝える経路はこれだけ）
+function stopWaiters(dirs) {
+  const stopped = [];
+  for (const p of nodeProcesses()) {
+    if (!p.argv.includes('wait-comments') || !dirs.includes(p.cwd)) continue;
+    try {
+      process.kill(p.pid, 'SIGTERM');
+      stopped.push({ pid: p.pid, projectDir: p.cwd });
+    } catch {
+      /* 既に終了 */
+    }
+  }
+  return stopped;
+}
+
+// 同じホストで動いている hub サーバ（review-hub.js serve）の pid
+function hubPids() {
+  return nodeProcesses()
+    .filter((p) => p.argv.some((a) => /(^|\/)review-hub\.js$/.test(a)) && p.argv.includes('serve'))
+    .map((p) => p.pid);
+}
+
+module.exports = {
+  arkServerInfo,
+  resolveArkTab,
+  stopArkServer,
+  planInterrupt,
+  stopArks,
+  hubPids,
+  postArkComment,
+  commentReceived,
+};
