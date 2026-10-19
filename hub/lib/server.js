@@ -1,8 +1,8 @@
 'use strict';
 
 // review-hub の HTTP サーバ。127.0.0.1 バインドのローカル専用（認証なし）。
-// フェーズを跨いで常駐する。例外は中断 API（/interrupt）で、これはサインアウト前の
-// 全停止用途なので ark serve を止めたうえで hub 自身も終了する。
+// フェーズを跨いで常駐する。例外は中断 API（/interrupt）で、そのセッションの ark serve を
+// 止めたうえで、他セッションの表示が途切れない場合は hub 自身も終了する。
 
 const fs = require('fs');
 const http = require('http');
@@ -62,10 +62,43 @@ async function resolveSession(session, hubPort) {
         resolved.url = `http://localhost:${hubPort}/static/${encodeURIComponent(session.id)}/${encodeURIComponent(tab.id)}/${tab.entry}`;
         resolved.alive = fs.existsSync(tab.path);
       }
+      const delivery = tab.approval && tab.approval.delivery;
+      if (delivery) {
+        resolved.approval = {
+          ...tab.approval,
+          received: await ark.commentReceived(delivery.projectDir, delivery.commentId),
+        };
+      }
       return resolved;
     })
   );
   return { ...session, tabs };
+}
+
+// 承認ボタンの押下を ark のコメントとしてエージェントに届ける（push 依頼ボタンと同じ方式）。
+// 承認専用の待ち受け（wait-approval）が止まっていると承認が黙って失われるため、
+// 待ち受けの棚卸し・再起動時の再配達・未解決表示が効く wait-comments の経路に乗せる。
+// 投稿先: ark-doc はそのドキュメント宛、ark-diff はその ark の全体コメント、
+// static は自前の ark が無いので docspace の全体コメント。タブの ark に投稿できない
+// （停止・レビュー終了済み）ときは docspace へフォールバックする
+const APPROVAL_PREFIX = '【承認】';
+
+async function postApprovalComment(session, tab, note) {
+  const label = (tab.approval && tab.approval.label) || `${tab.title} を承認`;
+  const body = `${APPROVAL_PREFIX}「${label}」が押されました（タブ: ${tab.title}）${note ? `\n\n${note}` : ''}`;
+  const candidates = [];
+  if (tab.type === 'ark-doc') candidates.push({ projectDir: tab.projectDir, payload: { body, intent: 'fix', documentId: tab.docId } });
+  if (tab.type === 'ark-diff') candidates.push({ projectDir: tab.projectDir, payload: { body, intent: 'fix' } });
+  if (session.docspaceDir && !candidates.some((c) => c.projectDir === session.docspaceDir && !c.payload.documentId)) {
+    candidates.push({ projectDir: session.docspaceDir, payload: { body, intent: 'fix' } });
+  }
+  const errors = [];
+  for (const c of candidates) {
+    const r = await ark.postArkComment(c.projectDir, c.payload);
+    if (r.ok) return { ok: true, delivery: { projectDir: c.projectDir, commentId: r.commentId } };
+    errors.push(r.error);
+  }
+  return { ok: false, error: errors.join(' / ') || '投稿先の ark がありません' };
 }
 
 function shellPage(sessionId) {
@@ -138,8 +171,25 @@ async function handle(req, res, hubPort) {
       json(res, 400, { error: 'tabId is required' });
       return;
     }
+    const session = store.loadSession(apiApprove[1]);
+    const target = session && session.tabs.find((t) => t.id === body.tabId);
+    if (!target) {
+      json(res, 400, { error: `tab not found: ${body.tabId}` });
+      return;
+    }
+    // 二重押し・別ウィンドウからの再押下で承認コメントを重複投稿しない
+    if (target.approval && target.approval.approvedAt) {
+      json(res, 200, { status: 'approved', tab: target });
+      return;
+    }
+    const delivered = await postApprovalComment(session, target, body.note);
+    if (!delivered.ok) {
+      // 承認として記録しない（ボタンを残してユーザーが押し直せるようにする）
+      json(res, 502, { error: `エージェントに承認を届けられませんでした: ${delivered.error}` });
+      return;
+    }
     try {
-      const { tab } = store.approveTab(apiApprove[1], body.tabId, body.note, 'browser');
+      const { tab } = store.approveTab(apiApprove[1], body.tabId, body.note, 'browser', delivered.delivery);
       json(res, 200, { status: 'approved', tab });
     } catch (err) {
       json(res, 400, { error: err.message });
@@ -179,19 +229,27 @@ async function handle(req, res, hubPort) {
       return;
     }
     try {
-      // 中断 = サインアウト前の全停止。全セッションの ark serve を止め、応答を返してから
-      // hub 自身も終了する（SIGTERM ハンドラが server.json を掃除する）
+      // 中断 = このセッションの作業を止める（サインアウト前用）。止めるのはこのセッションの
+      // ark serve と wait-comments だけで、稼働中の他セッション（同じホストの別 hub の
+      // チケットを含む）が使うスコープは残す（ark.planInterrupt）。
+      // hub 自身は、止めても他セッションの表示が途切れない場合だけ終了する:
+      // 別の hub プロセスが動いている、または稼働中の他セッションが無い
       const { interrupted } = store.interruptSession(apiInterrupt[1], body.note, 'browser');
-      const stoppedArks = await ark.stopArks(store.listSessions());
-      const stopped = stoppedArks.filter((r) => r.stopped);
+      const session = store.loadSession(apiInterrupt[1]);
+      const { dirs, otherActive } = await ark.planInterrupt(session, store.listSessions(), false);
+      const { servers, waiters: stoppedWaiters } = await ark.stopArks(dirs);
+      const stopped = servers.filter((r) => r.stopped);
       if (stopped.length > 0) {
         store.appendEvent(apiInterrupt[1], 'arks-stopped', {
           servers: stopped.map((r) => ({ projectDir: r.projectDir, pid: r.pid })),
         });
       }
-      store.appendEvent(apiInterrupt[1], 'hub-stopped', {});
-      json(res, 200, { status: 'interrupted', interrupted, stoppedArks, hubStopping: true });
-      setTimeout(() => process.kill(process.pid, 'SIGTERM'), 500);
+      if (stoppedWaiters.length > 0) store.appendEvent(apiInterrupt[1], 'waiters-stopped', { waiters: stoppedWaiters });
+      const otherHubs = ark.hubPids().filter((pid) => pid !== process.pid);
+      const hubStopping = otherActive.length === 0 || otherHubs.length > 0;
+      if (hubStopping) store.appendEvent(apiInterrupt[1], 'hub-stopped', {});
+      json(res, 200, { status: 'interrupted', interrupted, stoppedArks: servers, stoppedWaiters, otherActive, hubStopping });
+      if (hubStopping) setTimeout(() => process.kill(process.pid, 'SIGTERM'), 500);
     } catch (err) {
       json(res, 400, { error: err.message });
     }

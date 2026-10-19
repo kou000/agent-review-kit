@@ -15,7 +15,7 @@ function usage() {
     '  start --session <id> [--title <t>]               セッション作成（docspace も作成、既存なら再利用）',
     '        [--phases <a,b,c>]                          フェーズ列（省略時: 計画,実装,差分レビュー,E2E,PR）',
     '  set-status --session <id> [--phase <p>] [--note <t>]  現在フェーズ・作業メモを更新（ステータスバーに表示）',
-    '  interrupt --session <id> [--note <t>]            中断を記録（wait-approval が interrupted を返す）',
+    '  interrupt --session <id> [--note <t>] [--all]    中断を記録し、このセッションの ark serve・wait-comments を停止（--all: 全セッション・全 hub を停止）',
     '  resume --session <id>                            中断状態を解除（再開時に実行）',
     '  add-tab --session <id> --id <tabId> --title <t>',
     '          --type ark-doc|ark-diff|static',
@@ -27,7 +27,7 @@ function usage() {
     '  show-tab --session <id> --id <tabId>               非表示を解除する',
     '  approve --session <id> --tab <tabId> [--note <t>]  CLI から承認（主にテスト用）',
     '  approve-status --session <id> [--tab <tabId>]',
-    '  wait-approval --session <id> --tab <tabId> [--timeout <sec>]  承認までブロック（0=無期限, 既定 0）。中断で interrupted を返す',
+    '  wait-approval --session <id> --tab <tabId> [--timeout <sec>]  旧方式の承認待ち（互換用。承認は ark の wait-comments に【承認】コメントで届く）',
     '  url [--session <id>]                             ブラウザで開く URL を出力',
     '  status [--session <id>] [--events <n>]           サーバ情報とセッション一覧 / セッション詳細（現況サマリ）',
     '  stop                                             サーバ停止',
@@ -164,31 +164,45 @@ async function main() {
     }
 
     case 'interrupt': {
-      // 中断 = サインアウト前の全停止（ブラウザの中断ボタンと同じ）:
-      // 全セッションの ark serve と hub サーバを停止する
+      // 中断（ブラウザの中断ボタンと同じ）: このセッションの ark serve と wait-comments を止める。
+      // 稼働中の他セッションが使うスコープは残し、hub は稼働中の他セッションが無いときだけ止める
+      // （CLI はどの hub がこのセッションを表示しているか分からないため、残すときは全 hub を残す）。
+      // --all はサインアウト前の全停止: 全セッションに中断を記録し、全 ark と同じホストの全 hub を止める
       require_(args, ['session']);
       store.requireSession(args.session);
-      const { interrupted } = store.interruptSession(args.session, typeof args.note === 'string' ? args.note : undefined, 'cli');
+      const note = typeof args.note === 'string' ? args.note : undefined;
+      const { interrupted } = store.interruptSession(args.session, note, 'cli');
+      const all = Boolean(args.all);
+      if (all) {
+        for (const s of store.listSessions()) {
+          if (s.id !== args.session && !s.interrupted) store.interruptSession(s.id, `全停止（${args.session} から --all）`, 'cli');
+        }
+      }
       const arkLib = require('../lib/ark');
-      const stoppedArks = await arkLib.stopArks(store.listSessions());
+      const session = store.requireSession(args.session);
+      const { dirs, otherActive } = await arkLib.planInterrupt(session, store.listSessions(), all);
+      const { servers: stoppedArks, waiters: stoppedWaiters } = await arkLib.stopArks(dirs);
       const stopped = stoppedArks.filter((r) => r.stopped);
       if (stopped.length > 0) {
         store.appendEvent(args.session, 'arks-stopped', {
           servers: stopped.map((r) => ({ projectDir: r.projectDir, pid: r.pid })),
         });
       }
-      const info = store.loadServerInfo();
-      let hubStopped = false;
-      if (info) {
-        try {
-          process.kill(info.pid, 'SIGTERM');
-          hubStopped = true;
-          store.appendEvent(args.session, 'hub-stopped', {});
-        } catch {
-          store.removeServerInfo(); // 残骸
+      if (stoppedWaiters.length > 0) store.appendEvent(args.session, 'waiters-stopped', { waiters: stoppedWaiters });
+      const stoppedHubs = [];
+      if (all || otherActive.length === 0) {
+        for (const pid of arkLib.hubPids()) {
+          try {
+            process.kill(pid, 'SIGTERM');
+            stoppedHubs.push(pid);
+          } catch {
+            /* 既に終了 */
+          }
         }
+        if (stoppedHubs.length > 0) store.appendEvent(args.session, 'hub-stopped', { pids: stoppedHubs });
+        else store.removeServerInfo(); // 動いている hub が無いのに残っている server.json は残骸
       }
-      out({ status: 'interrupted', interrupted, stoppedArks, hubStopped });
+      out({ status: 'interrupted', interrupted, all, otherActive, stoppedArks, stoppedWaiters, stoppedHubs });
       break;
     }
 

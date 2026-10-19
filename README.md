@@ -500,7 +500,7 @@ agent-review-kit status
 
 ## review-hub（統合レビューシェル）
 
-`hub/` は、計画・差分レビュー・E2E 計画・E2E 結果などを 1 つのブラウザページにタブで並べる付属ツール。agent-review-kit のページを iframe で埋め込み、タブごとの承認ボタン（計画承認・E2E 実行承認・PR 作成承認など）を `wait-approval` でエージェントに返す。agent-review-kit 本体には手を入れず、`.agent-review/server.json` と `/api/status`・`/api/comments` だけを使う。
+`hub/` は、計画・差分レビュー・E2E 計画・E2E 結果などを 1 つのブラウザページにタブで並べる付属ツール。agent-review-kit のページを iframe で埋め込み、タブごとの承認ボタン（計画承認・E2E 実行承認・PR 作成承認など）を ark のコメント（`【承認】`）として `wait-comments` でエージェントに届ける。agent-review-kit 本体には手を入れず、`.agent-review/server.json` と `/api/status`・`/api/comments`（承認コメントの投稿を含む）だけを使う。
 
 - Node.js 標準ライブラリのみで、ビルドは不要（`node hub/bin/review-hub.js serve`）
 - 状態は `~/.review-hub/` に置き、対象リポジトリには書かない

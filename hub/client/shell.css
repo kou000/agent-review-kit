@@ -265,6 +265,8 @@ body {
 }
 #approve-btn:hover { background: #1a7f37; }
 #approved-mark { color: #1a7f37; font-weight: 700; }
+#approval-receipt { color: #57606a; }
+#approval-receipt.stale { color: #9a6700; font-weight: 600; }
 
 #frames { flex: 1; position: relative; min-height: 0; }
 #frames iframe {

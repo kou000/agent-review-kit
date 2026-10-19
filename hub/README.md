@@ -64,7 +64,9 @@ $RH serve [--port N]              # サーバ起動（フォアグラウンド�
 $RH start --session TICKET-123 --title "..." \
     --phases "計画,実装,差分レビュー,E2E,PR"     # セッション作成（既存なら再利用。--phases 省略時は左記が既定）
 $RH set-status --session TICKET-123 --phase 実装 --note "コメント3件対応中"  # ステータスバー更新
-$RH interrupt --session TICKET-123 [--note "..."]  # 中断を記録し、全 ark serve + hub を停止（サインアウト前用。note は自分用メモ）
+$RH interrupt --session TICKET-123 [--note "..."] [--all]  # 中断を記録し、このセッションの ark serve・wait-comments を停止（note は自分用メモ）
+                                  # 稼働中の他セッションが使う ark は残す。hub は稼働中の他セッションが無いときだけ止める
+                                  # --all: 全セッションに中断を記録し、全 ark・同じホストの全 hub を停止（サインアウト前用）
 $RH resume --session TICKET-123                    # 中断解除（再開時）
 $RH add-tab --session TICKET-123 --id plan --title 計画 \
     --type ark-doc --project-dir <docspace> --doc-id plan \
@@ -73,10 +75,8 @@ $RH add-tab --session TICKET-123 --id diff-backend --title "差分 (backend)" \
     --type ark-diff --project-dir ~/my-app
 $RH add-tab --session TICKET-123 --id e2e-report --title E2E結果 \
     --type static --path ~/e2e-reports/TICKET-123 --approval-label "PR 作成を承認"
-$RH wait-approval --session TICKET-123 --tab plan --timeout 6600   # 承認までブロック（中断で interrupted を返す）
-                                  # 0（無期限）は使わない。Claude Code の run_in_background は 2 時間で強制停止されるため、
-                                  # 110 分で {"status":"timeout"} を返させて起動し直す
-$RH approve-status --session TICKET-123
+$RH approve-status --session TICKET-123      # 承認状態の確認（承認の受け取り自体は ark の wait-comments。下記「承認の届き方」）
+$RH wait-approval --session TICKET-123 --tab plan --timeout 6600   # 旧方式の承認待ち（互換用。スキルでは使わない）
 $RH remove-tab --session TICKET-123 --id reproduce
 $RH hide-tab --session TICKET-123 --id plan     # 非表示（ブラウザの右クリックと同じ）/ show-tab で解除
 $RH url [--session TICKET-123]
@@ -86,6 +86,22 @@ $RH stop
 
 すべて JSON を stdout に返す。`add-tab` は同じ `--id` で再実行すると定義更新（承認状態は保持）。
 
+### 承認の届き方
+
+ブラウザの承認ボタンは、push 依頼ボタンと同じく **ark のコメント**としてエージェントに届く
+（本文は `【承認】「<ラベル>」が押されました（タブ: <タブ名>）`、intent: fix）。
+エージェントは通常のコメントと同じ `wait-comments` で受け取り、resolve するまで未解決として残る。
+
+| タブ種別 | 投稿先 |
+| --- | --- |
+| ark-doc | そのドキュメント宛のコメント |
+| ark-diff | その ark の全体コメント |
+| static | docspace の ark の全体コメント |
+
+タブの ark に投稿できない（停止・レビュー終了済み）ときは docspace の全体コメントにフォールバックし、
+どこにも投稿できなければ承認を記録せずエラーを返す（ボタンが残るので押し直せる）。
+承認バーには承認コメントの配達状況（受信待ち / 受信済み）が出て、1 分以上未受信なら警告になる。
+
 ## HTTP API
 
 | ルート | 内容 |
@@ -94,13 +110,16 @@ $RH stop
 | `GET /s/<id>` | シェルページ |
 | `GET /api/sessions` | セッション一覧 |
 | `GET /api/session/<id>` | タブ定義 + 解決済み iframe URL + ark 死活/未解決数 |
-| `POST /api/session/<id>/approve` | `{tabId, note?}` で承認記録 |
+| `POST /api/session/<id>/approve` | `{tabId, note?}` で承認。ark へ承認コメントを投稿してから記録する（投稿できなければ 502 で記録しない） |
 | `POST /api/session/<id>/tab-visibility` | `{tabId, hidden}` でタブの非表示を記録（タブの右クリックメニュー / 「非表示 N ▾」メニュー） |
-| `POST /api/session/<id>/interrupt` | `{note?}` で中断記録 + 全セッションの ark serve と hub 自身を停止（ステータスバーの中断ボタン。サインアウト前の全停止用） |
+| `POST /api/session/<id>/interrupt` | `{note?}` で中断記録 + このセッションの ark serve・その wait-comments を停止（ステータスバーの中断ボタン。wait-comments は `interrupted` を返す）。稼働中の他セッションが使う ark は残し、hub 自身は別の hub が動いているか稼働中の他セッションが無いときだけ終了する |
 | `GET /static/<sessionId>/<tabId>/<path>` | static タブの配信（Range 対応） |
 
-hub はフェーズを跨いで常駐する前提。例外は `/interrupt`（中断ボタン）で、これは
-サインアウト前の全停止用途のため ark serve を止めたうえで hub 自身も終了する。
+hub はフェーズを跨いで常駐する前提。例外は `/interrupt`（中断ボタン）で、そのセッションの ark serve を
+止めたうえで、他セッションの表示が途切れない場合は hub 自身も終了する。
+同じホストで hub を複数起動しても状態フォルダ（`~/.review-hub`）は共有されるため、中断は
+「稼働中の他セッション」（中断されておらず、中断するセッションと共有していない ark が生きている）を
+基準に止める範囲を決める。
 
 ## 注意
 

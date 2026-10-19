@@ -316,7 +316,9 @@ function waiterScopes(session) {
   }));
 }
 
-function approveTab(sessionId, tabId, note, source) {
+// delivery: ブラウザ承認で ark に投稿した承認コメントの所在 { projectDir, commentId }。
+// hub がエージェントの受信（open → seen）を表示するために持つ。CLI 承認では無い
+function approveTab(sessionId, tabId, note, source, delivery) {
   const result = mutateSession(sessionId, (session) => {
     const tab = session.tabs.find((t) => t.id === tabId);
     if (!tab) throw new Error(`tab not found: ${tabId}`);
@@ -325,6 +327,7 @@ function approveTab(sessionId, tabId, note, source) {
     }
     tab.approval.approvedAt = new Date().toISOString();
     tab.approval.note = note || null;
+    tab.approval.delivery = delivery || null;
     return { tab };
   });
   appendEvent(sessionId, 'approved', {
@@ -332,6 +335,7 @@ function approveTab(sessionId, tabId, note, source) {
     label: result.tab.approval.label,
     note: result.tab.approval.note,
     source: source || 'cli',
+    delivery: result.tab.approval.delivery,
   });
   return result;
 }
@@ -356,7 +360,7 @@ function setStatus(sessionId, { phase, note }) {
   return result;
 }
 
-// 中断（ブラウザの中断ボタン / CLI）。wait-approval がこれを検知して interrupted を返す
+// 中断（ブラウザの中断ボタン / CLI）。互換用の wait-approval はこれを検知して interrupted を返す
 function interruptSession(sessionId, note, source) {
   const result = mutateSession(sessionId, (session) => {
     session.interrupted = { at: new Date().toISOString(), note: note || null };
