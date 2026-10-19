@@ -110,6 +110,8 @@ echo "<セッションID>" > ~/.review-hub/waiter-owner-session
 - 補助クラス: `class="meta"`（薄字の日付行）/ `class="ok"`（PASS 等の緑）/ `class="warn"`（黄）/
   `class="note"`（枠付き注記）
 - script 不可・画像は data URI のみ・全体 5MB 上限（ark の sanitize / CSP 制約）
+- hub に載せた doc は、publish-html した後に hub で表示を確認する。表のセルの文字色、本文の `.doc` の付け忘れ、
+  style ブロックの欠落を見る
 
 ## 3. ステータス更新（フェーズ・作業メモ）
 

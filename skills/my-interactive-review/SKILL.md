@@ -98,10 +98,11 @@ Codex では `serve` と `wait-comments` をそれぞれ長時間実行できる
    agent-review-kit generate
    ```
 
-   ブランチ全体をレビュー対象にする場合は、比較先ブランチ名をそのまま指定せず merge-base を base にする:
+   ブランチ全体をレビュー対象にする場合は、比較先ブランチ名をそのまま指定せず、`git fetch origin` したうえで `origin/main`（リポジトリの既定ブランチが master なら `origin/master`）との merge-base を base にする。ローカルの `main` は古いことがあり、それとの merge-base では他チケットのファイルが差分に混ざる:
 
    ```bash
-   BASE_REF=$(git merge-base main HEAD)
+   git fetch origin
+   BASE_REF=$(git merge-base origin/main HEAD)   # 既定ブランチが master なら origin/master
    agent-review-kit generate --base "$BASE_REF"
    ```
 
@@ -171,6 +172,8 @@ Codex では `serve` と `wait-comments` をそれぞれ長時間実行できる
    agent-review-kit resolve-comment <id> --status answered --message "回答内容"
    ```
 
+   回答は一文目で質問に答える。
+
 7. コメントが**修正指摘**なら、まず**そのコメントの `intent`** と**そのバッチの `received.settings.readOnlyMode`** を確認する（`intent: "question"` または `readOnlyMode: true` なら修正せず、修正案を `answered` で回答する）。修正する場合、メインセッションは自分でコードを編集せず、**サブエージェントに委譲する**（1件だけでも委譲する。方針は「修正の委譲」）。
 
    **修正はコミットせず、スナップショットとして記録する。** git 履歴を汚さずに「この指摘に対する修正だけ」の差分ページをユーザーに見せられる。流れ:
@@ -212,6 +215,8 @@ Codex では `serve` と `wait-comments` をそれぞれ長時間実行できる
 
    `--base` を省略しても前回 generate の base が引き継がれるので、ブランチ全体レビューの再生成でもそのまま実行してよい。`--preserve-finished` は、再生成と同時にユーザーが終了ボタンを押しても終了シグナルを消さないために必須。ブラウザ側は自動でリロードされる。`finishing = true` なら再生成せず、受信済みコメントの resolve と最終検証だけを終える。
 
+   コードを直したら、ユーザーへ報告する前に毎回再生成し、修正分のスナップショットを付けてスレッドに返信する（手順7）。backend と frontend の差分を別々に見せている場合、backend の修正は backend の差分タブ側のスレッドに付ける。
+
 10. 現在の状態を確認する:
 
     ```bash
@@ -219,6 +224,8 @@ Codex では `serve` と `wait-comments` をそれぞれ長時間実行できる
     ```
 
     `unresolved`（open + seen）が未解決コメント数＝エージェント側の作業待ち。`wontfix` / `dismissed` は解決済みには数えないが（解決済みは `resolved` だけ）、待っているのはユーザーの確認なので画面上は「要確認」として残るだけで `unresolved` には含まれない。
+
+    ユーザーが会話で短い一言だけを送ってきたら、まずこのコマンドで未返信のコメントが残っていないか確認する。
 
 11. 未解決コメントが残っている、またはユーザーのレビューが続いている間は、すでに保持している `activeWaitSessionId` の結果を回収する。値がない場合に限り、手順4の通常待機（`--resume` なし）を1本起動する。`received` を回収したら処理キューへ追加して再び1本だけ待機を起動する。`finished` を回収したら `finishing = true` とし、待機を再起動せず処理キューを drain する。
 
@@ -327,6 +334,7 @@ agent-review-kit set-pr --url <作成した PR/MR の URL>
 
    出力の `status` が `exists` なら前回取り込み済みなので、見解も返さず次へ進む。
 4. **見解を返す**。新しく取り込んだコメントごとにコードを調べ、`resolve-comment <id> --status answered --message "<見解>"` で返す。見解は結論を 1〜2 文で先に書く（妥当なので直すべき / 過去の決定どおりなので直さない / 判断が必要、など）。その後に根拠を書く。
+   - bot の指摘には、まず対応要否と理由だけを返す。ユーザーがクローズの基準を示したら、基準に該当するコメントは全件閉じる。
 5. **依頼に返信する**。依頼コメントに `--status answered --message "新規 N 件を取り込み、見解を返しました（取り込み済み M 件・自分のスレッド K 件は対象外）"` で返信する（スレッドを閉じるのはユーザー）。
 
 取り込んだコメントは AI 指摘と同じ扱いで、`wait-comments` には配達されない。ユーザーが見解を読んで「🔧 修正を依頼」を押すか返信すると、その返信が通常のコメントとして届く。以降は「AI レビューモード」の手順 4 と同じで、修正したら返信と親（取り込んだコメント）の両方を resolve する。
