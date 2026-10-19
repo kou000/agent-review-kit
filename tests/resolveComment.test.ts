@@ -231,8 +231,36 @@ test('--status open/seen で追加した agent の返信は answered になり�
     assert.equal(comment.status, 'open');
     assert.equal(reply.status, 'answered');
     // Only the reopened top-level comment is open (the seeded user reply was
-    // settled by the first answered call's cascade).
+    // carried to answered by the first answered call).
     assert.equal(buildStatus(reviewPaths(tmp)).unresolved, 1);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('--status answered で大元に返信すると配下の open/seen の返信は answered になり resolved にはならない', async () => {
+  const tmp = makeTmpRepo();
+  try {
+    const { reply } = seed(tmp);
+    const seenReply: ReviewComment = { ...reply, id: 'reply-seen', body: '別の返信', status: 'seen' };
+    const fixedReply: ReviewComment = { ...reply, id: 'reply-fixed', body: '対応済みの返信', status: 'fixed' };
+    saveComments(reviewPaths(tmp).comments, [
+      ...loadComments(reviewPaths(tmp).comments),
+      seenReply,
+      fixedReply,
+    ]);
+
+    await captureLog(() =>
+      resolveComment({ id: 'top', status: 'answered', message: '回答です', cwd: tmp })
+    );
+
+    const comments = loadComments(reviewPaths(tmp).comments);
+    const byId = new Map(comments.map((c) => [c.id, c]));
+    assert.equal(byId.get('top')?.status, 'answered');
+    assert.equal(byId.get('reply')?.status, 'answered');
+    assert.equal(byId.get('reply-seen')?.status, 'answered');
+    assert.equal(byId.get('reply-fixed')?.status, 'fixed');
+    assert.equal(comments.filter((c) => c.status === 'resolved').length, 0);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
