@@ -880,6 +880,11 @@ tr.widget-row td.widget-pad + td.widget-cell {
   color: var(--muted);
   white-space: pre-wrap;
 }
+.commit-banner .snapshot-hint {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
 
 .comment-card .actions {
   padding: 0 10px 8px;

@@ -105,6 +105,92 @@ export function cancelForm() {
   clearSelectionHighlight();
 }
 
+// The comment body's header for a reply from the snapshot page: which fix,
+// which lines, and the selected code quoted. A reply's anchor is copied from
+// its parent (the server ignores position fields), so this text is the only
+// place the snapshot location travels to the agent. The quote keeps it
+// findable after later fixes shift the line numbers.
+function snapshotQuote(s, r) {
+  const rangeText = r.startLine === r.endLine ? 'L' + r.startLine : 'L' + r.startLine + '-L' + r.endLine;
+  const sideText = r.side === 'new' ? '変更後' : '変更前';
+  let head = '**修正差分 #' + s.seq + '（' + s.id + '）** `' + r.file + '` ' + sideText + ' ' + rangeText;
+  const code = captureCode(r.file, r.side, r.startLine, r.endLine);
+  if (!code) return head;
+  const text = code.lines.join('\n');
+  // A fence longer than any backtick run inside the code, so the quote can't close early.
+  const runs = text.match(/`+/g) || [];
+  const fence = '`'.repeat(Math.max(3, ...runs.map(function (x) { return x.length + 1; })));
+  const dot = r.file.lastIndexOf('.');
+  const lang = dot > r.file.lastIndexOf('/') ? r.file.slice(dot + 1) : '';
+  head += '\n\n' + fence + lang + '\n' + text + '\n' + fence;
+  return head;
+}
+
+// Comment form on the /snapshot/<id> page. The comment is posted as a reply
+// to the review comment the fix answered (window.__SNAPSHOT__.commentId), so
+// it travels through wait-comments like any reply and shows up in that thread
+// on the main review page. No manual edit: the snapshot is the code at fix
+// time, which the working tree may have moved past.
+function showSnapshotReplyForm(r, anchorRow) {
+  const s = window.__SNAPSHOT__;
+  const rangeText = r.startLine === r.endLine ? 'L' + r.startLine : 'L' + r.startLine + '-L' + r.endLine;
+  const sideText = r.side === 'new' ? '変更後' : '変更前';
+  const w = widgetRow('comment-form-row', r.side);
+  const wrap = document.createElement('div');
+  wrap.className = 'comment-form';
+  wrap.innerHTML =
+    '<div class="form-meta">' + esc(r.file) + ' / ' + sideText + ' ' + rangeText +
+    ' にコメント（対象コメントのスレッドに返信として送信）</div>' +
+    '<textarea placeholder="コメントを入力（Ctrl+Enterで送信 / 画像はペーストで添付）"></textarea>' +
+    intentFieldHtml() +
+    '<div class="buttons">' +
+    '<button class="primary submit">返信を送信</button>' +
+    '<button class="cancel">キャンセル</button>' +
+    '</div>';
+  w.td.appendChild(wrap);
+  anchorRow.after(w.tr);
+  state.openForm = w.tr;
+  syncIntentFields(wrap);
+
+  const textarea = wrap.querySelector('textarea');
+  const attachments = attachImagePaste(wrap, textarea);
+  textarea.focus();
+
+  function submit() {
+    const images = attachments.ids();
+    if (attachments.busy()) {
+      alert('画像をアップロード中です。完了までお待ちください。');
+      return;
+    }
+    const text = textarea.value.trim() || (images.length ? '（画像添付）' : '');
+    if (!text) return;
+    (wrap.querySelector('.submit') as any).disabled = true;
+    api('POST', '/api/comments', {
+      parentId: s.commentId,
+      body: snapshotQuote(s, r) + '\n\n' + text,
+      intent: selectedIntent(wrap),
+      images: images,
+    }).then(function () {
+      // The standalone page has no thread view to refresh; confirm in place.
+      wrap.innerHTML =
+        '<div class="form-meta">送信しました。レビューページの対象コメントのスレッドに返信として追加され、エージェントに届きます。</div>' +
+        '<div class="buttons"><button class="cancel">閉じる</button></div>';
+      wrap.querySelector('.cancel').addEventListener('click', cancelForm);
+      state.selection = null;
+      clearSelectionHighlight();
+    }).catch(function (err) {
+      alert('コメントの送信に失敗しました: ' + err);
+      (wrap.querySelector('.submit') as any).disabled = false;
+    });
+  }
+
+  wrap.querySelector('.submit').addEventListener('click', submit);
+  wrap.querySelector('.cancel').addEventListener('click', cancelForm);
+  textarea.addEventListener('keydown', function (e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') submit();
+  });
+}
+
 export function showCommentForm() {
   const r = selectionRange();
   if (!r) return;
@@ -112,6 +198,11 @@ export function showCommentForm() {
 
   const anchorRow = findRowFor(r.file, r.side, r.endLine);
   if (!anchorRow) return;
+
+  if (window.__SNAPSHOT__) {
+    showSnapshotReplyForm(r, anchorRow);
+    return;
+  }
 
   // The form opens in the half of the split view the selection is on, so the
   // saved thread later appears in the same place (see widgetRow).
