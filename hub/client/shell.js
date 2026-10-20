@@ -30,6 +30,7 @@
     notice: document.getElementById('notice'),
     approvalBar: document.getElementById('approval-bar'),
     approvalLabel: document.getElementById('approval-label'),
+    approvalNote: document.getElementById('approval-note'),
     approveBtn: document.getElementById('approve-btn'),
     approvedMark: document.getElementById('approved-mark'),
     approvalReceipt: document.getElementById('approval-receipt'),
@@ -77,6 +78,8 @@
   }
 
   function selectTab(id) {
+    // 追加指示は書いたタブの承認にだけ添える（別タブの承認に持ち越さない）
+    if (id !== activeTabId) el.approvalNote.value = '';
     activeTabId = id;
     render();
   }
@@ -505,6 +508,7 @@
       const approved = Boolean(tab.approval.approvedAt);
       el.approvalLabel.textContent = tab.approval.label || '承認';
       el.approveBtn.hidden = approved;
+      el.approvalNote.hidden = approved;
       el.approvedMark.hidden = !approved;
       el.approvedMark.textContent = approved ? `✓ 承認済み (${new Date(tab.approval.approvedAt).toLocaleString()})` : '';
       renderApprovalReceipt(tab.approval);
@@ -537,13 +541,19 @@
     const tab = activeTab();
     if (!tab || !tab.approval) return;
     const label = tab.approval.label || `${tab.title} を承認`;
-    if (!window.confirm(`「${label}」を実行します。よろしいですか？`)) return;
+    // 追加指示は承認コメントの本文に添えてエージェントに届く（例: 承認後そのまま MR 作成まで進める）
+    const note = el.approvalNote.value.trim();
+    const message = `「${label}」を実行します。${note ? `\n\n追加指示:\n${note}\n\n` : ''}よろしいですか？`;
+    if (!window.confirm(message)) return;
     api(`/api/session/${encodeURIComponent(sessionId)}/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tabId: tab.id }),
+      body: JSON.stringify({ tabId: tab.id, note }),
     })
-      .then(() => refresh())
+      .then(() => {
+        el.approvalNote.value = '';
+        refresh();
+      })
       .catch((err) => window.alert(`承認に失敗しました: ${err.message}`));
   });
 

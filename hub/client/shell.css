@@ -264,6 +264,16 @@ body {
   cursor: pointer;
 }
 #approve-btn:hover { background: #1a7f37; }
+#approval-note {
+  flex: 1;
+  max-width: 560px;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  font: inherit;
+  resize: vertical;
+}
 #approved-mark { color: #1a7f37; font-weight: 700; }
 #approval-receipt { color: #57606a; }
 #approval-receipt.stale { color: #9a6700; font-weight: 600; }
