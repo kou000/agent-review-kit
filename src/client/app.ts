@@ -478,7 +478,8 @@ function requestPush() {
   if (state.readOnlyMode) return;
   const msg =
     'エージェントに push を依頼しますか？\n' +
-    '全体コメントとして送信され、エージェントが現在のブランチを push します。';
+    '全体コメントとして送信され、エージェントが現在のブランチを push します。\n' +
+    '未コミットの変更がある場合は、先にコミット案が返信されます（返信で指示するまでコミットしません）。';
   if (!confirm(msg)) return;
   const btn = state.pushRequestBtn;
   if (btn) btn.disabled = true;
