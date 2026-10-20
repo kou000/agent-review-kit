@@ -73,9 +73,9 @@ Codex では `serve` と `wait-comments` をそれぞれ長時間実行できる
 - `intent: "fix"` — 本文で判断する（修正指摘なら修正、実質的に質問なら回答）。
 - `intent` が無いコメント（`add-comment` で投稿した AI 指摘、古い `comments.json`）も本文で判断する。
 - 本文が `【push依頼】` で始まる全体コメント（`file: null`、ブラウザ右上の「push を依頼」ボタンから投稿される） — 現在のブランチを push してほしいという依頼。コード修正ではないのでサブエージェントに委譲せず、メインセッションが次の順で対応する:
-  1. `git status --short` で未コミットの変更を確認する。未コミットの変更がある場合は、勝手にコミットせず「コミットしてから push するか、コミット済み分だけ push するか」を `--status answered` の返信でユーザーに確認して止まる（ユーザーの返信は同じスレッドの `parentId` 付きコメントとして届く）。
-  2. push する（`git push -u origin <ブランチ>`。upstream 設定済みなら `git push`）。force push はユーザーが明示した場合以外は行わない。
-  3. 成功したら `resolve-comment <id> --status answered --message "push しました: <ブランチ名> @ <短い sha>"` で返信する（スレッドを閉じるのはユーザー）。失敗したら出力を添えて同じく `--status answered` で返す。
+  1. `git status --short` で未コミットの変更を確認する。**未コミットの変更がある場合は、まだコミットせず、コミット案を `--status answered` の返信で示して止まる**。コミット案は「コミット指示への対応」の既定ルール（未 push のブランチなら既存のローカルコミットも含めて 1 コミットにまとめる / push 済みなら指摘単位）で組み立て、作るコミットごとにメッセージと含めるファイル（指摘単位ならどの指摘か）を並べる。指摘単位のときは「スナップショット外の変更が残れば最後に別コミットにする」ことも書いておく。`.env`・ログ・一時ファイルなど明らかにコミット対象外のものは除外案として別に書く。ユーザーの返信は同じスレッドの `parentId` 付きコメントとして届く。了承ならその案どおりにコミットして 2. へ進み、修正の指示があれば案を直して従う（修正後の案を再提示するかは指示の内容で判断する）。未コミットの変更が無ければ確認せずに 2. へ進む。
+  2. push する（`git push -u origin <ブランチ>`。upstream 設定済みなら `git push`）。force push はユーザーが明示した場合以外は行わない（1 コミットにまとめるのは未 push のブランチだけなので force push は要らない）。
+  3. 成功したら `resolve-comment <id> --status answered --message "push しました: <ブランチ名> @ <短い sha>（<作ったコミットの一覧>）"` で返信する（スレッドを閉じるのはユーザー）。失敗したら出力を添えて同じく `--status answered` で返す。
   ブラウザは `readOnlyMode: true` の間このボタンを無効化する（サーバーがこのモード中の投稿を `intent: question` に強制するため）。したがって push 依頼が届くのは読み取り専用 OFF のときだけで、届いた依頼の `intent` は常に `fix` になる。
 - 本文が `【PRコメント取込依頼】` で始まる全体コメント（`file: null`、`intent: "question"`。ヘッダの「PRコメント取込」ボタンから投稿される） — PR/MR のレビューコメントを取り込み、各スレッドに見解を返してほしいという依頼。**コードは変更しない**（だから `question` で届く）。サブエージェントに委譲せず、メインセッションが「PR/MR コメントの取込」の手順で対応する。
 - `manualEdit: true` のコメント（本文が `【手動修正】` で始まる） — ユーザーがブラウザの手動修正機能で直接書き換えた通知。**修正は適用済みで、コード対応は不要**（サブエージェント委譲もしない）。内容を確認したら `--status answered` にするだけでよい（snapshot は作らない。このコメントはブラウザには表示されないので、返信メッセージも不要）。対象が2種類ある:
@@ -241,10 +241,33 @@ Codex では `serve` と `wait-comments` をそれぞれ長時間実行できる
 
 ## コミット指示への対応
 
-レビュー中の修正は working tree に未コミットのまま蓄積されている。ユーザーからコミットの指示を受けたら、指定された粒度でコミットする:
+レビュー中の修正は working tree に未コミットのまま蓄積されている。ユーザーからコミットの指示を受けたら、指定された粒度でコミットする。**粒度の指定が無いとき（push 依頼ボタンでコミット案を作るときを含む）は、ブランチが push 済みかで決める**:
 
-- **まとめて1コミット**: 現在の working tree をそのままコミットするだけ。
-- **コメント単位でコミットを分ける**: `agent-review-kit snapshot path` が返す現在ブランチのディレクトリにある patch を、時系列（ファイル名の連番）順に再生する。各 patch は「その時点の working tree」を前提に作られているため、**先に最初の `snapshot begin` 時点の状態（`index.json` の `baselineTree`）を復元してから**再生する。レビュー開始時に未コミット変更があった場合、この復元を飛ばすと patch #1 が適用できない:
+```bash
+git fetch origin
+BRANCH=$(git branch --show-current)
+git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null && echo pushed || echo unpushed
+```
+
+- 未 push（リモートにブランチが無い）→ **まとめて1コミット**。ローカルにしか無い既存コミットもまとめて 1 つにする（下記）
+- push 済み → **コメント単位でコミットを分ける**（MR 上で指摘ごとの修正を追えるようにする）。リモートにあるコミットは書き換えない
+
+コミットメッセージは日本語で、リポジトリの慣習（`git log --oneline -20`）に合わせる。`Co-Authored-By` などのトレーラーは付けない。
+
+- **まとめて1コミット**: 未 push のブランチなら、既存のローカルコミットも含めて 1 つにまとめる。リモートに無いブランチの履歴なので書き換えても誰にも影響しない。メッセージはブランチ全体の変更を要約する:
+
+  ```bash
+  BASE=$(git merge-base origin/main HEAD)   # 既定ブランチが master なら origin/master
+  git reset --soft "$BASE"                   # 既存コミットの内容は index に残る
+  git add <未コミットのファイル>              # 対象外ファイルを除いて明示的に add
+  git commit -m "<ブランチ全体の要約>"
+  # snapshot があれば、全 patch をコミット済みとして印を付ける（後でコメント単位に切り替えたとき再生し直さないため）
+  echo <index.json の最大 seq> > "$(agent-review-kit snapshot path)/committed-seq"
+  ```
+
+  ユーザーが明示的に 1 コミットを指示した場合で、ブランチが push 済みなら、既存コミットはまとめず working tree の変更だけを 1 コミットにする。
+- **コメント単位でコミットを分ける**: `agent-review-kit snapshot path` が返す現在ブランチのディレクトリにある patch を、時系列（ファイル名の連番）順に再生する。各 patch は「その時点の working tree」を前提に作られているため、**先に最初の `snapshot begin` 時点の状態（`index.json` の `baselineTree`）を復元してから**再生する。レビュー開始時に未コミット変更があった場合、この復元を飛ばすと patch #1 が適用できない。
+  2 回目以降のコミット（push 依頼を複数回押した場合など）では、前回コミットした patch を再生し直さない。前回どの seq までコミットしたかは snapshot ディレクトリの `committed-seq` に記録しておき、それより後の patch だけを再生する。このときベースラインの復元は行わない（HEAD がすでにベースラインより先にあり、復元すると前回のコミットを打ち消してしまう）:
 
   ```bash
   # (0) 最終状態を tree として記録してから退避（安全ネット兼、再生後の検証基準。
@@ -254,26 +277,39 @@ Codex では `serve` と `wait-comments` をそれぞれ長時間実行できる
   git add -A && FINAL_TREE=$(git write-tree)
   git stash -u
 
-  # (1) ベースライン（最初の snapshot begin 時点）を復元する。
+  # (1) ベースライン（最初の snapshot begin 時点）を復元する。初回（committed-seq が無い）だけ。
   #     HEAD と一致していれば diff は空で、このコミットはスキップされる
-  BASE_TREE=$(node -e 'const fs=require("fs"); console.log(JSON.parse(fs.readFileSync(process.argv[1])).baselineTree)' "$SNAP_DIR/index.json")
-  git diff HEAD "$BASE_TREE" > /tmp/ark-baseline.patch
-  if [ -s /tmp/ark-baseline.patch ]; then
-    git apply --index /tmp/ark-baseline.patch
-    git commit -m "wip: レビュー開始時点の変更"   # メッセージ・扱いはユーザーに確認
+  DONE_SEQ=$(cat "$SNAP_DIR/committed-seq" 2>/dev/null || echo 0)
+  if [ "$DONE_SEQ" -eq 0 ]; then
+    BASE_TREE=$(node -e 'const fs=require("fs"); console.log(JSON.parse(fs.readFileSync(process.argv[1])).baselineTree)' "$SNAP_DIR/index.json")
+    git diff HEAD "$BASE_TREE" > /tmp/ark-baseline.patch
+    if [ -s /tmp/ark-baseline.patch ]; then
+      git apply --index /tmp/ark-baseline.patch
+      git commit -m "<レビュー開始時点の変更（実装本体など）の要約>"
+    fi
   fi
 
-  # (2) 連番順に、patch 適用 → コミット を繰り返す
+  # (2) 連番順に、未コミットの patch だけ 適用 → コミット を繰り返す
   for p in "$SNAP_DIR"/0*.patch; do
+    SEQ=$((10#$(basename "$p" | cut -d_ -f1)))
+    [ "$SEQ" -le "$DONE_SEQ" ] && continue
     git apply --index "$p"
-    git commit -m "fix: <index.json の該当エントリの title / commentId から要約>"
+    git commit -m "<index.json の該当エントリの title / commentId の指摘内容から要約>"
+    echo "$SEQ" > "$SNAP_DIR/committed-seq"
   done
+
+  # (3) 最終状態との差分 = スナップショットの外で行われた変更（手動編集など）。
+  #     残っていれば取り込んで最後の別コミットにする（コミット案などで了承を得ていなければ
+  #     ユーザーに確認してから）。取り込まずに stash を捨てると失われる
+  if [ -n "$(git diff "$FINAL_TREE")" ]; then
+    git diff --binary HEAD "$FINAL_TREE" | git apply --index
+    git commit -m "<残りの変更の要約>"
+  fi
 
   git diff "$FINAL_TREE"           # 空なら再生完了（最終状態を完全再現）。退避を破棄:
   git stash drop
   ```
-
-  `git diff "$FINAL_TREE"` に差分が残る場合、それはスナップショットの外で行われた変更（手動編集など）。その差分を最後の別コミットにするかユーザーに確認する。patch 適用が失敗した場合は `git apply --3way --index` を試し、それでも駄目ならそこで停止し、stash を保持したまま状況を報告する。ユーザーの明示承認なしに `git reset --hard` しない。ベースラインのコミットを履歴に残したくない場合は、再生後に rebase 等での整理をユーザーと相談する。
+patch 適用が失敗した場合は `git apply --3way --index` を試し、それでも駄目ならそこで停止し、stash を保持したまま状況を報告する。ユーザーの明示承認なしに `git reset --hard` しない。ベースラインのコミットを履歴に残したくない場合は、再生後に rebase 等での整理をユーザーと相談する。
 
 ## AI レビューモード
 
