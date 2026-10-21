@@ -66,5 +66,7 @@ export function resolveDefaultSettings(envFile: string): ReviewSettings {
       typeof env.ARK_EDITOR_URI_TEMPLATE === 'string'
         ? env.ARK_EDITOR_URI_TEMPLATE.slice(0, MAX_TEXT)
         : DEFAULT_SETTINGS.editorUriTemplate,
+    prPendingCommentEnabled:
+      envBool(env.ARK_PR_PENDING_COMMENT) ?? DEFAULT_SETTINGS.prPendingCommentEnabled,
   };
 }

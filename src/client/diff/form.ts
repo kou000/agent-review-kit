@@ -2,6 +2,7 @@ import { api } from '../api.js';
 import { esc } from '../dom.js';
 import { attachImagePaste } from '../images.js';
 import { intentFieldHtml, selectedIntent, syncIntentFields } from '../intent.js';
+import { PR_PENDING_LABEL, PR_PENDING_TITLE, prPendingBody } from '../prPending.js';
 import { DIFF, state } from '../state.js';
 import { refresh } from '../app.js';
 import { clearSelectionHighlight, selectionRange } from './selection.js';
@@ -236,6 +237,9 @@ export function showCommentForm() {
     intentFieldHtml() +
     '<div class="buttons">' +
     '<button class="primary submit">コメントを追加</button>' +
+    // 表示は body.pr-pending-on（設定 ON かつ PR/MR 登録中）で切り替える。
+    '<button class="pr-pending-submit" title="' + esc(PR_PENDING_TITLE) + '">' +
+    esc(PR_PENDING_LABEL) + '</button>' +
     (editableText !== null
       ? '<button class="manual-edit" title="選択範囲のコードをその場で書き換えてファイルに直接適用する">✏️ 手動修正</button>'
       : '') +
@@ -250,7 +254,11 @@ export function showCommentForm() {
   const attachments = attachImagePaste(wrap, textarea);
   textarea.focus();
 
-  function submit() {
+  // prPending: the 「PR に下書き投稿」 button. Same comment at the same
+  // anchor, but the body gets the request prefix so the agent posts it to the
+  // PR/MR as a pending review comment, and intent is question (posting to the
+  // PR/MR never touches code).
+  function submit(prPending?: boolean) {
     const images = attachments.ids();
     if (attachments.busy()) {
       alert('画像をアップロード中です。完了までお待ちください。');
@@ -259,7 +267,8 @@ export function showCommentForm() {
     // An image alone is a valid comment; the server still requires a body.
     const body = textarea.value.trim() || (images.length ? '（画像添付）' : '');
     if (!body) return;
-    (wrap.querySelector('.submit') as any).disabled = true;
+    const buttons: any = wrap.querySelectorAll('.submit, .pr-pending-submit');
+    buttons.forEach(function (b) { b.disabled = true; });
     api('POST', '/api/comments', {
       file: r.file,
       side: r.side,
@@ -267,16 +276,16 @@ export function showCommentForm() {
       endLine: r.endLine,
       startDiffLine: r.startDiffLine,
       endDiffLine: r.endDiffLine,
-      body: body,
-      intent: selectedIntent(wrap),
+      body: prPending ? prPendingBody(body) : body,
+      intent: prPending ? 'question' : selectedIntent(wrap),
       images: images,
       code: codeSnapshot,
     }).then(function () {
       cancelForm();
       refresh();
     }).catch(function (err) {
-      alert('コメントの保存に失敗しました: ' + err);
-      (wrap.querySelector('.submit') as any).disabled = false;
+      alert((prPending ? 'PR への下書き投稿の依頼' : 'コメントの保存') + 'に失敗しました: ' + err);
+      buttons.forEach(function (b) { b.disabled = false; });
     });
   }
 
@@ -331,7 +340,8 @@ export function showCommentForm() {
     });
   }
 
-  wrap.querySelector('.submit').addEventListener('click', submit);
+  wrap.querySelector('.submit').addEventListener('click', function () { submit(); });
+  wrap.querySelector('.pr-pending-submit').addEventListener('click', function () { submit(true); });
   wrap.querySelector('.cancel').addEventListener('click', cancelForm);
   const editBtn = wrap.querySelector('.manual-edit');
   if (editBtn) editBtn.addEventListener('click', showManualEdit);

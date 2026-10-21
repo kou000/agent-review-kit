@@ -3,6 +3,12 @@ import { bodySnippet, esc, fmtDate, isSafeImageDataUri, unescapeNl } from './dom
 import { attachImagePaste, commentBodyHtml, commentImagesHtml } from './images.js';
 import { renderMarkdown, stripMarkdown, tokenLineHtml } from './markdown.js';
 import { intentFieldHtml, selectedIntent, syncIntentFields } from './intent.js';
+import {
+  PR_PENDING_LABEL,
+  PR_PENDING_TITLE,
+  prPendingBody,
+  prPendingInitialText,
+} from './prPending.js';
 import { state } from './state.js';
 import { threadFoldActions, threadFoldPlan } from './threadFold.js';
 import { refresh } from './app.js';
@@ -381,6 +387,18 @@ export function commentCard(c: any, isReply?: boolean) {
     });
     actions.appendChild(reopen);
   }
+  // 「PR に下書き投稿」: このコメントの文面を PR/MR の Pending レビュー
+  // コメントにするようエージェントに依頼する。状態・投稿者を問わず全カードに
+  // 置き、表示は body.pr-pending-on（app.ts の syncPrPendingButtons）で切り替える。
+  const pendingBtn = document.createElement('button');
+  pendingBtn.type = 'button';
+  pendingBtn.className = 'pr-pending-btn';
+  pendingBtn.textContent = PR_PENDING_LABEL;
+  pendingBtn.title = PR_PENDING_TITLE;
+  pendingBtn.addEventListener('click', function () {
+    openPrPendingForm(div, c, pendingBtn);
+  });
+  actions.appendChild(pendingBtn);
   // Soft delete (any status, any author). A top-level delete takes its
   // replies with it on the server side, so warn accordingly.
   const del = document.createElement('button');
@@ -400,6 +418,61 @@ export function commentCard(c: any, isReply?: boolean) {
   actions.appendChild(del);
   div.appendChild(actions);
   return div;
+}
+
+// The 「PR に下書き投稿」 form under a comment card: the text to post on the
+// PR/MR, prefilled from the card (see prPendingInitialText) and editable. It
+// is sent as a reply in this thread, so the request inherits the thread's
+// anchor (the server copies it from the parent) and the agent knows which
+// lines the PR comment belongs on. intent is question: posting to the PR/MR
+// never touches code, and read-only mode forces question anyway. The form
+// reuses the reply form's markup, so its prefilled textarea counts as a
+// draft (isEditingDraft) and the polling re-render leaves it alone.
+function openPrPendingForm(card, c, btn) {
+  btn.disabled = true;
+  const form = document.createElement('div');
+  form.className = 'reply-form pr-pending-form';
+  form.innerHTML =
+    '<div class="form-meta">PR/MR に Pending（未公開）コメントとして投稿する文面</div>' +
+    '<textarea placeholder="PR/MR に投稿する文面（Ctrl+Enterで送信）"></textarea>' +
+    '<div class="buttons">' +
+    '<button class="primary pr-pending-send">' + esc(PR_PENDING_LABEL) + 'を依頼</button>' +
+    '<button class="pr-pending-cancel">キャンセル</button>' +
+    '</div>';
+  card.appendChild(form);
+  const textarea = form.querySelector('textarea');
+  textarea.value = prPendingInitialText(c);
+  textarea.rows = Math.min(20, Math.max(3, textarea.value.split('\n').length + 1));
+  textarea.focus();
+
+  function close() {
+    form.remove();
+    btn.disabled = false;
+  }
+  function submit() {
+    const text = textarea.value.trim();
+    if (!text) return;
+    const send: any = form.querySelector('.pr-pending-send');
+    send.disabled = true;
+    api('POST', '/api/comments', {
+      parentId: c.id,
+      body: prPendingBody(text),
+      intent: 'question',
+    }).then(function () {
+      // Same order as the reply form: drop the draft first so the refresh
+      // is not deferred by it.
+      close();
+      refresh();
+    }).catch(function (err) {
+      alert('PR への下書き投稿の依頼に失敗しました: ' + err);
+      send.disabled = false;
+    });
+  }
+  form.querySelector('.pr-pending-send').addEventListener('click', submit);
+  form.querySelector('.pr-pending-cancel').addEventListener('click', close);
+  textarea.addEventListener('keydown', function (e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') submit();
+  });
 }
 
 // Render a thread (top-level cards, each followed by its nested replies and a

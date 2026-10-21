@@ -19,6 +19,9 @@ Commands:
     --preserve-finished    レビュー中の再生成用。並行して届いた終了シグナルを保持する
   serve                    レビュー画面とAPIのローカルサーバーを起動する
     --port <n>             ポート番号（省略時: 5179 から空きポートを自動選択し .agent-review/server.json に記録）
+    --pr-pending-comment   設定 prPendingCommentEnabled を ON にして起動する。set-pr で PR/MR を
+                           登録している間、コメントカードと行コメントフォームに「PR に下書き投稿」
+                           ボタンが出る（他人の PR/MR をレビューするとき用）
   publish-html             任意の HTML をレビュー対象ドキュメントとして登録・更新する。
                            レンダリングされた状態が /doc/<id> で表示され、要素や
                            テキスト範囲にコメントできる。同じ --document-id で再実行
@@ -193,8 +196,11 @@ async function main(): Promise<void> {
       });
       break;
     case 'serve':
-      rejectUnknownFlags(flags, ['port']);
-      serve({ port: flagNum(flags, 'port') });
+      rejectUnknownFlags(flags, ['port', 'pr-pending-comment']);
+      serve({
+        port: flagNum(flags, 'port'),
+        prPendingComment: flagBool(flags, 'pr-pending-comment'),
+      });
       break;
     case 'publish-html':
       rejectUnknownFlags(flags, ['input', 'document-id', 'title', 'preserve-finished']);

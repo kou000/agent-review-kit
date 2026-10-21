@@ -280,6 +280,14 @@ export interface ReviewSettings {
   // then puts in an href). The client only renders the button for an
   // editor-scheme URI (see client/diff/editorLink.ts).
   editorUriTemplate: string;
+  // Shows the 「PR に下書き投稿」 buttons (comment cards and the line comment
+  // form) while a PR/MR is registered with `set-pr`. They post a comment whose
+  // body starts with 【PR Pending コメント依頼】, asking the agent to add it to
+  // the PR/MR as a pending (unpublished) review comment. Only meant for
+  // reviewing someone else's PR/MR (the my-interactive-review-peer skill
+  // turns it on via PUT /api/settings or `serve --pr-pending-comment`), so it
+  // is deliberately NOT in the browser's settings panel.
+  prPendingCommentEnabled: boolean;
 }
 
 export const DEFAULT_SETTINGS: ReviewSettings = {
@@ -295,6 +303,7 @@ export const DEFAULT_SETTINGS: ReviewSettings = {
   // 'vscode://vscode-remote/wsl+Ubuntu{path}'、Cursor なら 'cursor://file{path}'
   // のように ~/.agent-review/.env の ARK_EDITOR_URI_TEMPLATE で差し替える。
   editorUriTemplate: 'vscode://file{path}',
+  prPendingCommentEnabled: false,
 };
 
 // One captured fix: a git-format patch stored under the current branch's

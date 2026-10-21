@@ -78,6 +78,7 @@ Codex では `serve` と `wait-comments` をそれぞれ長時間実行できる
   3. 成功したら `resolve-comment <id> --status answered --message "push しました: <ブランチ名> @ <短い sha>（<作ったコミットの一覧>）"` で返信する（スレッドを閉じるのはユーザー）。失敗したら出力を添えて同じく `--status answered` で返す。
   ブラウザは `readOnlyMode: true` の間このボタンを無効化する（サーバーがこのモード中の投稿を `intent: question` に強制するため）。したがって push 依頼が届くのは読み取り専用 OFF のときだけで、届いた依頼の `intent` は常に `fix` になる。
 - 本文が `【PRコメント取込依頼】` で始まる全体コメント（`file: null`、`intent: "question"`。ヘッダの「PRコメント取込」ボタンから投稿される） — PR/MR のレビューコメントを取り込み、各スレッドに見解を返してほしいという依頼。**コードは変更しない**（だから `question` で届く）。サブエージェントに委譲せず、メインセッションが「PR/MR コメントの取込」の手順で対応する。
+- 本文が `【PR Pending コメント依頼】` で始まるコメント（`intent: "question"`。設定 `prPendingCommentEnabled` が ON で PR/MR を登録している間だけ出る「PR に下書き投稿」ボタンから投稿される。コメントカードからなら返信、行コメントフォームからならトップレベルのコメントとして届く） — 他人の PR/MR をレビューするとき（my-interactive-review-peer）の投稿依頼で、接頭辞の次の行以降の文面を、そのコメントの位置（`file` / `side` / `startLine` / `endLine`）に PR/MR の Pending（未公開）レビューコメントとして投稿してほしいというもの。**コードは変更しない**（`readOnlyMode` 中でも実行してよい操作）。サブエージェントに委譲せず、メインセッションが対応する。手順の詳細は my-interactive-review-peer の「PR への Pending コメント投稿依頼」を参照。
 - `manualEdit: true` のコメント（本文が `【手動修正】` で始まる） — ユーザーがブラウザの手動修正機能で直接書き換えた通知。**修正は適用済みで、コード対応は不要**（サブエージェント委譲もしない）。内容を確認したら `--status answered` にするだけでよい（snapshot は作らない。このコメントはブラウザには表示されないので、返信メッセージも不要）。対象が2種類ある:
   - diff レビュー（`file` あり）— working tree のファイルが変わっているので、以降そのファイルを扱うときは必ず読み直す。
   - HTML レビュー（`documentId` あり）— 保存済み文書（`.agent-review/branches/<ブランチ>/documents/<id>.html`）が変わっている。**この文書を `publish-html` で再公開すると手動編集が上書きされる**ため、以後この文書を更新する場合は保存済みの現在の内容を読み込み、それを基に編集して publish する。
