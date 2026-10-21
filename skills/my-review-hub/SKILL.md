@@ -165,6 +165,12 @@ $RH add-tab --session TICKET-123 --id e2e-report --title "E2E結果" \
   使わない**（プランモードだと計画が hub に出せず、承認ゲートが二重になるため）
 - タブ追加後、ユーザーには **hub の URL を 1 本だけ案内**する（`$RH url --session <id>`）。
   ark の URL や `file://` パスを併記しない（迷いのもと）
+- セッションを新しく作って最初に URL を案内するときだけ、その URL をブラウザで開く（`cmd.exe` が無い環境では何もしない）。
+  同じセッションでタブを追加したとき・再開（resume）のときは開かない（タブが増えるため）:
+
+  ```bash
+  command -v cmd.exe >/dev/null && cmd.exe /c start "" "<hub の URL>" >/dev/null 2>&1
+  ```
 
 ## 5. コメントと承認の待ち受け
 
