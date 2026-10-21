@@ -241,6 +241,10 @@ export function loadSettings(file: string, envFile?: string): ReviewSettings {
       typeof raw.editorUriTemplate === 'string'
         ? raw.editorUriTemplate
         : defaults.editorUriTemplate,
+    prPendingCommentEnabled:
+      typeof raw.prPendingCommentEnabled === 'boolean'
+        ? raw.prPendingCommentEnabled
+        : defaults.prPendingCommentEnabled,
   };
 }
 

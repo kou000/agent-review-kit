@@ -3,6 +3,7 @@
 import { api } from './api.js';
 import { bodySnippet, copyText } from './dom.js';
 import { stripMarkdown } from './markdown.js';
+import { prPendingAvailable } from './prPending.js';
 import { syncIntentFields } from './intent.js';
 import { restorePersistedWidths } from './resize.js';
 import { badge, connState, DOC, state } from './state.js';
@@ -226,6 +227,8 @@ function restoreCommentsHidden() {
 export function applySettings(settings) {
   if (!settings) return;
   state.readOnlyMode = !!settings.readOnlyMode;
+  state.prPendingCommentEnabled = settings.prPendingCommentEnabled === true;
+  syncPrPendingButtons();
   syncIntentFields();
   if (state.modeBadge) state.modeBadge.hidden = !state.readOnlyMode;
   // 読み取り専用はエージェントに変更をさせないモードなので、リポジトリ状態を
@@ -293,6 +296,7 @@ export function updatePrLink(pr) {
   const url = pr && typeof pr.url === 'string' && /^https:\/\//.test(pr.url) ? pr.url : null;
   state.prUrl = url;
   if (state.prImportBtn) state.prImportBtn.hidden = !url;
+  syncPrPendingButtons();
   if (!state.prLink) return;
   state.prLink.hidden = !url;
   if (!url) return;
@@ -300,6 +304,19 @@ export function updatePrLink(pr) {
   state.prLink.textContent = label + ' ↗';
   state.prLink.href = url;
   state.prLink.title = 'このブランチの ' + (pr.provider === 'gitlab' ? 'MR' : 'PR') + ' を開く: ' + url;
+}
+
+// 「PR に下書き投稿」ボタン（コメントカード・行コメントフォーム）の表示切替。
+// カードはコメントが変わったときしか描き直さないので、ボタンは常に DOM に
+// 置いておき、body クラス（CSS で display を切替）でまとめて出し入れする。
+// 設定と PR/MR 登録のどちらが変わっても追従できるよう、両方の更新箇所から呼ぶ。
+// 読み取り専用モードでも押せるままにする（投稿は intent: question になるが、
+// コードを変えない依頼なのでそれで成立する）。
+function syncPrPendingButtons() {
+  document.body.classList.toggle(
+    'pr-pending-on',
+    prPendingAvailable(state.prPendingCommentEnabled, state.prUrl)
+  );
 }
 
 function closeSettingsPanel() {

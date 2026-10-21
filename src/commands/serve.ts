@@ -1,11 +1,27 @@
 import * as fs from 'fs';
-import { ensureDir, reviewPaths } from '../paths';
+import { ensureDir, reviewPaths, ReviewPaths } from '../paths';
 import { createServer, DEFAULT_PORT } from '../server';
-import { nowIso } from '../store';
+import { mutateSettings, nowIso } from '../store';
 
 export interface ServeOptions {
   port?: number;
   cwd?: string;
+  // --pr-pending-comment: turn settings.prPendingCommentEnabled on before
+  // listening (saved to the branch's settings.json, like PUT /api/settings).
+  prPendingComment?: boolean;
+}
+
+// Settings the serve flags switch on. Only turns things on: a serve started
+// without the flag leaves the saved value alone.
+export function applyServeSettings(paths: ReviewPaths, opts: ServeOptions): void {
+  if (!opts.prPendingComment) return;
+  mutateSettings(
+    paths.settings,
+    (s) => {
+      s.prPendingCommentEnabled = true;
+    },
+    paths.envFile
+  );
 }
 
 // --port 未指定時に DEFAULT_PORT から順に試す範囲。
@@ -25,6 +41,7 @@ export function serve(opts: ServeOptions = {}): void {
       `warning: ${paths.html} がありません。先に \`agent-review-kit generate\` を実行してください。`
     );
   }
+  applyServeSettings(paths, opts);
 
   const server = createServer(paths, {
     onFinish: () => {

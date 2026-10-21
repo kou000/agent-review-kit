@@ -58,6 +58,9 @@ export const state: any = {
   prLink: null, // topbar の PR/MR リンク（set-pr で登録されたときだけ表示）
   prImportBtn: null, // topbar の「PRコメント取込」ボタン（PR/MR 登録中だけ表示）
   prUrl: null, // 登録中の PR/MR の URL（取り込み依頼の本文に入れる）
+  // settings.prPendingCommentEnabled の写し。PR/MR 登録中と合わせて
+  // 「PR に下書き投稿」ボタンの表示条件になる（app.ts の syncPrPendingButtons）。
+  prPendingCommentEnabled: false,
   projectDirLabel: null, // topbar のレビュー対象ディレクトリ（worktree の見分け用）
   projectDirCopyBtn: null, // その右のパスコピーボタン（パス取得前は非表示）
   projectDir: '',

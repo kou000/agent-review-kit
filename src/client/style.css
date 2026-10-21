@@ -115,6 +115,22 @@ body {
 #pr-link:hover { text-decoration: underline; }
 #pr-import-btn { color: #f0883e; border-color: rgba(219, 109, 40, 0.45); white-space: nowrap; }
 #pr-import-btn:disabled { opacity: 0.6; }
+/* 「PR に下書き投稿」（コメントカード・行コメントフォーム）。設定 ON かつ
+   PR/MR 登録中だけ body.pr-pending-on が付いて表示される（app.ts の
+   syncPrPendingButtons）。PR 関連の操作なので PRコメント取込と同じ橙系。 */
+.pr-pending-btn,
+.pr-pending-submit { display: none; }
+body.pr-pending-on .pr-pending-btn,
+body.pr-pending-on .pr-pending-submit {
+  display: inline-block;
+  color: #f0883e;
+  border-color: rgba(219, 109, 40, 0.45);
+  white-space: nowrap;
+}
+.pr-pending-btn:disabled,
+.pr-pending-submit:disabled { opacity: 0.6; }
+.pr-pending-form { padding: 0 10px 8px; }
+.pr-pending-form .form-meta { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
 
 /* 全コメント表示/非表示トグル（topbar）。非表示中は mode-badge と同じ
    注意色で「隠している」状態を示す。 */

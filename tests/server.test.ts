@@ -6,6 +6,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { after, before, test } from 'node:test';
 import { publishHtml } from '../src/commands/publishHtml';
+import { applyServeSettings } from '../src/commands/serve';
 import { resolveComment } from '../src/commands/resolveComment';
 import { reviewPaths } from '../src/paths';
 import { createServer } from '../src/server';
@@ -1319,6 +1320,61 @@ test('editorUriTemplate は status/settings に載るが PUT /api/settings で�
   const after = ((await res.json()) as { settings: Record<string, unknown> }).settings;
   assert.equal(after.editorUriTemplate, 'vscode://file{path}');
   assert.equal((await getSettings()).editorUriTemplate, 'vscode://file{path}');
+});
+
+test('prPendingCommentEnabled は既定 false で、PUT /api/settings で切り替えられる', async () => {
+  const getSettings = async (): Promise<Record<string, unknown>> =>
+    ((await (await fetch(`${baseUrl}/api/settings`)).json()) as {
+      settings: Record<string, unknown>;
+    }).settings;
+  const put = async (payload: Record<string, unknown>): Promise<Record<string, unknown>> => {
+    const res = await fetch(`${baseUrl}/api/settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    assert.equal(res.status, 200);
+    return ((await res.json()) as { settings: Record<string, unknown> }).settings;
+  };
+
+  assert.equal((await getSettings()).prPendingCommentEnabled, false);
+  try {
+    // peer スキルは読み取り専用モードと同時に設定する。
+    const on = await put({ readOnlyMode: true, prPendingCommentEnabled: true });
+    assert.equal(on.prPendingCommentEnabled, true);
+    assert.equal(on.readOnlyMode, true);
+    const status = (await (await fetch(`${baseUrl}/api/status`)).json()) as {
+      settings: Record<string, unknown>;
+    };
+    assert.equal(status.settings.prPendingCommentEnabled, true);
+
+    // bool 以外は無視される（allow-list の型チェック）。
+    assert.equal((await put({ prPendingCommentEnabled: 'false' })).prPendingCommentEnabled, true);
+    assert.equal((await put({ prPendingCommentEnabled: false })).prPendingCommentEnabled, false);
+  } finally {
+    await put({ readOnlyMode: false, prPendingCommentEnabled: false });
+  }
+});
+
+test('serve --pr-pending-comment は起動時に prPendingCommentEnabled を ON にする', async () => {
+  const getEnabled = async (): Promise<unknown> =>
+    ((await (await fetch(`${baseUrl}/api/settings`)).json()) as {
+      settings: Record<string, unknown>;
+    }).settings.prPendingCommentEnabled;
+
+  // フラグ無しの起動は保存済みの値を変えない。
+  applyServeSettings(reviewPaths(tmp), {});
+  assert.equal(await getEnabled(), false);
+  try {
+    applyServeSettings(reviewPaths(tmp), { prPendingComment: true });
+    assert.equal(await getEnabled(), true);
+  } finally {
+    await fetch(`${baseUrl}/api/settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prPendingCommentEnabled: false }),
+    });
+  }
 });
 
 /* ---------- コメント添付画像 (POST/GET /api/images, comments.images) ---------- */

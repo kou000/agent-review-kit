@@ -33,6 +33,7 @@ resolve-comment ──► 状態更新 ─────────────�
 - **画面上の設定とレビュー終了**: 歯車メニューでスナップショット ON/OFF・読み取り専用モード（修正させない）・確認済み自動解除（OFFにすると差分変更後も確認済みを維持）を切替。「レビュー終了」ボタンでコメント待機とサーバーを停止できる。
 - **push 依頼ボタン**: ヘッダ右側（「レビュー終了」の左隣）の「push を依頼」で、現在のブランチの push をエージェントに頼める。専用 API は無く、本文が `【push依頼】` で始まる全体コメント（`file: null`・`intent: "fix"`）として投稿されるだけなので、`wait-comments` で通常どおり届き、全体コメント欄に依頼の記録が残る。未コミットの変更があれば、エージェントはまずコミット案（未 push のブランチなら 1 コミットにまとめ、push 済みなら指摘単位）を返信して止まり、ユーザーの返信を受けてからコミットして push する。結果（ブランチ名・sha・作ったコミット）は返信で返す（スレッドを閉じるのはユーザー）。読み取り専用モード中は無効化される（このモード中の投稿は `intent: "question"` に強制されるため、依頼として成立しない）。文書レビュー（`publish-html`）のページには出ない。
 - **PR/MR リンクとコメントの取込**: エージェントが `set-pr` で PR/MR を登録すると、ヘッダにそのリンクと「PRコメント取込」ボタンが出る。ボタンを押すと、エージェントが PR/MR のレビューコメントをこの画面のコメントとして取り込み、各スレッドに見解を返す（コードは変更しない）。直してほしい指摘は「🔧 修正を依頼」で修正に回す。
+- **PR への下書き投稿依頼**: 設定 `prPendingCommentEnabled` が ON で PR/MR が登録されている間、コメントカード（AI 指摘・自分のコメント・返信）と行コメントのフォームに「PR に下書き投稿」ボタンが出る。押すと、その文面を PR/MR の Pending（未公開）レビューコメントとして投稿するよう、エージェントに依頼する（レビューの公開はしない）。他人の PR/MR をレビューするとき（my-interactive-review-peer スキル）用の機能なので、歯車メニューには出さない。
 - **HTMLレビュー**: diffだけでなく、実装プラン・設計書・テスト結果などの任意HTMLをレンダリング済みのまま表示し、要素単位・テキスト範囲でコメントできる（後述）。
 - **依存ゼロのランタイム**: サーバーは Node.js 標準ライブラリのみで動く。
 
@@ -155,6 +156,7 @@ agent-review-kit generate --preserve-finished      # レビュー中の更新（
 ```bash
 agent-review-kit serve                 # 5179 から空きポートを自動選択し .agent-review/server.json に記録
 agent-review-kit serve --port 8080
+agent-review-kit serve --pr-pending-comment   # 設定 prPendingCommentEnabled を ON にして起動
 ```
 
 API:
@@ -310,6 +312,15 @@ agent-review-kit add-comment --file src/foo.ts --line 42 --body "..." \
 
 ボタンを押すと、本文が `【PRコメント取込依頼】` で始まる全体コメントが `intent: "question"` で投稿され、`wait-comments` でエージェントに届く。エージェントは `gh` / `glab` でコメントを取得し、`--external-*` 付きの `add-comment` で取り込んで、各スレッドに見解を返す（コードは変更しない）。agent-review-kit 自身は GitHub / GitLab に接続しない。
 
+#### PR への下書き投稿依頼
+
+設定 `prPendingCommentEnabled` が `true` で、かつ `set-pr` で PR/MR が登録されている間だけ、コメントカード（AI 指摘・ユーザーのコメント・返信のすべて）と行・行範囲コメントのフォームに「PR に下書き投稿」ボタンが出る。設定は `PUT /api/settings`（`{"prPendingCommentEnabled": true}`）、`serve --pr-pending-comment`、`.env` の `ARK_PR_PENDING_COMMENT` のいずれかで ON にする。他人の PR/MR をレビューするとき（my-interactive-review-peer スキル）用なので、歯車メニューには出さない。
+
+- コメントカードのボタン: そのコメントの本文を初期値にした入力欄が開く（AI 指摘は先頭の `[Critical] ` / `[Warning] ` / `[Info] ` を除く）。送信すると、本文が `【PR Pending コメント依頼】` の行で始まり次の行から文面が続く返信が、そのスレッドに `intent: "question"` で投稿される（位置は親コメントから引き継ぐ）。
+- 行コメントフォームのボタン: 入力した本文の先頭に `【PR Pending コメント依頼】` の行を付けて、同じ位置にコメントを作る。
+
+依頼は `wait-comments` でエージェントに届き、エージェントが `gh` / `glab` で PR/MR の Pending レビュー（GitLab は draft note）にコメントを足す。読み取り専用モード中でも使える（コードは変更しない依頼なので、投稿が `intent: "question"` に強制されても成立する）。
+
 `--external-*` で取り込んだコメントは AI 指摘と同じ扱い（`author: "agent"`）で、画面では「AI」の代わりに「PR @<投稿者> ↗」のバッジが出て元コメントへリンクする。同じ `--external-id` が取り込み済みなら新しく作らず既存のコメントを返す（`status: "exists"`）ので、取り込みを何度実行しても増えるのは新しいコメントだけになる。
 
 ### 7. 状態確認
@@ -350,11 +361,14 @@ ARK_VIEWED_AUTO_RESET=true         # 差分変更時に Viewed を自動解除
 ARK_DELIVERY_NOTE_ENABLED=true     # wait-comments 受信出力に処理指示の note を同乗（組み込み既定は false）
 ARK_DELIVERY_NOTE_TEXT="修正時はテストも更新すること"  # note の本文（既定は委譲指示。空文字なら note なし）
 ARK_EDITOR_URI_TEMPLATE="vscode://vscode-remote/wsl+Ubuntu{path}"  # 「VS Code で開く」ボタンのURI（組み込み既定は vscode://file{path}）
+ARK_PR_PENDING_COMMENT=false       # 「PR に下書き投稿」ボタンを出す（PR/MR 登録中のみ表示。歯車メニューには無い）
 ```
 
 優先順位は **settings.json の明示値 > `.env` > 組み込みデフォルト**。`.env` はあくまで「初期値」で、ブラウザの歯車メニューで一度設定を変更すると全キーが `settings.json` に確定するため、以降そのブランチには `.env` の変更は反映されない（新しいブランチのレビューには反映される）。bool は `true/false/1/0` のみ有効で、それ以外の値は無視して組み込みデフォルトに落ちる。
 
 `ARK_EDITOR_URI_TEMPLATE` は「リポジトリのファイル」見出しに並ぶ**「VS Code で開く」ボタン**（レビューページのサイドバーと `/files` ページ。ファイルごとではなくリポジトリ単位で1つ）が開く URI のテンプレートで、`{path}` がプロジェクトのルートディレクトリの絶対パスに置き換わる。既定は `vscode://file{path}`。WSL 上のリポジトリを Windows 側の VS Code で開くなら `vscode://vscode-remote/wsl+Ubuntu{path}`、Cursor なら `cursor://file{path}` のように差し替える。マシンごとのパス変換という位置づけなので、このキーだけは**ブラウザの設定パネル（歯車メニュー）からは変更できない**（`PUT /api/settings` は無視する）`.env` 専用の設定（`GET /api/status` / `GET /api/settings` のレスポンスには載る）。値がそのまま href に入るため、ブラウザ側で許可するのは `vscode:` / `vscode-insiders:` / `vscodium:` / `cursor:` / `windsurf:` のみで、それ以外のスキームならボタン自体を出さない。
+
+`ARK_PR_PENDING_COMMENT`（設定キー `prPendingCommentEnabled`）は歯車メニューには出さない設定で、`.env` のほか `PUT /api/settings` と `serve --pr-pending-comment` でも ON にできる（「PR への下書き投稿依頼」参照）。
 
 `.env` はホームディレクトリ配下の人ごとのファイルなので、リポジトリには置かない（コミットの心配も不要）。
 

@@ -819,6 +819,8 @@ async function handle(
         s.deliveryNoteEnabled = body.deliveryNoteEnabled;
       if (typeof body.deliveryNoteText === 'string')
         s.deliveryNoteText = body.deliveryNoteText.slice(0, MAX_TARGET_FIELD);
+      if (typeof body.prPendingCommentEnabled === 'boolean')
+        s.prPendingCommentEnabled = body.prPendingCommentEnabled;
     }, paths.envFile);
     json(res, 200, { settings });
     return;

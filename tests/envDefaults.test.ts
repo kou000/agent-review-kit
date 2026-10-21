@@ -120,6 +120,36 @@ test('.env の ARK_EDITOR_URI_TEMPLATE が設定として読み込まれる', ()
   }
 });
 
+test('prPendingCommentEnabled は既定 false で、.env の ARK_PR_PENDING_COMMENT で ON にできる', () => {
+  const tmp = makeTmpDir();
+  try {
+    const envFile = path.join(tmp, '.env');
+    assert.equal(DEFAULT_SETTINGS.prPendingCommentEnabled, false);
+    assert.equal(resolveDefaultSettings(envFile).prPendingCommentEnabled, false);
+
+    fs.writeFileSync(envFile, 'ARK_PR_PENDING_COMMENT=true\n');
+    assert.equal(
+      loadSettings(path.join(tmp, 'settings.json'), envFile).prPendingCommentEnabled,
+      true
+    );
+
+    // bool として不正な値はコード内デフォルト（false）に落ちる。
+    fs.writeFileSync(envFile, 'ARK_PR_PENDING_COMMENT=yes\n');
+    assert.equal(resolveDefaultSettings(envFile).prPendingCommentEnabled, false);
+
+    // settings.json の明示値が .env より優先される。
+    fs.writeFileSync(envFile, 'ARK_PR_PENDING_COMMENT=1\n');
+    const settingsFile = path.join(tmp, 'settings.json');
+    fs.writeFileSync(settingsFile, JSON.stringify({ prPendingCommentEnabled: false }));
+    assert.equal(loadSettings(settingsFile, envFile).prPendingCommentEnabled, false);
+    // 型が違う値は無視してデフォルト（ここでは .env の true）に落ちる。
+    fs.writeFileSync(settingsFile, JSON.stringify({ prPendingCommentEnabled: 'true' }));
+    assert.equal(loadSettings(settingsFile, envFile).prPendingCommentEnabled, true);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('parseEnvFile はクォート・コメント・空行を扱える', () => {
   const tmp = makeTmpDir();
   try {
