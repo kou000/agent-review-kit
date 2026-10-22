@@ -12,6 +12,7 @@ import {
   runGitCommitLog,
   runGitGrep,
   runGitLsFiles,
+  runGitUncommitted,
 } from './gitDiff';
 import {
   bakeDiffHighlight,
@@ -963,6 +964,14 @@ async function handle(
     const base = state?.base ?? null;
     const projectDir = path.dirname(paths.dir);
     json(res, 200, { commits: base ? runGitCommitLog(base, projectDir) : [] });
+    return;
+  }
+
+  // Files with uncommitted changes (staged, unstaged, untracked), for the
+  // sidebar's 未コミット section. Independent of base: with or without it the
+  // diff runs up to the working tree, so uncommitted work is always mixed in.
+  if (method === 'GET' && p === '/api/uncommitted') {
+    json(res, 200, { files: runGitUncommitted(path.dirname(paths.dir)) });
     return;
   }
 

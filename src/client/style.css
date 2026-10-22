@@ -1234,6 +1234,8 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 .tree-status-deleted { color: var(--danger); }
 .tree-status-renamed { color: var(--attention); }
 .tree-status-modified { color: var(--accent); }
+.tree-status-untracked { color: var(--success); }
+.tree-status-conflicted { color: var(--danger); }
 /* Unsettled threads in this file. Default (filled red) means 要確認 is among
    them: the user has something to check. With only 未解決 left the file is
    waiting on the agent, so the badge steps back to a quiet blue. */
@@ -1405,6 +1407,16 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   white-space: nowrap;
   font-size: 12px;
 }
+/* 未コミット: same rows as the commit list, the path in the code font. Rows
+   not in the current diff have nothing to jump to, so they drop the pointer;
+   so does the heading when there are 0 files (nothing to open). */
+.uncommitted-item-path {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+.uncommitted-item-static { cursor: default; }
+.uncommitted-item-static:hover { background: none; }
+.uncommitted-item-static .uncommitted-item-path { color: var(--muted); }
+.uncommitted-title-static { cursor: default; }
 
 /* ---------- back to top button ---------- */
 /* Fixed bottom-right; sits below the sticky topbar (z-index 30) so it never
