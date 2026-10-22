@@ -47,6 +47,10 @@ export const state: any = {
   // In-memory only, like resolvedListOpen: survives the polling re-render, and
   // a page reload folds them again.
   threadFoldOpen: {},
+  // Long comment bodies the reader expanded ({ [commentId + ':body' |
+  // ':response']: true }; see commentFold.ts). In-memory only, like
+  // threadFoldOpen.
+  commentFoldOpen: {},
   toastStack: null,
   lastCommentsJson: '',
   // 全コメント非表示トグル（diff ページ）。localStorage 復元は app.ts の

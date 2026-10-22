@@ -1087,6 +1087,27 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 .thread-fold-middle[hidden] { display: none; }
 .comment-card.reply-card .meta { color: var(--accent); }
 
+/* 長いコメント本文・エージェント応答の折りたたみ（commentFold.ts）。
+   400px は COMMENT_FOLD_MAX_PX と同じ値で、本文 1 行約 20px（差分ページは
+   line-height 20px、doc ページは 14px / normal）のおよそ 20 行分。
+   下端は mask で中身だけを薄くするので、背景色（カード・エージェント応答の
+   青み）やテーマに依存しない。コードブロックの横スクロールは pre 自身の
+   overflow-x のまま。 */
+.comment-card .comment-fold.folded {
+  max-height: 400px;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 60px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 60px), transparent);
+}
+/* 見た目は .thread-fold-toggle（テキストリンク風）を流用し、位置だけ本文の
+   左端に合わせる。 */
+.comment-card .comment-fold-toggle { display: block; margin: -4px 10px 6px; }
+.comment-card .comment-fold-toggle[hidden] { display: none; }
+.comment-card .agent-response .comment-fold-toggle { margin: 2px 0 0; }
+/* 応答本文を .agent-response-text で包んだので、末尾の余白の打ち消しを包みの
+   中にも掛ける（.agent-response > *:last-child と同じ役割）。 */
+.comment-card .agent-response-text > *:last-child { margin-bottom: 0; }
+
 /* ---------- reply form ---------- */
 .reply-wrap { margin: 4px 0 2px; max-width: 800px; }
 .reply-toggle { font-size: 12px; }

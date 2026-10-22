@@ -11,6 +11,7 @@ import {
 } from './prPending.js';
 import { state } from './state.js';
 import { threadFoldActions, threadFoldPlan } from './threadFold.js';
+import { commentFoldToggle, shouldFoldComment } from './commentFold.js';
 import { refresh } from './app.js';
 
 /* ---------- comment threads ---------- */
@@ -212,6 +213,77 @@ function codeSnapshotHtml(c) {
     '<table>' + rows.join('') + '</table></details>';
 }
 
+/* ---------- long comment body folding ---------- */
+
+// 長いコメント本文・エージェント応答を折りたたむ（判定は commentFold.ts）。
+// 高さはカードが描画されるまで測れない（組み立て時はまだ DOM の外で、解決済み
+// スレッドは display: none で始まる）ので、ResizeObserver で要素が描画された
+// とき・幅が変わったとき・画像の読み込みで伸びたときに測り直す。
+// コールバックは描画（paint）の前に走り、要素は折りたたんだ状態で作るので、
+// 長い本文が一瞬全文で見えることはない。展開状態は state.commentFoldOpen に
+// 持ち、3 秒ポーリングでカードが作り直されても保つ。
+const commentFoldSyncs = new Map();
+let commentFoldObserver = null;
+
+function observeCommentFold(el, sync) {
+  if (!commentFoldObserver) {
+    commentFoldObserver = new ResizeObserver(function (entries) {
+      // 再描画で DOM から外れた古いカードは、監視を外さないと observer が
+      // 参照し続けてメモリに残る。新しいカードの監視開始で毎回ここが呼ばれる
+      // ので、そのたびに掃除する。
+      commentFoldSyncs.forEach(function (_sync, target) {
+        if (!target.isConnected) {
+          commentFoldObserver.unobserve(target);
+          commentFoldSyncs.delete(target);
+        }
+      });
+      entries.forEach(function (entry) {
+        const fn = commentFoldSyncs.get(entry.target);
+        if (fn) fn();
+      });
+    });
+  }
+  commentFoldSyncs.set(el, sync);
+  commentFoldObserver.observe(el);
+}
+
+// `el` はカード内の本文要素（.body / .agent-response-text）、`key` は展開状態の
+// キー（コメント id + 部位）。ボタンは el の直後に置く。返信フォームや PR 下書き
+// フォームの textarea はカードの別要素なので対象にならない。
+function attachCommentFold(el, key) {
+  el.classList.add('comment-fold');
+  if (!state.commentFoldOpen[key]) el.classList.add('folded');
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'thread-fold-toggle comment-fold-toggle';
+  btn.hidden = true;
+  el.after(btn);
+
+  function sync() {
+    const h = el.scrollHeight;
+    // display: none の中（折りたたんだスレッドなど）。見えたときに
+    // ResizeObserver が呼び直すので、今の状態のまま置いておく。
+    if (!h) return;
+    const open = !!state.commentFoldOpen[key];
+    const need = shouldFoldComment(h);
+    el.classList.toggle('folded', need && !open);
+    btn.hidden = !need;
+    const t = commentFoldToggle(open);
+    btn.textContent = t.label;
+    btn.title = t.title;
+  }
+  btn.addEventListener('click', function () {
+    const open = !state.commentFoldOpen[key];
+    if (open) state.commentFoldOpen[key] = true;
+    else delete state.commentFoldOpen[key];
+    sync();
+    // 全文を下まで読んでから折りたたむと、カードが画面の上へ外れて読んでいた
+    // 位置を見失うので、ボタンが見える位置まで戻す。
+    if (!open) btn.scrollIntoView({ block: 'nearest' });
+  });
+  observeCommentFold(el, sync);
+}
+
 export function commentCard(c: any, isReply?: boolean) {
   const div = document.createElement('div');
   div.className = 'comment-card' + (isReply ? ' reply-card' : '') +
@@ -261,7 +333,11 @@ export function commentCard(c: any, isReply?: boolean) {
     // The reply's fences were highlighted after the same unescapeNl
     // normalization applied here, so fence positions line up.
     html += '<div class="agent-response"><span class="who">agent</span>' +
-      renderMarkdown(unescapeNl(c.agentResponse.message), null, c.agentResponse.fences);
+      // 長い応答の折りたたみ（attachCommentFold）は本文だけに掛け、下に続く
+      // コミット・修正差分のリンクと画像は折りたたみ中も見えるようにする。
+      '<div class="agent-response-text">' +
+      renderMarkdown(unescapeNl(c.agentResponse.message), null, c.agentResponse.fences) +
+      '</div>';
     // A linked fix commit renders as a chip; clicking opens /commit/<sha>
     // (this commit's diff) in a new tab. sha is hex-only so it needs no
     // attribute escaping beyond esc() for the visible text.
@@ -297,6 +373,10 @@ export function commentCard(c: any, isReply?: boolean) {
     html += '</div>';
   }
   div.innerHTML = html;
+  const bodyEl = div.querySelector(':scope > .body');
+  if (bodyEl) attachCommentFold(bodyEl, c.id + ':body');
+  const responseEl = div.querySelector(':scope > .agent-response > .agent-response-text');
+  if (responseEl) attachCommentFold(responseEl, c.id + ':response');
 
   const actions = document.createElement('div');
   actions.className = 'actions';
