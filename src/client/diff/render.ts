@@ -42,7 +42,8 @@ function statusLabel(st) {
 
 export function renderDiff() {
   diffMeta.textContent = (DIFF.base ? 'base: ' + DIFF.base : 'working tree vs HEAD') +
-    ' / generated: ' + fmtDate(DIFF.generatedAt);
+    ' / generated: ' + fmtDate(DIFF.generatedAt) +
+    (state.ignoreWhitespace ? ' / 空白の変更を無視' : '');
 
   // Compute per-file content hashes up front. Persisted viewed state is
   // fetched from the server asynchronously (see below) and applied once the
@@ -168,6 +169,20 @@ export function renderDiff() {
     const fileComments = document.createElement('div');
     fileComments.className = 'file-comments';
     box.appendChild(fileComments);
+
+    // 空白無視の表示で空白の変更しかないファイル。全体を畳んだ範囲として
+    // 出すので（table.ts）、空白だけを変えた行のコメントは展開して表示される。
+    if (file.whitespaceOnly) {
+      const p = document.createElement('div');
+      p.className = 'empty-diff';
+      p.textContent = '空白の変更のみ（「空白の変更を無視」で非表示）';
+      box.appendChild(p);
+      if (Array.isArray(file.newLines) && file.newLines.length) {
+        box.appendChild(buildDiffTable(file, true));
+      }
+      frag.appendChild(box);
+      return;
+    }
 
     if (file.status === 'binary' || !file.hunks.length) {
       const p = document.createElement('div');

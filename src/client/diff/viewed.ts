@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { DIFF, state } from '../state.js';
+import { DIFF, FULL_FILES, state } from '../state.js';
 import { setCollapsed } from './collapse.js';
 import { renderSidebarTree } from './sidebar.js';
 
@@ -30,9 +30,11 @@ function fileHash(file) {
 }
 
 // Cache the current hash of every file so lookups during toggle/render are O(1).
+// 「空白の変更を無視」の表示中も通常の差分で計算する。表示を切り替えただけで
+// ハッシュが変わり、確認済みが外れてしまわないように。
 export function computeFileHashes() {
   state.fileHashes = {};
-  (DIFF.files || []).forEach(function (f) { state.fileHashes[f.path] = fileHash(f); });
+  (FULL_FILES || []).forEach(function (f) { state.fileHashes[f.path] = fileHash(f); });
 }
 
 // Load persisted viewed state from the server. Any legacy localStorage marks

@@ -136,7 +136,7 @@ export function runGitGrep(query: string, opts: GrepOptions, cwd: string): GrepO
 // `diff --git … / new file mode …` shape parseUnifiedDiff already handles for
 // added files — binary untracked files come through as "Binary files … differ",
 // matching how tracked binaries are rendered.
-function runUntrackedDiff(cwd: string): string {
+function runUntrackedDiff(cwd: string, extraArgs: string[]): string {
   let listed: string;
   try {
     listed = git(['ls-files', '--others', '--exclude-standard', '-z'], cwd);
@@ -147,30 +147,41 @@ function runUntrackedDiff(cwd: string): string {
   let out = '';
   for (const file of files) {
     out += gitAllowDiffExit(
-      ['diff', '--no-color', '--no-ext-diff', '--no-index', '--', '/dev/null', file],
+      ['diff', '--no-color', '--no-ext-diff', ...extraArgs, '--no-index', '--', '/dev/null', file],
       cwd
     );
   }
   return out;
 }
 
-export function runGitDiff(base: string | undefined, cwd: string): string {
+export interface GitDiffOptions {
+  // `git diff -w`: 行内の空白の違いを無視する（レビュー画面の「空白の変更を
+  // 無視」用）。空白だけを変えたファイルは差分から消える。
+  ignoreWhitespace?: boolean;
+}
+
+export function runGitDiff(
+  base: string | undefined,
+  cwd: string,
+  opts: GitDiffOptions = {}
+): string {
+  const diffArgs = ['diff', '--no-color', '--no-ext-diff', ...(opts.ignoreWhitespace ? ['-w'] : [])];
   let tracked: string;
   if (base) {
-    tracked = git(['diff', '--no-color', '--no-ext-diff', base], cwd);
+    tracked = git([...diffArgs, base], cwd);
   } else {
     try {
       // Working tree vs HEAD: covers both staged and unstaged changes.
-      tracked = git(['diff', '--no-color', '--no-ext-diff', 'HEAD'], cwd);
+      tracked = git([...diffArgs, 'HEAD'], cwd);
     } catch {
       // Repo without any commit yet: fall back to index diff.
-      tracked = git(['diff', '--no-color', '--no-ext-diff'], cwd);
+      tracked = git(diffArgs, cwd);
     }
   }
   // Untracked files are absent from every `git diff` variant above regardless of
   // --base (the base only moves the old side; untracked files have no old side
   // in either the index or any commit), so append them unconditionally.
-  const untracked = runUntrackedDiff(cwd);
+  const untracked = runUntrackedDiff(cwd, opts.ignoreWhitespace ? ['-w'] : []);
   if (!untracked) return tracked;
   return tracked && !tracked.endsWith('\n') ? `${tracked}\n${untracked}` : tracked + untracked;
 }

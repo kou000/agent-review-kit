@@ -76,8 +76,15 @@ export function buildDiffTable(file, interactive) {
       const html = typeof hl === 'string' ? hl : undefined;
       // Expanded lines are not part of the generated diff, so they have no
       // diff position; diffLine 0 marks "expanded context" on saved comments.
-      const left = { line: n + delta, text: text, diffLine: 0, kind: 'context', html: html };
-      const right = { line: n, text: text, diffLine: 0, kind: 'context', html: html };
+      // 空白無視の表示では、展開した行が通常の差分では変更行のことがある
+      // （空白だけの変更）。そのときは通常の差分上の位置を使う（whitespace.ts）。
+      const ref = file.refDiffLines;
+      const left = {
+        line: n + delta, text: text, diffLine: (ref && ref.old[n + delta]) || 0, kind: 'context', html: html,
+      };
+      const right = {
+        line: n, text: text, diffLine: (ref && ref.new[n]) || 0, kind: 'context', html: html,
+      };
       const row = document.createElement('tr');
       row.className = 'diff-row expanded-row';
       row.appendChild(numCell(file, 'old', left, interactive));
@@ -215,6 +222,13 @@ export function buildDiffTable(file, interactive) {
     const gapHi = file.newLines.length;
     const delta = prevRange.oldEnd - prevRange.newEnd;
     if (gapHi >= gapLo) addExpander(gapLo, gapHi, delta);
+  }
+
+  // 空白無視の表示で空白の変更しかないファイル: ハンクが無いので全体を 1 つの
+  // 畳んだ範囲にする。空白以外は同じなので新旧の行は 1 対 1（delta 0）。
+  // これで空白だけを変えた行のコメントも tryExpandTo で展開して出せる。
+  if (canExpand && !file.hunks.length && file.whitespaceOnly) {
+    addExpander(1, file.newLines.length, 0);
   }
 
   // The pin panel is display-only and rebuilt on every pin; only the main

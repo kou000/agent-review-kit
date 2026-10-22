@@ -74,7 +74,9 @@ function buildPinPanel(fi) {
   if (file.status === 'binary' || !file.hunks.length) {
     const p = document.createElement('div');
     p.className = 'empty-diff';
-    p.textContent = file.status === 'binary' ? 'バイナリファイル（表示できません）' : '内容の変更はありません';
+    p.textContent = file.status === 'binary' ? 'バイナリファイル（表示できません）'
+      : file.whitespaceOnly ? '空白の変更のみ（「空白の変更を無視」で非表示）'
+        : '内容の変更はありません';
     bodyEl.appendChild(p);
   } else {
     // Display-only table (interactive=false): number cells get no data-file,
@@ -144,6 +146,18 @@ function pinFile(fi) {
   if (!file) return;
   if (state.pins.some(function (p) { return p.index === fi; })) return;
   addPin(fi, buildPinPanel(fi));
+}
+
+// 「空白の変更を無視」の切り替え後、固定表示中の差分パネルを今の DIFF.files
+// で作り直す（幅と並びはそのまま。リポジトリファイルのパネルは対象外）。
+export function rebuildDiffPins() {
+  state.pins.forEach(function (p) {
+    if (typeof p.index !== 'number') return;
+    const el = buildPinPanel(p.index);
+    p.el.replaceWith(el);
+    p.el = el;
+  });
+  updatePinLayout();
 }
 
 // Re-📌 an already-pinned file unpins just that panel; 📌 a new file adds one.

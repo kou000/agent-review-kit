@@ -6,9 +6,13 @@ import { stripMarkdown } from './markdown.js';
 import { prPendingAvailable } from './prPending.js';
 import { syncIntentFields } from './intent.js';
 import { restorePersistedWidths } from './resize.js';
-import { badge, connState, DOC, state } from './state.js';
+import { badge, connState, DIFF, DOC, FULL_FILES, state } from './state.js';
 import { commentLocShort, setThreadCollapsed } from './threads.js';
 import { setCollapsed } from './diff/collapse.js';
+import { cancelForm } from './diff/form.js';
+import { rebuildDiffPins } from './diff/pins.js';
+import { refreshDiffSummary } from './diff/sidebar.js';
+import { alignIgnoreWhitespaceFiles } from './diff/whitespace.js';
 import {
   diffRefresh,
   renderCommitPage,
@@ -221,6 +225,59 @@ function restoreCommentsHidden() {
   } catch (e) { /* ignore */ }
 }
 
+/* ---- 空白の変更を無視（GitHub の Hide whitespace） ----
+ * generate が埋め込んだ `git diff -w` の差分（DIFF.ignoreWhitespaceFiles）に
+ * DIFF.files を差し替えて描画し直す。既定は OFF（空白の変更も表示）。選択は
+ * コメント非表示トグルと同じく localStorage に覚える。コメントは表示に依らず
+ * 「ファイル・左右・行番号」で置くので、どちらの表示でも同じ行に出る
+ * （diff/comments.ts。空白だけを変えた行は畳まれた範囲を展開して出す）。 */
+const IGNORE_WHITESPACE_KEY = 'ark-ignore-whitespace';
+
+function ignoreWhitespaceAvailable() {
+  return Array.isArray(DIFF.ignoreWhitespaceFiles);
+}
+
+function updateIgnoreWhitespaceBtn() {
+  const btn = state.ignoreWhitespaceBtn;
+  if (!btn) return;
+  const on = state.ignoreWhitespace;
+  btn.textContent = (on ? '✓ ' : '') + '空白の変更を無視';
+  btn.title = on
+    ? '空白の変更を無視して表示中（クリックで空白の変更も表示）'
+    : '空白（インデント等）だけの変更を差分から隠す';
+  btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  btn.classList.toggle('active', on);
+}
+
+function applyIgnoreWhitespace(on) {
+  state.ignoreWhitespace = !!on;
+  if (state.ignoreWhitespace && !state.wsFiles) {
+    state.wsFiles = alignIgnoreWhitespaceFiles(FULL_FILES, DIFF.ignoreWhitespaceFiles);
+  }
+  DIFF.files = state.ignoreWhitespace ? state.wsFiles : FULL_FILES;
+  updateIgnoreWhitespaceBtn();
+}
+
+function setIgnoreWhitespace(on) {
+  if (!ignoreWhitespaceAvailable() || !!on === state.ignoreWhitespace) return;
+  // 描き直すと開いているフォーム・返信欄は作り直される。
+  if (isEditingDraft() &&
+    !confirm('入力中のコメントは破棄されます。表示を切り替えますか？')) return;
+  try { localStorage.setItem(IGNORE_WHITESPACE_KEY, on ? '1' : '0'); } catch (e) { /* ignore */ }
+  cancelForm();
+  applyIgnoreWhitespace(on);
+  renderDiff();
+  refreshDiffSummary();
+  rebuildDiffPins();
+}
+
+function restoreIgnoreWhitespace() {
+  if (!ignoreWhitespaceAvailable()) return;
+  try {
+    if (localStorage.getItem(IGNORE_WHITESPACE_KEY) === '1') applyIgnoreWhitespace(true);
+  } catch (e) { /* ignore */ }
+}
+
 // Every place that learns the current settings (status poll, settings PUT
 // response) routes through here, so the read-only badge and the intent
 // selectors can never disagree with the server.
@@ -419,6 +476,18 @@ export function setupTopbarControls() {
   state.modeBadge.title = '読み取り専用モード: エージェントはコードを修正せず回答のみ行います';
   state.modeBadge.hidden = true;
   inner.appendChild(state.modeBadge);
+
+  if (!DOC && ignoreWhitespaceAvailable()) {
+    const wsBtn = document.createElement('button');
+    wsBtn.id = 'ignore-whitespace-btn';
+    wsBtn.type = 'button';
+    wsBtn.addEventListener('click', function () {
+      setIgnoreWhitespace(!state.ignoreWhitespace);
+    });
+    inner.appendChild(wsBtn);
+    state.ignoreWhitespaceBtn = wsBtn;
+    updateIgnoreWhitespaceBtn();
+  }
 
   state.commentsToggleBtn = document.createElement('button');
   state.commentsToggleBtn.id = 'comments-toggle-btn';
@@ -619,6 +688,7 @@ function main() {
   restorePersistedWidths();
   setupTopbarControls();
   restoreCommentsHidden();
+  restoreIgnoreWhitespace();
   renderDiff();
   refresh();
   state.refreshTimer = setInterval(refresh, 3000);
