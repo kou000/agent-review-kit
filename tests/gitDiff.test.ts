@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { after, before, test } from 'node:test';
-import { parseUnifiedDiff, runGitDiff, runGitLsFiles } from '../src/gitDiff';
+import { parseUnifiedDiff, runGitDiff, runGitLsFiles, runGitUncommitted, UncommittedFile } from '../src/gitDiff';
 import { FileDiff } from '../src/types';
 
 let tmp: string;
@@ -142,6 +142,76 @@ test('ignoreWhitespace: 空白だけの変更は出ず、本物の変更と未�
       // 未追跡ファイルは通常の差分と同じく追加ファイルとして含まれる。
       assert.equal(ws.get('untracked.py')?.status, 'added');
     }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('runGitUncommitted lists staged, unstaged and untracked files with verbatim paths, ignored and .agent-review excluded', () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'ark-uncommitted-'));
+  try {
+    git(['init'], repo);
+    git(['config', 'user.email', 'test@example.com'], repo);
+    git(['config', 'user.name', 'Test User'], repo);
+    fs.writeFileSync(path.join(repo, '.gitignore'), '*.log\n');
+    fs.writeFileSync(path.join(repo, 'staged.txt'), 'a\n');
+    fs.writeFileSync(path.join(repo, 'unstaged.txt'), 'a\n');
+    fs.writeFileSync(path.join(repo, 'both.txt'), 'a\n');
+    fs.writeFileSync(path.join(repo, 'gone.txt'), 'a\n');
+    fs.writeFileSync(path.join(repo, 'old name.txt'), 'rename me\n');
+    fs.writeFileSync(path.join(repo, 'clean.txt'), 'a\n');
+    git(['add', '.'], repo);
+    git(['commit', '-m', 'initial commit'], repo);
+    // 何も変えていなければ空
+    assert.deepEqual(runGitUncommitted(repo), []);
+
+    fs.writeFileSync(path.join(repo, 'staged.txt'), 'b\n');
+    git(['add', 'staged.txt'], repo);
+    fs.writeFileSync(path.join(repo, 'unstaged.txt'), 'b\n');
+    fs.writeFileSync(path.join(repo, 'both.txt'), 'b\n');
+    git(['add', 'both.txt'], repo);
+    fs.writeFileSync(path.join(repo, 'both.txt'), 'c\n');
+    fs.rmSync(path.join(repo, 'gone.txt'));
+    git(['mv', 'old name.txt', '新しい 名前.txt'], repo);
+    fs.writeFileSync(path.join(repo, 'staged new.txt'), 'x\n');
+    git(['add', 'staged new.txt'], repo);
+    // 未追跡はディレクトリではなくファイル単位で出る
+    fs.mkdirSync(path.join(repo, 'new dir', 'sub'), { recursive: true });
+    fs.writeFileSync(path.join(repo, 'new dir', 'sub', '日本語 ファイル.ts'), 'x\n');
+    // ignore 対象と、generate が self-ignore する .agent-review/ は出ない
+    fs.writeFileSync(path.join(repo, 'debug.log'), 'x\n');
+    fs.mkdirSync(path.join(repo, '.agent-review'), { recursive: true });
+    fs.writeFileSync(path.join(repo, '.agent-review', '.gitignore'), '*\n');
+    fs.writeFileSync(path.join(repo, '.agent-review', 'comments.json'), '[]\n');
+
+    const m = new Map<string, UncommittedFile>(runGitUncommitted(repo).map((f) => [f.path, f]));
+    assert.deepEqual(m.get('staged.txt'), { path: 'staged.txt', status: 'modified', staged: true, unstaged: false });
+    assert.deepEqual(m.get('unstaged.txt'), { path: 'unstaged.txt', status: 'modified', staged: false, unstaged: true });
+    assert.deepEqual(m.get('both.txt'), { path: 'both.txt', status: 'modified', staged: true, unstaged: true });
+    assert.deepEqual(m.get('gone.txt'), { path: 'gone.txt', status: 'deleted', staged: false, unstaged: true });
+    assert.deepEqual(m.get('新しい 名前.txt'), { path: '新しい 名前.txt', status: 'renamed', staged: true, unstaged: false });
+    assert.deepEqual(m.get('staged new.txt'), { path: 'staged new.txt', status: 'added', staged: true, unstaged: false });
+    assert.deepEqual(m.get('new dir/sub/日本語 ファイル.ts'), {
+      path: 'new dir/sub/日本語 ファイル.ts',
+      status: 'untracked',
+      staged: false,
+      unstaged: false,
+    });
+    // リネーム元のパスは別の行として読まれない
+    assert.equal(m.has('old name.txt'), false);
+    assert.equal(m.has('clean.txt'), false);
+    assert.equal(m.has('debug.log'), false);
+    assert.equal([...m.keys()].some((p) => p.startsWith('.agent-review')), false);
+    assert.equal(m.size, 7);
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('runGitUncommitted returns [] outside a git repository', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ark-uncommitted-nogit-'));
+  try {
+    assert.deepEqual(runGitUncommitted(dir), []);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

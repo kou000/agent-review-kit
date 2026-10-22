@@ -104,18 +104,21 @@ function renderTreeNode(node, container, depth) {
     fEl.appendChild(mark);
     fEl.appendChild(label);
     fEl.appendChild(badge);
-    fEl.addEventListener('click', function () {
-      const el = document.getElementById('file-' + f.index);
-      if (!el) return;
-      // 確認済み等で折りたたまれていても、クリックで飛んだ先が読めるように
-      // 展開してからスクロールする（確認済みマーク自体は維持する）。
-      if (el.classList.contains('collapsed')) setCollapsed(el, false);
-      if (typeof el.scrollIntoView === 'function') {
-        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-    });
+    fEl.addEventListener('click', function () { jumpToFile(f.index); });
     container.appendChild(fEl);
   });
+}
+
+// Scroll the diff to the file box for DIFF.files[index].
+function jumpToFile(index) {
+  const el = document.getElementById('file-' + index);
+  if (!el) return;
+  // 確認済み等で折りたたまれていても、クリックで飛んだ先が読めるように
+  // 展開してからスクロールする（確認済みマーク自体は維持する）。
+  if (el.classList.contains('collapsed')) setCollapsed(el, false);
+  if (typeof el.scrollIntoView === 'function') {
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 }
 
 // Create the .layout flex wrapper holding the (empty) tree sidebar, its drag
@@ -270,6 +273,19 @@ export function buildSidebar() {
   sidebar.appendChild(commitList);
   loadCommitList(commitHeading, commitList);
 
+  // Uncommitted files (staged, unstaged, untracked). The diff runs up to the
+  // working tree, so it mixes committed and uncommitted changes; this section
+  // shows which part is still uncommitted. Fetched once per page load too.
+  const uncommittedHeading = document.createElement('div');
+  uncommittedHeading.className = 'sidebar-title sidebar-commits-title';
+  uncommittedHeading.id = 'sidebar-uncommitted-title';
+  const uncommittedList = document.createElement('div');
+  uncommittedList.className = 'commit-list';
+  uncommittedList.id = 'sidebar-uncommitted-list';
+  sidebar.appendChild(uncommittedHeading);
+  sidebar.appendChild(uncommittedList);
+  loadUncommittedList(uncommittedHeading, uncommittedList);
+
   // Repository file viewer (support feature): a collapsed-by-default section
   // listing every repository file (untracked included, ignored excluded).
   // The list loads lazily on first expand;
@@ -374,6 +390,70 @@ function loadCommitList(heading, list) {
       item.addEventListener('click', function () {
         window.open('/commit/' + encodeURIComponent(cm.sha), '_blank', 'noopener');
       });
+      list.appendChild(item);
+    });
+  }).catch(function () { /* auxiliary; ignore fetch failures */ });
+}
+
+const UNCOMMITTED_MARK = {
+  modified: 'M', added: 'A', deleted: 'D', renamed: 'R', untracked: '?', conflicted: 'U',
+};
+const UNCOMMITTED_LABEL = {
+  modified: '変更', added: '追加', deleted: '削除', renamed: '名前変更', untracked: '未追跡', conflicted: '競合',
+};
+
+// Fill the sidebar 未コミット section, laid out like the commits section:
+// collapsed by default. With nothing uncommitted the heading still shows
+// "(0 ファイル)" but has nothing to open, so it gets no toggle. A row
+// whose path is in the current diff jumps to that file box; any other row
+// (e.g. a change that cancels out against base) is plain text.
+function loadUncommittedList(heading, list) {
+  heading.style.display = 'none';
+  list.style.display = 'none';
+  api('GET', '/api/uncommitted').then(function (data) {
+    const files = data.files || [];
+    heading.style.display = '';
+    if (!files.length) {
+      heading.textContent = '未コミット (0 ファイル)';
+      heading.classList.add('uncommitted-title-static');
+      return;
+    }
+    let collapsed = true;
+    function syncHeading() {
+      heading.textContent = (collapsed ? '▸' : '▾') + ' 未コミット (' + files.length + ' ファイル)';
+      list.style.display = collapsed ? 'none' : '';
+    }
+    heading.addEventListener('click', function () {
+      collapsed = !collapsed;
+      syncHeading();
+    });
+    heading.title = 'クリックで開閉';
+    syncHeading();
+
+    files.forEach(function (uf) {
+      const index = DIFF.files.findIndex(function (f) { return f.path === uf.path; });
+      const label = UNCOMMITTED_LABEL[uf.status] || '変更';
+      const stage = uf.staged && uf.unstaged ? '一部ステージ済み'
+        : uf.staged ? 'ステージ済み'
+          : uf.unstaged ? '未ステージ' : '';
+      const item = document.createElement('div');
+      item.className = 'commit-item' + (index < 0 ? ' uncommitted-item-static' : '');
+      item.title = uf.path + '\n' + label + (stage ? '（' + stage + '）' : '') +
+        (index < 0 ? '\n今の差分には含まれていません' : '');
+
+      const mark = document.createElement('span');
+      mark.className = 'tree-status tree-status-' + esc(uf.status);
+      mark.textContent = UNCOMMITTED_MARK[uf.status] || 'M';
+
+      const name = document.createElement('span');
+      name.className = 'commit-item-subject uncommitted-item-path';
+      name.textContent = uf.path;
+
+      item.appendChild(mark);
+      item.appendChild(name);
+      if (index >= 0) {
+        item.addEventListener('click', function () { jumpToFile(index); });
+      }
       list.appendChild(item);
     });
   }).catch(function () { /* auxiliary; ignore fetch failures */ });

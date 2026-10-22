@@ -235,6 +235,70 @@ export function runGitCommitLog(base: string, cwd: string): CommitMeta[] {
     });
 }
 
+export type UncommittedStatus = 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked' | 'conflicted';
+
+export interface UncommittedFile {
+  path: string;
+  status: UncommittedStatus;
+  // Whether part of the change is staged / still only in the working tree.
+  // Untracked files are neither.
+  staged: boolean;
+  unstaged: boolean;
+}
+
+// Porcelain's renamed (R) / copied (C) code, in either column.
+function isRenameCode(c: string): boolean {
+  return c === 'R' || c === 'C';
+}
+
+// Collapse porcelain's two status columns (X = index, Y = working tree) into
+// the one kind the sidebar shows. Rename/add win over a later edit on top
+// (RM / AM), and a deletion in either column wins over a modification.
+function uncommittedStatus(x: string, y: string): UncommittedStatus {
+  if (x === '?') return 'untracked';
+  if (x === 'U' || y === 'U' || (x === 'D' && y === 'D') || (x === 'A' && y === 'A')) return 'conflicted';
+  if (isRenameCode(x) || isRenameCode(y)) return 'renamed';
+  if (x === 'A') return 'added';
+  if (x === 'D' || y === 'D') return 'deleted';
+  return 'modified';
+}
+
+// Files with uncommitted changes (staged, unstaged, untracked), for the
+// sidebar's 未コミット section: the review diff is `git diff <base>` against
+// the working tree, so it mixes committed and uncommitted work, and this list
+// tells the two apart. -z keeps paths verbatim (spaces, non-ASCII) and
+// --untracked-files=all lists each untracked file instead of its directory,
+// so every entry can be matched to a diff file path. .agent-review internals
+// never appear: generate/publishHtml self-ignore the directory. Not a git
+// repo (or any git failure) yields [] — the list is auxiliary.
+export function runGitUncommitted(cwd: string): UncommittedFile[] {
+  let out: string;
+  try {
+    out = git(['status', '--porcelain', '-z', '--untracked-files=all'], cwd);
+  } catch {
+    return [];
+  }
+  const records = out.split('\0');
+  const files: UncommittedFile[] = [];
+  for (let i = 0; i < records.length; i++) {
+    const rec = records[i];
+    if (rec.length < 4) continue;
+    const x = rec[0];
+    const y = rec[1];
+    // A rename/copy record (`XY new\0orig\0`) carries the original path as
+    // the next NUL field; skip it so it isn't read as a record of its own.
+    if (isRenameCode(x) || isRenameCode(y)) i++;
+    const untracked = x === '?';
+    files.push({
+      path: rec.slice(3),
+      status: uncommittedStatus(x, y),
+      staged: !untracked && x !== ' ',
+      unstaged: !untracked && y !== ' ',
+    });
+  }
+  return files;
+}
+
 // Unified diff introduced by a single commit (vs its first parent; a root
 // commit shows as all-additions). `--format=` suppresses the commit header so
 // only the diff body remains for parseUnifiedDiff.
