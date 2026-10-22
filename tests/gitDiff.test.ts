@@ -96,3 +96,53 @@ test('untracked binary files are marked binary, matching tracked binary handling
   assert.equal(m.get('blob.bin')?.status, 'binary');
   fs.rmSync(path.join(tmp, 'blob.bin'));
 });
+
+// 空白の変更だけのファイル・本物の変更を含むファイル・未追跡ファイルを持つ
+// 使い捨てリポジトリ（「空白の変更を無視」の差分用）。
+function makeWhitespaceRepo(): { dir: string; base: string } {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ark-gitdiff-ws-'));
+  git(['init'], dir);
+  git(['config', 'user.email', 'test@example.com'], dir);
+  git(['config', 'user.name', 'Test User'], dir);
+  fs.writeFileSync(path.join(dir, 'ws_only.py'), 'def f():\n  return 1\n');
+  fs.writeFileSync(path.join(dir, 'mixed.py'), 'a = 1\n  b = 2\nc = 3\n');
+  git(['add', '.'], dir);
+  git(['commit', '-m', 'initial commit'], dir);
+  const base = git(['rev-parse', 'HEAD'], dir).trim();
+  // インデントだけを変更
+  fs.writeFileSync(path.join(dir, 'ws_only.py'), 'def f():\n    return 1\n');
+  // インデント変更（2 行目）と本物の変更（3 行目）
+  fs.writeFileSync(path.join(dir, 'mixed.py'), 'a = 1\n    b = 2\nc = 30\n');
+  fs.writeFileSync(path.join(dir, 'untracked.py'), 'x = 1\n');
+  return { dir, base };
+}
+
+test('ignoreWhitespace: 空白だけの変更は出ず、本物の変更と未追跡ファイルは出る', () => {
+  const { dir, base: wsBase } = makeWhitespaceRepo();
+  try {
+    for (const b of [undefined, wsBase]) {
+      // 通常の差分には空白だけの変更も出る。
+      const full = byPath(parseUnifiedDiff(runGitDiff(b, dir)));
+      assert.equal(full.get('ws_only.py')?.hunks.length, 1);
+
+      const ws = byPath(parseUnifiedDiff(runGitDiff(b, dir, { ignoreWhitespace: true })));
+      // 空白だけを変えたファイルは差分から消える。
+      assert.equal(ws.has('ws_only.py'), false);
+      // 本物の変更は残り、空白だけを変えた 2 行目は変更行ではなく文脈行になる。
+      const mixed = ws.get('mixed.py')!;
+      const rows = mixed.hunks.flatMap((h) => h.rows);
+      const changed = rows.filter((r) => r.left?.kind === 'del' || r.right?.kind === 'add');
+      assert.deepEqual(
+        changed.map((r) => [r.left?.text, r.right?.text]),
+        [['c = 3', 'c = 30']]
+      );
+      const line2 = rows.find((r) => r.right?.line === 2);
+      assert.equal(line2?.right?.kind, 'context');
+      assert.equal(line2?.left?.line, 2);
+      // 未追跡ファイルは通常の差分と同じく追加ファイルとして含まれる。
+      assert.equal(ws.get('untracked.py')?.status, 'added');
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

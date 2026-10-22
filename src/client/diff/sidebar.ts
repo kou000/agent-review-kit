@@ -199,6 +199,12 @@ function buildDiffSummary() {
   return row;
 }
 
+// 「空白の変更を無視」の切り替え後に、表示中の差分の行数へ差し替える。
+export function refreshDiffSummary() {
+  const old = document.querySelector('#file-tree .diff-summary');
+  if (old) old.replaceWith(buildDiffSummary());
+}
+
 // File-tree-only sidebar for the standalone /commit and /snapshot pages:
 // jump navigation over the read-only file boxes. No viewed split, comment
 // list, or commits section — none of those apply there.

@@ -139,6 +139,12 @@ body.pr-pending-on .pr-pending-submit {
   color: #d29922;
   border-color: rgba(210, 153, 34, 0.5);
 }
+/* 「空白の変更を無視」。ON の間はコメント非表示と同じく色で示す。 */
+#ignore-whitespace-btn { white-space: nowrap; }
+#ignore-whitespace-btn.active {
+  color: #d29922;
+  border-color: rgba(210, 153, 34, 0.5);
+}
 
 /* 非表示中もスレッドは DOM に残す（再表示・件数・サイドバーはそのまま
    生きる）。行スレッド・迷子コメント・全体コメントの一覧だけを隠し、

@@ -406,4 +406,11 @@ export interface DiffData {
   base: string | null;
   generatedAt: string;
   files: FileDiff[];
+  // 同じ範囲を `git diff -w`（空白の変更を無視）で取った差分。レビュー画面の
+  // 「空白の変更を無視」トグルで files と描画を入れ替える。newLines /
+  // newLinesHtml は files の同じパスと同一なので埋め込まず、ブラウザが files
+  // から引き継ぐ（HTML の肥大化を避ける）。空白だけを変えたファイルはここに
+  // 現れない。generate のレビューページだけが持ち、/commit・/snapshot の
+  // ページでは省略。
+  ignoreWhitespaceFiles?: FileDiff[];
 }

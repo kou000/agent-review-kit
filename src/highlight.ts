@@ -292,6 +292,14 @@ async function bakeSyntax(files: FileDiff[], sources: HighlightSources): Promise
   const { createHighlighter } = await importShiki();
   const hl = await createHighlighter({ themes: [THEME], langs: ALL_LANGS });
 
+  // generate は通常の差分と空白無視の差分に同じ内容配列（newLines・旧側の
+  // 内容）を渡すので、配列ごとに 1 回だけハイライトする。
+  const cache = new Map<string[], string[] | null>();
+  const highlightOnce = (content: string[], lang: string): string[] | null => {
+    if (!cache.has(content)) cache.set(content, highlightLines(hl, content, lang));
+    return cache.get(content) ?? null;
+  };
+
   try {
     for (const f of files) {
       const lang = langForPath(f.path);
@@ -299,8 +307,8 @@ async function bakeSyntax(files: FileDiff[], sources: HighlightSources): Promise
 
       const newLines = f.newLines ?? null;
       const oldLines = sources.oldByPath.get(f.path) ?? null;
-      const newHl = newLines ? highlightLines(hl, newLines, lang) : null;
-      const oldHl = oldLines ? highlightLines(hl, oldLines, lang) : null;
+      const newHl = newLines ? highlightOnce(newLines, lang) : null;
+      const oldHl = oldLines ? highlightOnce(oldLines, lang) : null;
 
       // Parallel highlighted array for context expansion (GitHub-style). Only
       // when every line highlighted, so indices stay aligned with newLines.

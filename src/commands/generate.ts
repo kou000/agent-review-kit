@@ -84,15 +84,38 @@ export async function generate(opts: GenerateOptions = {}): Promise<void> {
   const files = parseUnifiedDiff(diffText);
   embedNewSideContent(files, cwd);
 
+  // 「空白の変更を無視」トグル用の差分（git diff -w）。新側の内容は同じ
+  // working tree なので files のものを共有し、ハイライトの文脈に使う。
+  const wsFiles = parseUnifiedDiff(runGitDiff(base, cwd, { ignoreWhitespace: true }));
+  const newLinesByPath = new Map(files.map((f) => [f.path, f.newLines]));
+  for (const f of wsFiles) {
+    const lines = newLinesByPath.get(f.path);
+    if (lines) f.newLines = lines;
+  }
+
   // SSR syntax highlighting: bake per-line Shiki HTML into each diff cell so the
   // client renders pre-colored markup (no runtime highlighter, self-contained).
+  // 旧側の内容も files と同じ配列を使い回す（ハイライトは配列ごとに 1 回）。
   const oldSources = collectOldSources(files, base, cwd);
-  await bakeHighlight(files, oldSources);
+  const wsOnlySources = collectOldSources(
+    wsFiles.filter((f) => !oldSources.oldByPath.has(f.path)),
+    base,
+    cwd
+  );
+  for (const [p, lines] of wsOnlySources.oldByPath) oldSources.oldByPath.set(p, lines);
+  await bakeHighlight([...files, ...wsFiles], oldSources);
+  // newLines / newLinesHtml は files 側にだけ載せる（ブラウザが引き継ぐ。
+  // DiffData.ignoreWhitespaceFiles 参照）。
+  for (const f of wsFiles) {
+    delete f.newLines;
+    delete f.newLinesHtml;
+  }
 
   const data: DiffData = {
     base: base ?? null,
     generatedAt: nowIso(),
     files,
+    ignoreWhitespaceFiles: wsFiles,
   };
 
   fs.writeFileSync(paths.html, renderHtml(data));

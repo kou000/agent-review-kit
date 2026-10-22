@@ -7,6 +7,10 @@
  * old single-file app.js lives here as a property of `state` instead. */
 
 export const DIFF = window.__DIFF__ || { files: [], base: null, generatedAt: '' };
+// 空白の変更も含む通常の差分。DIFF.files は「空白の変更を無視」の切り替えで
+// 表示中の側に差し替わる（app.ts の setIgnoreWhitespace）ので、表示に依らない
+// 処理（確認済みのハッシュ）はこちらを使う。
+export const FULL_FILES = DIFF.files;
 // HTML document review mode (/doc/<id>): set by renderDocumentHtml. The
 // document body renders in an iframe; all review chrome stays out here.
 export const DOC = window.__DOC__ || null;
@@ -57,6 +61,12 @@ export const state: any = {
   // restoreCommentsHidden。doc ページは docPanelCollapsed が同じ役割を担う。
   commentsHidden: false,
   commentsToggleBtn: null, // topbar の「コメントを隠す/表示」ボタン
+  // 「空白の変更を無視」トグル（diff ページ）。localStorage 復元は app.ts の
+  // restoreIgnoreWhitespace。wsFiles は DIFF.ignoreWhitespaceFiles を
+  // DIFF.files と同じ並びに揃えたもの（初回の ON で作る。whitespace.ts）。
+  ignoreWhitespace: false,
+  ignoreWhitespaceBtn: null,
+  wsFiles: null,
   modeBadge: null,
   pushRequestBtn: null, // topbar の「push を依頼」ボタン（読み取り専用中は無効化）
   prLink: null, // topbar の PR/MR リンク（set-pr で登録されたときだけ表示）
