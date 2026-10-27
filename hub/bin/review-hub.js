@@ -15,6 +15,8 @@ function usage() {
     '  start --session <id> [--title <t>]               セッション作成（docspace も作成、既存なら再利用）',
     '        [--phases <a,b,c>]                          フェーズ列（省略時: 計画,実装,差分レビュー,E2E,PR）',
     '  set-status --session <id> [--phase <p>] [--note <t>]  現在フェーズ・作業メモを更新（ステータスバーに表示）',
+    '  set-waiting --session <id> --item <文> [--item <tabId>::<文> ...]  返事待ち一覧を丸ごと置き換える（ステータスバーに表示）',
+    '  set-waiting --session <id> --clear              返事待ち一覧を空にする',
     '  interrupt --session <id> [--note <t>] [--all]    中断を記録し、このセッションの ark serve・wait-comments を停止（--all: 全セッション・全 hub を停止）',
     '  resume --session <id>                            中断状態を解除（再開時に実行）',
     '  add-tab --session <id> --id <tabId> --title <t>',
@@ -52,6 +54,36 @@ function parseArgs(argv) {
     }
   }
   return args;
+}
+
+// 繰り返し指定できるオプション（set-waiting の --item）の値を順に集める。
+// parseArgs は同じキーを最後の値で上書きするため、argv から直接拾う
+function repeatedValues(argv, flag) {
+  const values = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    if (argv[i] !== flag) continue;
+    const next = argv[i + 1];
+    if (next === undefined || next.startsWith('--')) fail(`${flag} requires a value`);
+    values.push(next);
+    i += 1;
+  }
+  return values;
+}
+
+// --item の値。「<tabId>::<文>」の形で先頭がタブ id として妥当なら関係するタブ付き、それ以外は文だけ
+const ITEM_TAB_SEP = '::';
+function parseWaitingItem(value) {
+  const idx = value.indexOf(ITEM_TAB_SEP);
+  if (idx > 0) {
+    const tabId = value.slice(0, idx);
+    try {
+      store.validateTabId(tabId);
+      return { tabId, text: value.slice(idx + ITEM_TAB_SEP.length) };
+    } catch {
+      /* タブ id の形でなければ文の一部の「::」 */
+    }
+  }
+  return { text: value };
 }
 
 function out(value) {
@@ -160,6 +192,19 @@ async function main() {
         note: typeof args.note === 'string' ? args.note : undefined,
       });
       out({ status: 'ok', current: status });
+      break;
+    }
+
+    case 'set-waiting': {
+      // 返事待ち一覧を丸ごと置き換える。空にするのは --clear の明示だけ
+      // （項目なしの呼び出しを空扱いにすると、引数の組み立て漏れで一覧が黙って消えるため）
+      require_(args, ['session']);
+      const values = repeatedValues(rest, '--item');
+      if (args.clear && values.length > 0) fail('--clear and --item cannot be used together');
+      if (!args.clear && values.length === 0) fail('--item or --clear is required');
+      store.requireSession(args.session);
+      const { waiting } = store.setWaiting(args.session, values.map(parseWaitingItem));
+      out({ status: 'ok', waiting });
       break;
     }
 
@@ -285,6 +330,7 @@ async function main() {
           session: { id: session.id, title: session.title, createdAt: session.createdAt },
           phases: session.phases || [],
           current: session.status || null,
+          waiting: session.waiting || { items: [], updatedAt: null },
           interrupted: session.interrupted || null,
           lastInterrupt: session.lastInterrupt || null,
           pendingApprovals: tabs.filter((t) => t.approval && !t.approval.approvedAt).map((t) => t.approval.label || t.id),

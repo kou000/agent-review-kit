@@ -20,6 +20,9 @@
     statusBar: document.getElementById('status-bar'),
     phaseSteps: document.getElementById('phase-steps'),
     statusNote: document.getElementById('status-note'),
+    waitingBtn: document.getElementById('waiting-btn'),
+    waitingCount: document.getElementById('waiting-count'),
+    waitingMenu: document.getElementById('waiting-menu'),
     statusMeta: document.getElementById('status-meta'),
     interruptBtn: document.getElementById('interrupt-btn'),
     memoBtn: document.getElementById('memo-btn'),
@@ -42,6 +45,8 @@
   let activeTabId = null;
   let draggingTabId = null; // ドラッグ中はタブバーの再構築を止める（つかんだ要素が消えるため）
   let hiddenMenuOpen = false;
+  let waitingMenuOpen = false;
+  let waitingMenuKey = null; // 一覧の中身が変わったときだけ作り直す（ポーリングのたびに行を差し替えない）
   let contextTabId = null; // 右クリックメニューの対象タブ
   const frames = new Map(); // tabId -> {iframe, url, overlay}
 
@@ -266,7 +271,8 @@
     const phases = session.phases || [];
     const st = session.status || {};
     const interrupted = session.interrupted || null;
-    const visible = phases.length > 0 || st.phase || st.note || interrupted;
+    const waitingItems = (session.waiting && session.waiting.items) || [];
+    const visible = phases.length > 0 || st.phase || st.note || interrupted || waitingItems.length > 0;
     el.statusBar.hidden = !visible;
     if (!visible) return;
     el.statusBar.classList.toggle('interrupted', Boolean(interrupted));
@@ -288,6 +294,7 @@
 
     el.statusNote.textContent = st.note || '';
     el.statusNote.title = st.note || '';
+    renderWaiting();
 
     const parts = [];
     if (interrupted) {
@@ -305,6 +312,92 @@
     el.statusMeta.textContent = parts.join('　');
 
     el.interruptBtn.hidden = Boolean(interrupted);
+  }
+
+  // ステータスバーの「返事待ち N件 ▾」とその一覧。中身はエージェントが set-waiting で書いたものだけで、
+  // 承認待ち・コメント件数（status-meta 側）とは混ぜない。行を押すとその文をコピーし、タブ付きの項目はタブ名のチップを押すとそのタブへ切り替える
+  function renderWaiting() {
+    const waiting = session.waiting || {};
+    const items = Array.isArray(waiting.items) ? waiting.items : [];
+    el.waitingCount.textContent = String(items.length);
+    el.waitingBtn.classList.toggle('has-items', items.length > 0);
+    el.waitingMenu.hidden = !waitingMenuOpen;
+    const tabsById = new Map(session.tabs.map((t) => [t.id, t]));
+    const key = JSON.stringify([waiting.updatedAt, items, items.map((it) => (tabsById.get(it.tabId) || {}).title)]);
+    if (key === waitingMenuKey) return;
+    waitingMenuKey = key;
+    el.waitingMenu.textContent = '';
+    const head = document.createElement('div');
+    head.className = 'waiting-head';
+    head.textContent = waiting.updatedAt ? `エージェントが返事を待っている事項（更新 ${new Date(waiting.updatedAt).toLocaleString()}）` : 'エージェントが返事を待っている事項';
+    el.waitingMenu.appendChild(head);
+    if (items.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'waiting-empty';
+      empty.textContent = '返事待ちの事項はありません';
+      el.waitingMenu.appendChild(empty);
+      return;
+    }
+    for (const item of items) {
+      const tab = item.tabId ? tabsById.get(item.tabId) : null;
+      const row = document.createElement('div');
+      row.className = 'waiting-row';
+      row.title = 'クリックでコピー';
+      const text = document.createElement('span');
+      text.className = 'waiting-text';
+      text.textContent = item.text;
+      row.appendChild(text);
+      const copied = document.createElement('span');
+      copied.className = 'waiting-copied';
+      copied.textContent = 'コピーしました';
+      copied.hidden = true;
+      row.appendChild(copied);
+      let copiedTimer = null;
+      row.addEventListener('click', () => {
+        copyText(item.text);
+        copied.hidden = false;
+        clearTimeout(copiedTimer);
+        // 一覧が作り直されて行が消えても、hidden の更新が空振りするだけでエラーにはならない
+        copiedTimer = setTimeout(() => { copied.hidden = true; }, 1500);
+      });
+      if (tab) {
+        const label = document.createElement('button');
+        label.type = 'button';
+        label.className = 'waiting-tab';
+        label.textContent = tab.title;
+        label.title = 'このタブを開く';
+        label.addEventListener('click', (e) => {
+          e.stopPropagation();
+          waitingMenuOpen = false;
+          // 非表示のタブは再表示して開く（非表示のままでは切り替え先が無い）
+          if (tab.hidden) showTab(tab.id);
+          else selectTab(tab.id);
+        });
+        row.appendChild(label);
+      }
+      el.waitingMenu.appendChild(row);
+    }
+  }
+
+  // クリップボードへコピー。localhost は安全なコンテキストなので clipboard API を使い、
+  // 失敗したときだけ隠し textarea + execCommand で代替する
+  function copyText(value) {
+    const fallback = () => {
+      const ta = document.createElement('textarea');
+      ta.value = value;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); } catch { /* 何もしない */ }
+      ta.remove();
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(value).catch(fallback);
+    } else {
+      fallback();
+    }
   }
 
   // ヘッダの「非表示 N ▾」ボタンとその一覧。未解決コメント・承認待ちがある非表示タブは
@@ -375,24 +468,29 @@
   el.hiddenTabsBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     hiddenMenuOpen = !hiddenMenuOpen;
+    waitingMenuOpen = false;
     render();
   });
   el.hiddenTabsMenu.addEventListener('click', (e) => e.stopPropagation());
-  // メニュー外クリック・Esc で両メニューを閉じる
-  document.addEventListener('click', () => {
-    closeTabContextMenu();
-    if (hiddenMenuOpen) {
-      hiddenMenuOpen = false;
-      render();
-    }
+  el.waitingBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    waitingMenuOpen = !waitingMenuOpen;
+    hiddenMenuOpen = false;
+    render();
   });
-  document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape') return;
+  el.waitingMenu.addEventListener('click', (e) => e.stopPropagation());
+  // メニュー外クリック・Esc でメニューをすべて閉じる
+  function closeMenus() {
     closeTabContextMenu();
-    if (hiddenMenuOpen) {
+    if (hiddenMenuOpen || waitingMenuOpen) {
       hiddenMenuOpen = false;
+      waitingMenuOpen = false;
       render();
     }
+  }
+  document.addEventListener('click', closeMenus);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeMenus();
   });
   window.addEventListener('blur', closeTabContextMenu); // iframe をクリックしたときも閉じる
 
