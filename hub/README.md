@@ -46,7 +46,7 @@
 1 セッション = 1 チケット（フロー 1 回）。複数リポジトリ（backend / frontend / E2E）を跨ぐため、
 状態は対象リポジトリではなく `~/.review-hub/sessions/<id>/` に置く。
 
-- `session.json` — タブ定義・承認状態・フェーズ/ステータス・中断状態
+- `session.json` — タブ定義・承認状態・フェーズ/ステータス・返事待ち一覧・中断状態
 - `events.jsonl` — 操作イベントログ（作成・タブ・承認・ステータス・中断/再開）。`status --session` の直近イベント欄の元
 - `docspace/` — ドキュメント類（計画・E2E計画等）の publish 先として使う **非 git ディレクトリ**。
   ここで ark serve を起動すると ark のデータが固定スコープ（`no-git`）になり、
@@ -64,6 +64,11 @@ $RH serve [--port N]              # サーバ起動（フォアグラウンド�
 $RH start --session TICKET-123 --title "..." \
     --phases "計画,実装,差分レビュー,E2E,PR"     # セッション作成（既存なら再利用。--phases 省略時は左記が既定）
 $RH set-status --session TICKET-123 --phase 実装 --note "コメント3件対応中"  # ステータスバー更新
+$RH set-waiting --session TICKET-123 \
+    --item "push してよいか" --item "plan::案 A と案 B のどちらで進めるか"  # 返事待ち一覧を丸ごと置き換え（ステータスバーの「返事待ち N件」。行を押すとその文をコピー）
+                                  # --item は繰り返し可。「<タブid>::<文>」で関係するタブを付けると、一覧の行の右のタブ名チップを押してそのタブに切り替わる
+                                  # 中身はエージェントが書いたものだけ（承認待ち・コメント件数は混ぜない）。status の waiting にも出る
+$RH set-waiting --session TICKET-123 --clear       # 返事待ち一覧を空にする
 $RH interrupt --session TICKET-123 [--note "..."] [--all]  # 中断を記録し、このセッションの ark serve・wait-comments を停止（note は自分用メモ）
                                   # 稼働中の他セッションが使う ark は残す。hub は稼働中の他セッションが無いときだけ止める
                                   # --all: 全セッションに中断を記録し、全 ark・同じホストの全 hub を停止（サインアウト前用）

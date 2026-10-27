@@ -203,6 +203,7 @@ function createSession(id, title, phases) {
       docspaceDir: docspaceDir(id),
       phases: Array.isArray(phases) && phases.length ? phases : DEFAULT_PHASES.slice(),
       status: { phase: null, note: null, updatedAt: null },
+      waiting: { items: [], updatedAt: null },
       interrupted: null,
       tabs: [],
     };
@@ -360,6 +361,30 @@ function setStatus(sessionId, { phase, note }) {
   return result;
 }
 
+// 返事待ち一覧（ユーザーの返事を待っている事項）。中身はエージェントが書いたものだけで、
+// 承認状態・コメント件数など hub が持つ情報とは混ぜない。set-waiting のたびに丸ごと置き換える。
+// items: [{ text, tabId? }]。tabId はそのセッションに登録済みのタブに限る
+function setWaiting(sessionId, items) {
+  for (const item of items) {
+    if (!item || typeof item.text !== 'string' || !item.text.trim()) throw new Error('waiting item text is required');
+    if (item.tabId !== undefined) validateTabId(item.tabId);
+  }
+  const result = mutateSession(sessionId, (session) => {
+    for (const item of items) {
+      if (item.tabId !== undefined && !session.tabs.some((t) => t.id === item.tabId)) {
+        throw new Error(`tab not found: ${item.tabId}`);
+      }
+    }
+    session.waiting = {
+      items: items.map((item) => (item.tabId !== undefined ? { text: item.text.trim(), tabId: item.tabId } : { text: item.text.trim() })),
+      updatedAt: new Date().toISOString(),
+    };
+    return { waiting: session.waiting };
+  });
+  appendEvent(sessionId, 'waiting', { items: result.waiting.items });
+  return result;
+}
+
 // 中断（ブラウザの中断ボタン / CLI）。互換用の wait-approval はこれを検知して interrupted を返す
 function interruptSession(sessionId, note, source) {
   const result = mutateSession(sessionId, (session) => {
@@ -414,6 +439,7 @@ module.exports = {
   setTabHidden,
   waiterScopes,
   setStatus,
+  setWaiting,
   interruptSession,
   resumeSession,
   appendEvent,
