@@ -404,7 +404,8 @@ const UNCOMMITTED_LABEL = {
 
 // Fill the sidebar 未コミット section, laid out like the commits section:
 // collapsed by default. With nothing uncommitted the heading still shows
-// "(0 ファイル)" but has nothing to open, so it gets no toggle. A row
+// "(0 ファイル)" but has nothing to open, so it gets no toggle; with 1+ files
+// it takes the warning look so the leftover changes are hard to miss. A row
 // whose path is in the current diff jumps to that file box; any other row
 // (e.g. a change that cancels out against base) is plain text.
 function loadUncommittedList(heading, list) {
@@ -418,9 +419,11 @@ function loadUncommittedList(heading, list) {
       heading.classList.add('uncommitted-title-static');
       return;
     }
+    heading.classList.add('uncommitted-title-alert');
     let collapsed = true;
     function syncHeading() {
-      heading.textContent = (collapsed ? '▸' : '▾') + ' 未コミット (' + files.length + ' ファイル)';
+      heading.textContent = (collapsed ? '▸' : '▾') + ' ⚠ 未コミット ' + files.length +
+        ' ファイル（コミットされていない変更があります）';
       list.style.display = collapsed ? 'none' : '';
     }
     heading.addEventListener('click', function () {

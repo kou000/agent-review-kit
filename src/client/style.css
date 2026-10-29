@@ -1417,6 +1417,13 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 .uncommitted-item-static:hover { background: none; }
 .uncommitted-item-static .uncommitted-item-path { color: var(--muted); }
 .uncommitted-title-static { cursor: default; }
+/* With 1+ uncommitted files the heading turns into a warning, so the leftover
+   changes stand out even while the section is collapsed. */
+.uncommitted-title-alert {
+  color: var(--attention);
+  background: rgba(210, 153, 34, 0.15);
+  border-left: 3px solid var(--attention);
+}
 
 /* ---------- back to top button ---------- */
 /* Fixed bottom-right; sits below the sticky topbar (z-index 30) so it never
