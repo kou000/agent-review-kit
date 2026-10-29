@@ -563,8 +563,15 @@ const IMAGES_NOTE =
   'imagePaths はユーザーがコメントに添付した画像ファイルの絶対パス。' +
   '内容の確認が必要なコメントについてのみ、Read ツールでそのパスを読み込んで画像として参照すること。';
 
-// The delivered JSON for one "received" batch. Two fields are reshaped on the
-// way out; comments.json itself is never rewritten, these are copies.
+// Appended to the delivered body of each intent: 'question' comment. Agents
+// have gone on to fix things after a question; text riding in the body itself
+// sits closer to the comment than any skill-file rule or batch-level note.
+const QUESTION_NOTE =
+  '（このコメントは質問です。回答だけを返し、コードやファイルは修正しないこと。' +
+  '修正が必要だと考えたら、修正案を示して指示を待つこと）';
+
+// The delivered JSON for one "received" batch. Three fields are reshaped on
+// the way out; comments.json itself is never rewritten, these are copies.
 //   images — stored ids (see ReviewComment.images) become absolute file paths,
 //     so the agent's context only ever holds a path and it Reads the file when
 //     it actually needs the pixels, never base64.
@@ -573,6 +580,8 @@ const IMAGES_NOTE =
 //     to an agent it is noise that would cost several times the code's own
 //     size in context. The plain before/lines/after text is what gets
 //     delivered.
+//   body — a question (intent: 'question', replies included) gets
+//     QUESTION_NOTE after a blank line.
 function deliveredPayload(
   received: ReviewComment[],
   paths: ReviewPaths,
@@ -589,6 +598,9 @@ function deliveredPayload(
     if (c.code && c.code.tokens) {
       const { tokens, ...code } = c.code;
       out = { ...out, code };
+    }
+    if (c.intent === 'question') {
+      out = { ...out, body: `${c.body}\n\n${QUESTION_NOTE}` };
     }
     return out;
   });

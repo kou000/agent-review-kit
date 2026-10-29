@@ -390,3 +390,39 @@ test('自分用メモ（memo.json）の内容は配達されない', async () =>
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('質問のコメント（返信を含む）は配達時だけ body の末尾に注記が付き、fix・intent なしには付かない', async () => {
+  const tmp = makeTmpRepo();
+  try {
+    const paths = reviewPaths(tmp);
+    const question: ReviewComment = { ...diffComment('q1'), intent: 'question', body: 'なぜこうした？' };
+    const fix: ReviewComment = { ...diffComment('q2'), intent: 'fix', body: 'ここ直して' };
+    const unspecified: ReviewComment = { ...diffComment('q3'), body: '気になる' };
+    const reply: ReviewComment = {
+      ...diffComment('q4'),
+      parentId: 'q2',
+      intent: 'question',
+      body: '直す前に、影響範囲は？',
+    };
+    saveComments(paths.comments, [question, fix, unspecified, reply]);
+
+    const lines = await captureLog(() => waitComments({ timeout: 2, cwd: tmp }));
+    const result = JSON.parse(lines[0]) as { status: string; comments: ReviewComment[] };
+    assert.equal(result.status, 'received');
+    const note =
+      '（このコメントは質問です。回答だけを返し、コードやファイルは修正しないこと。' +
+      '修正が必要だと考えたら、修正案を示して指示を待つこと）';
+    const bodyOf = (id: string) => result.comments.find((c) => c.id === id)?.body;
+    assert.equal(bodyOf('q1'), `なぜこうした？\n\n${note}`);
+    assert.equal(bodyOf('q2'), 'ここ直して');
+    assert.equal(bodyOf('q3'), '気になる');
+    assert.equal(bodyOf('q4'), `直す前に、影響範囲は？\n\n${note}`);
+
+    // 注記は stdout 用のコピーにだけ付け、comments.json の body は変えない。
+    const stored = loadComments(paths.comments);
+    assert.equal(stored.find((c) => c.id === 'q1')?.body, 'なぜこうした？');
+    assert.equal(stored.find((c) => c.id === 'q4')?.body, '直す前に、影響範囲は？');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
