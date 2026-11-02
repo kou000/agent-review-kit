@@ -10,6 +10,7 @@ import { badge, connState, DIFF, DOC, FULL_FILES, state } from './state.js';
 import { commentLocShort, setThreadCollapsed } from './threads.js';
 import { setCollapsed } from './diff/collapse.js';
 import { cancelForm } from './diff/form.js';
+import { jumpToLocation, setupLineJumpLinks } from './diff/lineJump.js';
 import { rebuildDiffPins } from './diff/pins.js';
 import { refreshDiffSummary } from './diff/sidebar.js';
 import { alignIgnoreWhitespaceFiles } from './diff/whitespace.js';
@@ -689,7 +690,9 @@ function main() {
   setupTopbarControls();
   restoreCommentsHidden();
   restoreIgnoreWhitespace();
-  renderDiff();
+  setupLineJumpLinks();
+  // `/?file=...&line=...` で開かれたら、確認済みの折りたたみが反映された後に飛ぶ
+  Promise.resolve(renderDiff()).then(function () { jumpToLocation(location.search); });
   refresh();
   state.refreshTimer = setInterval(refresh, 3000);
   setupScrollTop();

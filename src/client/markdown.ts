@@ -10,7 +10,8 @@
  * The only HTML in the output is the tags this file emits, which means no
  * separate sanitizer is needed. The one value that flows from the source
  * into an attribute is a link href, and safeUrl() restricts that to http,
- * https and mailto — javascript: and data: never reach the DOM. The
+ * https, mailto and the same-page line-jump form (`/?file=...`) —
+ * javascript: and data: never reach the DOM. The
  * server-highlighted fence tokens (renderMarkdown's `fences`) are the other
  * outside input: they come from comments.json, which is only semi-trusted,
  * so their text is esc()'d like everything else and a style string reaches
@@ -23,6 +24,7 @@
  */
 
 import { esc } from './dom.js';
+import { isLineJumpHref } from './lineJump.js';
 
 /* ---------- placeholders ----------
  * Chunks that must survive later rules (code spans, links, code fences) are
@@ -52,11 +54,14 @@ function restore(text, store) {
 
 // Schemes allowed in a link href. Tested against the escaped text, which is
 // safe because esc() leaves ':' and '/' alone.
+// The one relative form allowed is a line-jump link (`/?file=...`, see
+// lineJump.ts), which stays in the same tab.
 function safeUrl(url) {
-  return /^(https?:\/\/|mailto:)/i.test(url);
+  return /^(https?:\/\/|mailto:)/i.test(url) || isLineJumpHref(url);
 }
 
 function linkHtml(url, inner) {
+  if (isLineJumpHref(url)) return '<a href="' + url + '" class="line-jump">' + inner + '</a>';
   return '<a href="' + url + '" target="_blank" rel="noopener">' + inner + '</a>';
 }
 

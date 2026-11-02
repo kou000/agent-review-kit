@@ -205,7 +205,8 @@ export function renderDiff() {
   // Fetch persisted viewed state and apply it to the freshly built boxes.
   // Done after the DOM exists (and after renderComments) so async ordering
   // never leaves comments unrendered; a brief all-unviewed flash is fine.
-  loadViewed().then(applyViewedState);
+  // Returned so main() can jump to a line only after viewed boxes collapse.
+  return loadViewed().then(applyViewedState);
 }
 
 // Shared by the standalone /commit and /snapshot pages: same file boxes and

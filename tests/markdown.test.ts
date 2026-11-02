@@ -62,6 +62,13 @@ test('renders links and bare urls, and drops unsafe schemes', () => {
   assert.equal(renderMarkdown('[x](javascript:alert(1))'), '<p>[x](javascript:alert(1))</p>');
 });
 
+test('renders line-jump links in the same tab and keeps other relative links as text', () => {
+  assert.equal(renderMarkdown('[client.rs L10-12](/?file=src/a.rs&line=10-12)'),
+    '<p><a href="/?file=src/a.rs&amp;line=10-12" class="line-jump">client.rs L10-12</a></p>');
+  assert.equal(renderMarkdown('[x](/api/finish)'), '<p>[x](/api/finish)</p>');
+  assert.equal(renderMarkdown('[x](?file=a.rs)'), '<p>[x](?file=a.rs)</p>');
+});
+
 test('escapes html in every context', () => {
   assert.equal(renderMarkdown('<img src=x onerror=alert(1)>'),
     '<p>&lt;img src=x onerror=alert(1)&gt;</p>');
