@@ -63,8 +63,13 @@ docspace は `~/.review-hub/sessions/<id>/docspace/`（`start` の出力の `doc
 非 git ディレクトリなので ark のデータが固定スコープ（`no-git`）になり、
 **作業リポジトリのブランチ切替の影響を受けない**（作業リポジトリに載せると checkout で doc が 404 になる）。
 
+publish する HTML の**元ファイル（Markdown・本文・スタイル部分を含む）は `~/.review-hub/sessions/<id>/src/` に置く**。
+scratchpad（`/tmp` の下）には置かない。`/tmp` は OS の再起動などで空になることがあり、消えた元ファイルから
+publish すると doc が空で上書きされる。publish の前に元ファイルが空でないこと（`[ -s <file> ]`）を確かめる。
+元ファイルが見当たらないときは、公開済みの `<docspaceDir>/.agent-review/branches/no-git/documents/<doc-id>.html` を元にする。
+
 ```bash
-cd <docspaceDir> && $ARK publish-html --input <plan.html> --document-id plan --title "実装計画" 2>/dev/null
+cd <docspaceDir> && [ -s ~/.review-hub/sessions/<id>/src/plan.html ] && $ARK publish-html --input ~/.review-hub/sessions/<id>/src/plan.html --document-id plan --title "実装計画" 2>/dev/null
 mkdir -p ~/.review-hub/logs
 # setsid nohup で切り離して起動（このセッションで 1 本だけ。run_in_background は 2 時間で強制停止されるため使わない）
 cd <docspaceDir> && setsid nohup $ARK serve > ~/.review-hub/logs/ark-<セッションID>-docspace.log 2>&1 < /dev/null &
