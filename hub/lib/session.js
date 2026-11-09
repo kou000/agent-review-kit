@@ -176,7 +176,7 @@ function listSessions() {
   return sessions;
 }
 
-function createSession(id, title, phases) {
+function createSession(id, title, phases, skill) {
   validateSessionId(id);
   const result = withLock(id, () => {
     const existing = readJson(sessionJsonPath(id));
@@ -192,6 +192,10 @@ function createSession(id, title, phases) {
         existing.phases = phases;
         changed = true;
       }
+      if (skill) {
+        existing.skill = { ...skill, setAt: new Date().toISOString() };
+        changed = true;
+      }
       if (changed) atomicWriteJson(sessionJsonPath(id), existing);
       return { session: existing, created: false };
     }
@@ -205,6 +209,7 @@ function createSession(id, title, phases) {
       status: { phase: null, note: null, updatedAt: null },
       waiting: { items: [], updatedAt: null },
       interrupted: null,
+      skill: skill ? { ...skill, setAt: new Date().toISOString() } : null,
       tabs: [],
     };
     atomicWriteJson(sessionJsonPath(id), session);
@@ -361,6 +366,17 @@ function setStatus(sessionId, { phase, note }) {
   return result;
 }
 
+// 実行中のスキル（名前と SKILL.md のパス）。会話の要約や再開のあとにエージェントが
+// スキルの手順を読み直せるよう、status と SessionStart フックが出す。null で解除
+function setSkill(sessionId, skill) {
+  const result = mutateSession(sessionId, (session) => {
+    session.skill = skill ? { ...skill, setAt: new Date().toISOString() } : null;
+    return { skill: session.skill };
+  });
+  appendEvent(sessionId, 'skill', { skill: result.skill });
+  return result;
+}
+
 // 返事待ち一覧（ユーザーの返事を待っている事項）。中身はエージェントが書いたものだけで、
 // 承認状態・コメント件数など hub が持つ情報とは混ぜない。set-waiting のたびに丸ごと置き換える。
 // items: [{ text, tabId? }]。tabId はそのセッションに登録済みのタブに限る
@@ -439,6 +455,7 @@ module.exports = {
   setTabHidden,
   waiterScopes,
   setStatus,
+  setSkill,
   setWaiting,
   interruptSession,
   resumeSession,

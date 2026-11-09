@@ -413,6 +413,11 @@ export interface FileDiff {
 
 export interface DiffData {
   base: string | null;
+  // 画面に出す base の名前と解決済みのコミット（generate のレビューページだけ。
+  // resolveBaseInfo 参照）。ハッシュで渡された base はブランチ名が分かったとき
+  // だけ baseName を持つ。古い review.html と /commit・/snapshot のページには無い。
+  baseName?: string;
+  baseSha?: string;
   generatedAt: string;
   files: FileDiff[];
   // 同じ範囲を `git diff -w`（空白の変更を無視）で取った差分。レビュー画面の

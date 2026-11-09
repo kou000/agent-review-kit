@@ -477,3 +477,34 @@ test('snapshot path prints the active branch-scoped directory through the CLI', 
   const expected = path.join(fs.realpathSync(cwd), path.relative(cwd, paths.snapshotsDir));
   assert.equal(result.stdout.trim(), expected);
 });
+
+test('the delivery note saved to the env file via PUT /api/settings/env rides along with wait-comments', async (t) => {
+  // Keep the developer's real ~/.agent-review/.env out of this test and safe
+  // from the write: reviewPaths resolves envFile from HOME at call time.
+  const originalHome = process.env.HOME;
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-review-kit-home-'));
+  process.env.HOME = home;
+  const { cwd } = fixture([comment('new-user', 'open')]);
+  const { createServer } = require('../dist/server');
+  const server = createServer(reviewPaths(cwd));
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    await new Promise((resolve) => server.close(resolve));
+    process.env.HOME = originalHome;
+    fs.rmSync(cwd, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  const res = await fetch(`http://127.0.0.1:${server.address().port}/api/settings/env`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ deliveryNoteEnabled: true, deliveryNoteText: 'env からの指示' }),
+  });
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).envFile, path.join(home, '.agent-review', '.env'));
+
+  const result = await captureWait({ cwd });
+  assert.equal(result.status, 'received');
+  assert.equal(result.note, 'env からの指示');
+  assert.equal(result.settings.deliveryNoteEnabled, true);
+});

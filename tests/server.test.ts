@@ -1529,3 +1529,73 @@ test('GET /api/status returns the PR/MR registered for the branch', async () => 
   const cleared = (await (await fetch(`${baseUrl}/api/status`)).json()) as { pr: unknown };
   assert.equal(cleared.pr, null);
 });
+
+test('GET /api/settings は書き込み先の envFile を返す', async () => {
+  const res = await fetch(`${baseUrl}/api/settings`);
+  assert.equal(res.status, 200);
+  const data = (await res.json()) as { envFile: string };
+  assert.equal(data.envFile, path.join(process.env.HOME!, '.agent-review', '.env'));
+});
+
+test('PUT /api/settings/env は指示テキストと ON/OFF だけを .env に書き、他の行は残す', async () => {
+  const envFile = path.join(process.env.HOME!, '.agent-review', '.env');
+  fs.mkdirSync(path.dirname(envFile), { recursive: true });
+  fs.writeFileSync(envFile, '# keep\nARK_SNAPSHOTS_ENABLED=false\nARK_DELIVERY_NOTE_TEXT="old"\n');
+  try {
+    const settingsBefore = fs.existsSync(reviewPaths(tmp).settings)
+      ? fs.readFileSync(reviewPaths(tmp).settings, 'utf8')
+      : null;
+    const res = await fetch(`${baseUrl}/api/settings/env`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        deliveryNoteEnabled: true,
+        deliveryNoteText: '新しい指示\n2行目',
+        snapshotsEnabled: true, // 対象外のキーは無視される
+      }),
+    });
+    assert.equal(res.status, 200);
+    const data = (await res.json()) as {
+      status: string;
+      envFile: string;
+      keys: string[];
+      defaults: { deliveryNoteEnabled: boolean; deliveryNoteText: string; snapshotsEnabled: boolean };
+    };
+    assert.equal(data.status, 'written');
+    assert.equal(data.envFile, envFile);
+    assert.deepEqual(data.keys, ['ARK_DELIVERY_NOTE_ENABLED', 'ARK_DELIVERY_NOTE_TEXT']);
+    assert.equal(data.defaults.deliveryNoteEnabled, true);
+    assert.equal(data.defaults.deliveryNoteText, '新しい指示\n2行目');
+    assert.equal(data.defaults.snapshotsEnabled, false);
+    assert.equal(
+      fs.readFileSync(envFile, 'utf8'),
+      '# keep\nARK_SNAPSHOTS_ENABLED=false\nARK_DELIVERY_NOTE_TEXT="新しい指示\\n2行目"\nARK_DELIVERY_NOTE_ENABLED=true\n'
+    );
+    // ブランチの settings.json には触れない
+    const settingsAfter = fs.existsSync(reviewPaths(tmp).settings)
+      ? fs.readFileSync(reviewPaths(tmp).settings, 'utf8')
+      : null;
+    assert.equal(settingsAfter, settingsBefore);
+  } finally {
+    fs.rmSync(envFile, { force: true });
+  }
+});
+
+test('PUT /api/settings/env は対象キーが無い・表せない文字列なら 400 でファイルを変えない', async () => {
+  const envFile = path.join(process.env.HOME!, '.agent-review', '.env');
+  fs.mkdirSync(path.dirname(envFile), { recursive: true });
+  fs.writeFileSync(envFile, 'ARK_DELIVERY_NOTE_TEXT="old"\n');
+  try {
+    for (const body of [{}, { deliveryNoteEnabled: 'true' }, { deliveryNoteText: 'C:\\new' }]) {
+      const res = await fetch(`${baseUrl}/api/settings/env`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      assert.equal(res.status, 400);
+    }
+    assert.equal(fs.readFileSync(envFile, 'utf8'), 'ARK_DELIVERY_NOTE_TEXT="old"\n');
+  } finally {
+    fs.rmSync(envFile, { force: true });
+  }
+});

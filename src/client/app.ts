@@ -405,9 +405,15 @@ function openSettingsPanel() {
     '<span class="settings-hint">既定は「修正はサブエージェントに委譲する」指示。自由に書き換えられる（空なら送らない）</span>' +
     '<textarea data-text-key="deliveryNoteText" rows="3" ' +
     'placeholder="例: 修正後は必ず npm test を実行すること"></textarea></span></label>' +
+    '<div class="settings-env-save">' +
+    '<button type="button" class="settings-env-btn">env にも保存</button>' +
+    '<span class="settings-env-result" aria-live="polite"></span>' +
+    '<span class="settings-hint">上の「指示（note）を同梱」と指示テキストを、全ブランチ共通の初期値として ' +
+    '<code class="settings-env-path">~/.agent-review/.env</code> に書き込む（他の行はそのまま）</span>' +
+    '</div>' +
     '<div class="settings-footnote">ここでの変更は現在のブランチにだけ保存されます。' +
-    '自分の定番の初期値（指示テキスト等）は <code>.agent-review/.env</code> に ' +
-    '<code>ARK_*</code> で定義でき、全ブランチに効きます（書式は README「設定のデフォルト（.env）」参照）。</div>';
+    '自分の定番の初期値（指示テキスト等）は <code>~/.agent-review/.env</code> に ' +
+    '<code>ARK_*</code> で定義でき、まだ設定を変えていないブランチに効きます（書式は README「設定のデフォルト（.env）」参照）。</div>';
   document.body.appendChild(panel);
   state.settingsPanel = panel;
 
@@ -439,8 +445,55 @@ function openSettingsPanel() {
         });
       });
     });
+    setupEnvSaveButton(panel, data.envFile);
   }).catch(function () {
     panel.innerHTML = '<div class="settings-title">設定を読み込めませんでした</div>';
+  });
+}
+
+// api() rejects with "<status> <body>"; show the server's error field when
+// the body is the usual {"error": ...} JSON.
+function apiErrorText(err: Error): string {
+  const m = /^\d+ ([\s\S]*)$/.exec(err.message);
+  if (m) {
+    try {
+      const body = JSON.parse(m[1]);
+      if (body && typeof body.error === 'string') return body.error;
+    } catch {
+      // Not JSON: fall through to the raw message.
+    }
+  }
+  return err.message;
+}
+
+// 「env にも保存」: writes what the panel currently shows (not the saved
+// settings.json, which lags the textarea until it blurs) into the per-user
+// env file via PUT /api/settings/env.
+function setupEnvSaveButton(panel: HTMLElement, envFile: unknown) {
+  const pathEl = panel.querySelector('.settings-env-path');
+  if (pathEl && typeof envFile === 'string') pathEl.textContent = envFile;
+  const btn = panel.querySelector('.settings-env-btn') as HTMLButtonElement | null;
+  const result = panel.querySelector('.settings-env-result') as HTMLElement | null;
+  if (!btn || !result) return;
+  btn.addEventListener('click', function () {
+    const enabled = panel.querySelector('input[data-key="deliveryNoteEnabled"]') as HTMLInputElement | null;
+    const area = panel.querySelector('textarea[data-text-key="deliveryNoteText"]') as HTMLTextAreaElement | null;
+    if (!enabled || !area) return;
+    btn.disabled = true;
+    result.className = 'settings-env-result';
+    result.textContent = '保存中…';
+    api('PUT', '/api/settings/env', {
+      deliveryNoteEnabled: enabled.checked,
+      deliveryNoteText: area.value,
+    }).then(function () {
+      result.classList.add('ok');
+      result.textContent = '保存しました';
+    }).catch(function (err) {
+      result.classList.add('error');
+      result.textContent = '保存に失敗しました: ' + apiErrorText(err);
+    }).finally(function () {
+      btn.disabled = false;
+    });
   });
 }
 

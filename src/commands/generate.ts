@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { parseUnifiedDiff, readOldSideContent, runGitDiff } from '../gitDiff';
+import { parseUnifiedDiff, readOldSideContent, resolveBaseInfo, runGitDiff } from '../gitDiff';
 import { bakeHighlight, HighlightSources } from '../highlight';
 import { ensureDir, reviewPaths } from '../paths';
 import { renderHtml, writeAssets } from '../render';
@@ -111,8 +111,11 @@ export async function generate(opts: GenerateOptions = {}): Promise<void> {
     delete f.newLinesHtml;
   }
 
+  const baseInfo = base ? resolveBaseInfo(base, cwd) : {};
   const data: DiffData = {
     base: base ?? null,
+    ...(baseInfo.name ? { baseName: baseInfo.name } : {}),
+    ...(baseInfo.sha ? { baseSha: baseInfo.sha } : {}),
     generatedAt: nowIso(),
     files,
     ignoreWhitespaceFiles: wsFiles,

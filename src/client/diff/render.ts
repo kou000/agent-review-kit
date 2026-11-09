@@ -1,4 +1,5 @@
 import { api } from '../api.js';
+import { baseLabel } from '../baseLabel.js';
 import { copyPathButton, esc, fmtDate, openFileTabButton } from '../dom.js';
 import { attachImagePaste } from '../images.js';
 import { intentFieldHtml, selectedIntent, syncIntentFields } from '../intent.js';
@@ -41,7 +42,9 @@ function statusLabel(st) {
 }
 
 export function renderDiff() {
-  diffMeta.textContent = (DIFF.base ? 'base: ' + DIFF.base : 'working tree vs HEAD') +
+  const baseText = baseLabel(DIFF);
+  diffMeta.title = baseText ? baseText.title : '';
+  diffMeta.textContent = (baseText ? 'base: ' + baseText.text : 'working tree vs HEAD') +
     ' / generated: ' + fmtDate(DIFF.generatedAt) +
     (state.ignoreWhitespace ? ' / 空白の変更を無視' : '');
 
