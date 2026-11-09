@@ -213,6 +213,43 @@ export function getCommitMeta(sha: string, cwd: string): CommitMeta {
   return { sha: full, shortSha: short, subject, author, date };
 }
 
+function tryGit(args: string[], cwd: string): string | null {
+  try {
+    return git(args, cwd).trim();
+  } catch {
+    return null;
+  }
+}
+
+export interface BaseInfo {
+  // 画面に出す比較元の名前。ref 名で渡された base はそのまま、コミットハッシュ
+  // で渡された base は対応するブランチ名（見つからなければ省略）。
+  name?: string;
+  sha?: string;
+}
+
+// ブランチ全体のレビューは `--base $(git merge-base origin/main HEAD)` のように
+// ハッシュで渡されるので、ハッシュのままだと何と比べているかが画面から読めない。
+// 既定ブランチの候補のうち、先端か HEAD との merge-base がそのハッシュに一致する
+// ものを名前として返す。
+export function resolveBaseInfo(base: string, cwd: string): BaseInfo {
+  const sha = tryGit(['rev-parse', '--verify', '-q', `${base}^{commit}`], cwd) || undefined;
+  const isHash = /^[0-9a-f]{4,40}$/i.test(base) && !tryGit(['rev-parse', '--symbolic-full-name', base], cwd);
+  if (!isHash) return { name: base, sha };
+  if (!sha) return {};
+
+  const originHead = tryGit(['symbolic-ref', '-q', '--short', 'refs/remotes/origin/HEAD'], cwd);
+  const candidates = [originHead, 'origin/main', 'origin/master', 'main', 'master'].filter(
+    (c, i, all): c is string => !!c && all.indexOf(c) === i
+  );
+  for (const cand of candidates) {
+    const tip = tryGit(['rev-parse', '--verify', '-q', `${cand}^{commit}`], cwd);
+    if (!tip) continue;
+    if (tip === sha || tryGit(['merge-base', cand, 'HEAD'], cwd) === sha) return { name: cand, sha };
+  }
+  return { sha };
+}
+
 // Commits between base and HEAD (newest first), for the review's commit list
 // (GitHub PR "Commits" tab equivalent). An unresolvable base yields [] rather
 // than an error: the list is auxiliary and must never break the review page.

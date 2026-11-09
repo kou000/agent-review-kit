@@ -65,3 +65,60 @@ test('generate は通常の差分と空白の変更を無視した差分の両�
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('generate はハッシュで渡された base に対応するブランチ名を baseName に入れる', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ark-generate-'));
+  try {
+    git(['init', '-b', 'main'], tmp);
+    git(['config', 'user.email', 'test@example.com'], tmp);
+    git(['config', 'user.name', 'Test User'], tmp);
+    fs.writeFileSync(path.join(tmp, 'a.txt'), 'one\n');
+    git(['add', '.'], tmp);
+    git(['commit', '-m', 'initial commit'], tmp);
+    const forkSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: tmp, encoding: 'utf8' }).trim();
+    git(['checkout', '-b', 'feature'], tmp);
+    fs.writeFileSync(path.join(tmp, 'a.txt'), 'two\n');
+    git(['commit', '-am', 'feature commit'], tmp);
+    // main が先へ進んでも、merge-base のハッシュは main の名前で出る。
+    git(['checkout', 'main'], tmp);
+    fs.writeFileSync(path.join(tmp, 'b.txt'), 'main side\n');
+    git(['add', '.'], tmp);
+    git(['commit', '-m', 'main moves on'], tmp);
+    git(['checkout', 'feature'], tmp);
+
+    await generate({ cwd: tmp, quiet: true, base: forkSha });
+    let data = readDiffData(tmp);
+    assert.equal(data.base, forkSha);
+    assert.equal(data.baseName, 'main');
+    assert.equal(data.baseSha, forkSha);
+
+    // --base 省略時は前回の base（ハッシュ）を引き継ぎ、名前も同じに解決する。
+    await generate({ cwd: tmp, quiet: true });
+    data = readDiffData(tmp);
+    assert.equal(data.base, forkSha);
+    assert.equal(data.baseName, 'main');
+
+    // ref 名で渡した base はその名前のまま。
+    await generate({ cwd: tmp, quiet: true, base: 'main' });
+    data = readDiffData(tmp);
+    assert.equal(data.baseName, 'main');
+    assert.ok(data.baseSha);
+
+    // どのブランチにも対応しないハッシュは名前を持たない。
+    const featureSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: tmp, encoding: 'utf8' }).trim();
+    await generate({ cwd: tmp, quiet: true, base: featureSha });
+    data = readDiffData(tmp);
+    assert.equal(data.baseName, undefined);
+    assert.equal(data.baseSha, featureSha);
+
+    // base 無し（未コミット差分だけ）の初回 generate はどちらも持たない。
+    fs.rmSync(reviewPaths(tmp).dir, { recursive: true, force: true });
+    await generate({ cwd: tmp, quiet: true });
+    data = readDiffData(tmp);
+    assert.equal(data.base, null);
+    assert.equal(data.baseName, undefined);
+    assert.equal(data.baseSha, undefined);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

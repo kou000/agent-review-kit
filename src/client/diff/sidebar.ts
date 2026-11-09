@@ -1,4 +1,5 @@
 import { api } from '../api.js';
+import { baseLabel } from '../baseLabel.js';
 import { bodySnippet, esc } from '../dom.js';
 import { stripMarkdown } from '../markdown.js';
 import { attachSidebarResize } from '../resize.js';
@@ -195,8 +196,9 @@ function buildDiffSummary() {
 
   const base = document.createElement('span');
   base.className = 'diff-summary-base';
-  base.textContent = DIFF.base ? 'base: ' + DIFF.base : 'base: HEAD (working tree)';
-  base.title = '比較元の ref（generate の --base）';
+  const baseText = baseLabel(DIFF);
+  base.textContent = baseText ? 'base: ' + baseText.text : 'base: HEAD (working tree)';
+  base.title = baseText ? baseText.title : '比較元の ref（generate の --base）';
   row.appendChild(base);
 
   return row;

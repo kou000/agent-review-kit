@@ -129,6 +129,7 @@ agent-review-kit generate --preserve-finished      # レビュー中の更新（
 ```
 
 - `--base` を省略すると**前回 generate の base を引き継ぐ**（初回は working tree vs HEAD）。
+- 画面の「base:」には ref 名を出す。merge-base のようにコミットハッシュで渡した base は、`origin/HEAD` の指す既定ブランチ・`origin/main`・`origin/master`・`main`・`master` のうち、先端か HEAD との merge-base が一致するブランチ名で出す（ハッシュはツールチップ）。
 - 未追跡（untracked）ファイルは追加ファイルの差分として自動で含まれる（ignore 済みファイルは除外。バイナリは `Binary files differ` 表示）。
 - 画面の「空白の変更を無視」用に、同じ範囲を `git diff -w` で取った差分も `review.html` に入れる（未追跡ファイルの扱いは通常の差分と同じ）。
 - `.agent-review/review.html`（+ `client/*.js` / `style.css`）を生成する。
