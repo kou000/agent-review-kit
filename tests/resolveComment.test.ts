@@ -265,3 +265,99 @@ test('--status answered で大元に返信すると配下の open/seen の返信
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('--status working は未解決に数えるが、wait-comments では --resume でも配達しない', async () => {
+  const tmp = makeTmpRepo();
+  try {
+    seed(tmp);
+    await captureLog(() =>
+      resolveComment({ id: 'reply', status: 'answered', message: '返信への回答', cwd: tmp })
+    );
+    const out = await captureLog(() =>
+      resolveComment({
+        id: 'top',
+        status: 'working',
+        message: 'サブエージェントで調査中。10 分ほどで返します',
+        cwd: tmp,
+      })
+    );
+    const { comment } = JSON.parse(out) as { comment: ReviewComment };
+    assert.equal(comment.status, 'working');
+    assert.equal(comment.agentResponse?.message, 'サブエージェントで調査中。10 分ほどで返します');
+
+    const status = buildStatus(reviewPaths(tmp)) as {
+      unresolved: number;
+      counts: Record<string, number>;
+    };
+    assert.equal(status.counts.working, 1);
+    assert.equal(status.unresolved, 1);
+
+    const waited = await captureLog(() => waitComments({ timeout: 1, resume: true, cwd: tmp }));
+    const result = JSON.parse(waited) as { status: string; comments: ReviewComment[] };
+    assert.equal(result.status, 'timeout');
+    assert.equal(result.comments.length, 0);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('--status working で大元を更新すると配下の seen の返信だけ working になり、open の返信は配達待ちのまま残る', async () => {
+  const tmp = makeTmpRepo();
+  try {
+    const { reply } = seed(tmp);
+    const seenReply: ReviewComment = { ...reply, id: 'reply-seen', body: '【催促】対応中のままです', status: 'seen' };
+    const answeredReply: ReviewComment = { ...reply, id: 'reply-answered', body: '回答済みの返信', status: 'answered' };
+    saveComments(reviewPaths(tmp).comments, [
+      ...loadComments(reviewPaths(tmp).comments),
+      seenReply,
+      answeredReply,
+    ]);
+
+    await captureLog(() => resolveComment({ id: 'top', status: 'working', cwd: tmp }));
+
+    const byId = new Map(loadComments(reviewPaths(tmp).comments).map((c) => [c.id, c]));
+    assert.equal(byId.get('top')?.status, 'working');
+    assert.equal(byId.get('reply-seen')?.status, 'working');
+    assert.equal(byId.get('reply')?.status, 'open');
+    assert.equal(byId.get('reply-answered')?.status, 'answered');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('working の大元への 2 回目の --message を working で送ると、追加される agent の返信も working になる', async () => {
+  const tmp = makeTmpRepo();
+  try {
+    seed(tmp);
+    await captureLog(() =>
+      resolveComment({ id: 'top', status: 'working', message: '調査を開始しました', cwd: tmp })
+    );
+    const out = await captureLog(() =>
+      resolveComment({ id: 'top', status: 'working', message: 'テスト実行中。あと 5 分', cwd: tmp })
+    );
+    const { reply } = JSON.parse(out) as { reply: ReviewComment };
+    assert.equal(reply.author, 'agent');
+    assert.equal(reply.status, 'working');
+    assert.equal(reply.agentResponse?.message, 'テスト実行中。あと 5 分');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('working の返信は大元を answered にすると answered になる', async () => {
+  const tmp = makeTmpRepo();
+  try {
+    const { reply } = seed(tmp);
+    const workingReply: ReviewComment = { ...reply, id: 'reply-working', status: 'working', author: 'agent' };
+    saveComments(reviewPaths(tmp).comments, [...loadComments(reviewPaths(tmp).comments), workingReply]);
+
+    await captureLog(() =>
+      resolveComment({ id: 'top', status: 'answered', message: '結果です', cwd: tmp })
+    );
+
+    const byId = new Map(loadComments(reviewPaths(tmp).comments).map((c) => [c.id, c]));
+    assert.equal(byId.get('reply-working')?.status, 'answered');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

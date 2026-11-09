@@ -1,6 +1,14 @@
 export type CommentStatus =
   | 'open'
   | 'seen'
+  // The agent has the comment and work is still running in the background
+  // (e.g. delegated to a subagent); it promises to reply when done. Set only
+  // by the agent (`resolve-comment --status working`). Counts as agent work
+  // exactly like seen (unresolved badge, 未解決 thread state), but it is
+  // never delivered by wait-comments — not even with --resume — since the
+  // agent already holds it. review-hub nudges a thread left working too long
+  // (see hub/lib/agentWatch.js).
+  | 'working'
   | 'fixed'
   | 'answered'
   | 'wontfix'
@@ -14,6 +22,7 @@ export type CommentStatus =
 export const COMMENT_STATUSES: CommentStatus[] = [
   'open',
   'seen',
+  'working',
   'fixed',
   'answered',
   'wontfix',

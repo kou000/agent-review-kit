@@ -115,7 +115,10 @@ export async function resolveComment(opts: ResolveOptions): Promise<void> {
         // renders like any other agent answer (commit/snapshot links, images,
         // fences, toast). Its status follows the target's, except that an
         // agent message is never open/seen work: those would count toward
-        // the unresolved badge and be dismissed at finish.
+        // the unresolved badge and be dismissed at finish. working is kept:
+        // a progress report ("still on it, done in ~10 min") is the newest
+        // message of the thread and must keep saying the agent is on it, so
+        // review-hub times the thread from this reply (hub/lib/agentWatch.js).
         reply = {
           id: newCommentId(),
           ...replyAnchor(comments, comment),
@@ -131,21 +134,33 @@ export async function resolveComment(opts: ResolveOptions): Promise<void> {
       }
     }
     // Updating a top-level comment carries its thread along:
-    // - resolved: the thread is closed — replies still open/seen, plus
+    // - resolved: the thread is closed — replies still open/seen/working, plus
     //   replies only answered/fixed (handled but not signed off), become
     //   resolved.
-    // - answered/fixed/wontfix/dismissed: only replies still open/seen take
+    // - answered/fixed/wontfix/dismissed: only replies still open/seen/working take
     //   the same status, so the user's pending replies stop looking like
     //   agent work without the agent closing the thread. Replies already
     //   answered/fixed/wontfix/dismissed/resolved keep their status.
+    // - working: only replies already delivered (seen) become working — the
+    //   agent holds them and is on it. Open replies stay open: the agent has
+    //   not received them yet, and turning them into working would mean
+    //   wait-comments never delivers them.
     // - open/seen: replies are left alone.
     // Replies deliberately parked as wontfix/dismissed — and replies already
     // resolved — never change, so the record of what was skipped or rejected
-    // survives.
+    // survives. A working reply counts as pending for the other statuses.
     if (!comment.parentId && status !== 'open' && status !== 'seen') {
       for (const reply of comments) {
         if (reply.parentId !== comment.id || reply.deleted) continue;
-        const pending = reply.status === 'open' || reply.status === 'seen';
+        if (status === 'working') {
+          if (reply.status === 'seen') {
+            reply.status = 'working';
+            reply.updatedAt = now;
+          }
+          continue;
+        }
+        const pending =
+          reply.status === 'open' || reply.status === 'seen' || reply.status === 'working';
         const handled = reply.status === 'answered' || reply.status === 'fixed';
         if (pending || (status === 'resolved' && handled)) {
           reply.status = status;

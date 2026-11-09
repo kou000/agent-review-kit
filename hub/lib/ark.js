@@ -131,19 +131,30 @@ async function commentReceived(projectDir, commentId) {
   return c ? c.status !== 'open' : null;
 }
 
+// その ark スコープのコメント配列（削除済みを含む生データ）。ark 停止・取り違え・応答不正なら null。
+// エージェント対応中の監視（agentWatch.js）が使う
+async function fetchArkComments(projectDir) {
+  const port = await livePort(projectDir);
+  if (!port) return null;
+  const data = await fetchArkJson(port, '/api/comments');
+  return data && Array.isArray(data.comments) ? data.comments : null;
+}
+
 // タブに対応するコメント件数。ark の /api/status の集計は ark サーバ（ブランチスコープ）
 // 全体の合計で、同じ docspace に複数の doc を載せると他の doc のコメントまで混ざる。
 // タブ単位で正しく出すために /api/comments を documentId で絞って数える。
 //
 // 数え方は ark サイドバーの「コメント (要確認 N / 未解決 M)」と同じ**スレッド単位**
 // （ark client/threads.ts の threadState と同じ規則。返信の多いスレッドも 1 と数える）:
-//   未解決 (open)  — ユーザー名義の open/seen コメントを含むスレッド。エージェントの作業待ち
+//   未解決 (open)  — ユーザー名義の open/seen コメント、または working（名義を問わない。
+//                    エージェントが「作業中・終わったら返信する」と宣言した）を含むスレッド。エージェントの作業待ち
 //   要確認 (check) — 回答・修正済み / wontfix / dismissed の確認待ち、または AI 指摘
 //                    （エージェント名義の open/seen）への返信待ち。ユーザーの確認待ち
 //   解決済み       — 全コメントが resolved。数えない
 function threadState(comments) {
   let needsCheck = false;
   for (const c of comments) {
+    if (c.status === 'working') return 'open';
     if (c.status === 'open' || c.status === 'seen') {
       if ((c.author || 'user') === 'agent') {
         needsCheck = true;
@@ -314,4 +325,5 @@ module.exports = {
   hubPids,
   postArkComment,
   commentReceived,
+  fetchArkComments,
 };

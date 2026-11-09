@@ -149,6 +149,7 @@ export function buildStatus(paths: ReviewPaths): Record<string, unknown> {
   const counts: Record<CommentStatus, number> = {
     open: 0,
     seen: 0,
+    working: 0,
     fixed: 0,
     answered: 0,
     wontfix: 0,
@@ -164,10 +165,11 @@ export function buildStatus(paths: ReviewPaths): Record<string, unknown> {
     projectDir: path.dirname(paths.dir),
     branch: paths.branch,
     total: comments.length,
-    // 未解決 = open + seen。unresolved はエージェント側の作業待ちを表す。
+    // 未解決 = open + seen + working。unresolved はエージェント側の作業待ちを表す
+    // （working は「バックグラウンドで作業中・終わったら返信する」の意味で seen と同じ扱い）。
     // wontfix / dismissed は解決済みではないが、待っているのはユーザーの確認
     // （画面では「要確認」）でありエージェントの作業ではないので、ここには含めない。
-    unresolved: counts.open + counts.seen,
+    unresolved: counts.open + counts.seen + counts.working,
     counts,
     base: state?.base ?? null,
     generatedAt: state?.generatedAt ?? null,
@@ -1458,7 +1460,7 @@ async function handle(
       comment.status = 'resolved';
       comment.updatedAt = now;
       // Resolving a top-level comment settles the whole thread (mirrors
-      // delete's cascade): replies still open/seen, plus replies only
+      // delete's cascade): replies still open/seen/working, plus replies only
       // answered/fixed (handled but not signed off), go with it. Replies
       // deliberately parked as wontfix/dismissed — and replies already
       // resolved — keep their status so the record of what was skipped or
@@ -1470,6 +1472,7 @@ async function handle(
             !reply.deleted &&
             (reply.status === 'open' ||
               reply.status === 'seen' ||
+              reply.status === 'working' ||
               reply.status === 'answered' ||
               reply.status === 'fixed')
           ) {

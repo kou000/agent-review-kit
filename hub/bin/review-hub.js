@@ -339,6 +339,8 @@ async function main() {
           tabs,
           // wait-comments が必要なスコープ。allHidden のスコープは waiter 不要（Stop フックも咎めない）
           waiterScopes: store.waiterScopes(session),
+          // エージェント対応中（seen・working）の件数と最長経過、未配達（open が 3 分超）の警告。中断中は null
+          agentWatch: await require('../lib/agentWatch').sessionSummary(session, arkLib.fetchArkComments, store.waiterScopes),
           recentEvents: store.readEvents(args.session, args.events ? Number(args.events) : 10),
           url: hubUrl(session.id),
         });
