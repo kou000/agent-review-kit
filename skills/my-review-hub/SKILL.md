@@ -51,12 +51,17 @@ hub はフェーズを跨いで常駐する。フロー完了後も止める必�
 セッション ID は原則チケット番号（例 `TICKET-123`）:
 
 ```bash
-$RH start --session TICKET-123 --title "TICKET-123 ○○の修正" --phases "計画,実装,差分レビュー,E2E,PR"
+$RH start --session TICKET-123 --title "TICKET-123 ○○の修正" --phases "計画,実装,差分レビュー,E2E,PR" \
+  --skill my-feature-ct --skill-path ~/.claude/skills/my-feature-ct/SKILL.md
 ```
 
 - `--phases` はフローのフェーズ列（ステータスバーに進行表示される）。省略時は
   `計画,実装,差分レビュー,E2E,PR`。バグ修正フローなら `再現,設計,修正,E2E,PR` のように
   実際の流れに合わせる。既存セッションに `--phases` 付きで start し直すと差し替えられる
+- `--skill` / `--skill-path` は、このセッションで実行しているフロー系スキルの名前と SKILL.md のパス（対で指定する）。
+  `$RH status --session <id>` の `skill` / `skillReminder` に出るほか、SessionStart フック
+  （session-skill-reminder.sh、matcher: compact / resume）が会話の要約・再開の直後に「SKILL.md を読み直す」よう伝える。
+  start の後から付けるときや付け替えるときは `$RH set-skill --session <id> --skill <name> --skill-path <path>`
 
 計画・E2E計画・E2Eサマリなどの**ドキュメント類は必ず docspace に publish する**。
 docspace は `~/.review-hub/sessions/<id>/docspace/`（`start` の出力の `docspaceDir`）。
@@ -301,7 +306,8 @@ hub の承認バーには承認コメントの配達状況（受信待ち / 受�
    直近イベント）を読む（status は hub 未起動でも動くので 1 と 2 は逆でもよい）。
    件数は ark サイドバーと同じスレッド単位で、`unresolved`（未解決 = エージェントの作業待ち）と
    `check`（要確認 = ユーザーの確認待ち。AI 指摘の返信待ちを含む）に分かれる。
-   自分がやるべき残作業は `unresolvedTotal` を見る
+   自分がやるべき残作業は `unresolvedTotal` を見る。
+   `skill` があれば、**その SKILL.md を Read で読み直してから**続きに進む（いまのフェーズと、これから進める Step の手順を確かめる）
 3. **最初にユーザーへ状況を報告する**（例:「いま実装フェーズ、差分レビューのコメント 2 件が未解決、
    E2E 実行承認待ちです。前回は○○まで完了しています」）。`interrupted.note`（ユーザーの
    中断メモ）があればそのまま見せる
@@ -339,6 +345,7 @@ ark ページ内の「レビュー終了」ボタンは **ark サーバ自体を
 - セッション終了（PR 作成完了）後、docspace / 各リポの ark serve は kill してよい。
   切り離して起動しているのでタスクとしては止められない。各 cwd の `.agent-review/server.json` の pid を kill する
   （`kill $(node -p "require('./.agent-review/server.json').pid")`）。hub は `$RH stop`（`~/.review-hub/server.json` の pid を止める）
+- フローが終わったら `$RH set-skill --session <id> --clear` で実行中のスキルを外す（読み直しの案内を止める）
 - ark serve をすべて止めたら `rm -f ~/.review-hub/waiter-owner-session`（waiter 監視フックの解除）。
   中断ボタン経由の停止時（手順 6）も同様に削除する
 - hub サーバは常駐可。セッションデータは `~/.review-hub/sessions/<id>/` に残る

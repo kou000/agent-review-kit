@@ -14,6 +14,9 @@ function usage() {
     '  serve [--port N]                                 hub サーバを起動（フォアグラウンド常駐）',
     '  start --session <id> [--title <t>]               セッション作成（docspace も作成、既存なら再利用）',
     '        [--phases <a,b,c>]                          フェーズ列（省略時: 計画,実装,差分レビュー,E2E,PR）',
+    '        [--skill <name> --skill-path <SKILL.md>]    実行中のスキル（status と再開・要約後のフックが読み直しを促す）',
+    '  set-skill --session <id> --skill <name> --skill-path <SKILL.md>  実行中のスキルを設定する',
+    '  set-skill --session <id> --clear               実行中のスキルを外す（フロー完了時）',
     '  set-status --session <id> [--phase <p>] [--note <t>]  現在フェーズ・作業メモを更新（ステータスバーに表示）',
     '  set-waiting --session <id> --item <文> [--item <tabId>::<文> ...]  返事待ち一覧を丸ごと置き換える（ステータスバーに表示）',
     '  set-waiting --session <id> --clear              返事待ち一覧を空にする',
@@ -101,6 +104,20 @@ function require_(args, keys) {
   }
 }
 
+// --skill と --skill-path は対で指定する。パスは存在を確かめ、絶対パスで持つ
+// （フックや別ディレクトリのエージェントがそのまま Read できるように）
+function skillArg(args) {
+  const hasName = typeof args.skill === 'string';
+  const hasPath = typeof args.skillPath === 'string';
+  if (!hasName && !hasPath) return undefined;
+  if (!hasName || !hasPath) fail('--skill and --skill-path must be given together');
+  const path = require('path');
+  const fs = require('fs');
+  const abs = path.resolve(args.skillPath.replace(/^~(?=$|\/)/, require('os').homedir()));
+  if (!fs.existsSync(abs)) fail(`skill path not found: ${abs}`);
+  return { name: args.skill, path: abs };
+}
+
 function hubUrl(sessionId) {
   const info = store.loadServerInfo();
   if (!info) return null;
@@ -131,7 +148,8 @@ async function main() {
         typeof args.phases === 'string'
           ? args.phases.split(',').map((s) => s.trim()).filter(Boolean)
           : undefined;
-      const { session, created } = store.createSession(args.session, args.title, phases);
+      const skill = skillArg(args);
+      const { session, created } = store.createSession(args.session, args.title, phases, skill);
       out({
         status: created ? 'created' : 'exists',
         session,
@@ -195,6 +213,19 @@ async function main() {
       break;
     }
 
+    case 'set-skill': {
+      require_(args, ['session']);
+      store.requireSession(args.session);
+      if (args.clear === true) {
+        out({ status: 'ok', ...store.setSkill(args.session, null) });
+        break;
+      }
+      const skill = skillArg(args);
+      if (!skill) fail('--skill and --skill-path are required (or --clear)');
+      out({ status: 'ok', ...store.setSkill(args.session, skill) });
+      break;
+    }
+
     case 'set-waiting': {
       // 返事待ち一覧を丸ごと置き換える。空にするのは --clear の明示だけ
       // （項目なしの呼び出しを空扱いにすると、引数の組み立て漏れで一覧が黙って消えるため）
@@ -254,7 +285,9 @@ async function main() {
     case 'resume': {
       require_(args, ['session']);
       store.requireSession(args.session);
-      out({ status: 'resumed', ...store.resumeSession(args.session) });
+      const resumed = store.resumeSession(args.session);
+      const { skill } = store.requireSession(args.session);
+      out({ status: 'resumed', ...resumed, skill: skill || null });
       break;
     }
 
@@ -328,6 +361,10 @@ async function main() {
         out({
           status: 'ok',
           session: { id: session.id, title: session.title, createdAt: session.createdAt },
+          skill: session.skill || null,
+          skillReminder: session.skill
+            ? `このセッションはスキル ${session.skill.name} を実行中。作業を続ける前に ${session.skill.path} を Read で読み直し、いまのフェーズの手順に従うこと`
+            : undefined,
           phases: session.phases || [],
           current: session.status || null,
           waiting: session.waiting || { items: [], updatedAt: null },
