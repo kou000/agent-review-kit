@@ -498,7 +498,7 @@ export function diffRefresh() {
     // comments); this page's badge counts only what it can show.
     let unresolved = 0;
     cs.forEach(function (c) {
-      if (c.status === 'open' || c.status === 'seen') unresolved++;
+      if (c.status === 'open' || c.status === 'seen' || c.status === 'working') unresolved++;
     });
     renderBadge({ unresolved: unresolved });
     applySettings(status.settings);

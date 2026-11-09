@@ -922,6 +922,8 @@ tr.widget-row td.widget-pad + td.widget-cell {
 }
 .status-open { background: rgba(56, 139, 253, 0.2); color: #58a6ff; }
 .status-seen { background: rgba(210, 153, 34, 0.2); color: #d29922; }
+/* working = エージェントがバックグラウンドで作業中。seen と同じ「エージェント対応中」の色 */
+.status-working { background: rgba(210, 153, 34, 0.2); color: #d29922; }
 .status-fixed { background: rgba(63, 185, 80, 0.2); color: #3fb950; }
 .status-answered { background: rgba(163, 113, 247, 0.2); color: #a371f7; }
 .status-wontfix { background: rgba(248, 81, 73, 0.2); color: #f85149; }

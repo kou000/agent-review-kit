@@ -3,6 +3,7 @@
 // review-hub の HTTP サーバ。127.0.0.1 バインドのローカル専用（認証なし）。
 // フェーズを跨いで常駐する。例外は中断 API（/interrupt）で、そのセッションの ark serve を
 // 止めたうえで、他セッションの表示が途切れない場合は hub 自身も終了する。
+// 常駐中は、エージェントが対応中のまま放置したコメントを監視して催促する（agentWatch.js）。
 
 const fs = require('fs');
 const http = require('http');
@@ -11,6 +12,7 @@ const path = require('path');
 const store = require('./session');
 const ark = require('./ark');
 const staticFiles = require('./staticFiles');
+const agentWatch = require('./agentWatch');
 
 // ark のスキャン範囲 5179-5199 と重ならないようにする
 const DEFAULT_PORT = 5280;
@@ -72,7 +74,9 @@ async function resolveSession(session, hubPort) {
       return resolved;
     })
   );
-  return { ...session, tabs };
+  // ステータスバーの「エージェント対応中 / 未配達」表示用（agentWatch.js）
+  const agentWatchSummary = await agentWatch.sessionSummary(session, ark.fetchArkComments, store.waiterScopes);
+  return { ...session, tabs, agentWatch: agentWatchSummary };
 }
 
 // 承認ボタンの押下を ark のコメントとしてエージェントに届ける（push 依頼ボタンと同じ方式）。
@@ -309,6 +313,8 @@ async function startServer(requestedPort) {
           process.exit(0);
         });
       }
+      // エージェントが対応中のまま放置したコメントの監視・催促（30 秒ごと）
+      agentWatch.startAgentWatch();
       return { server, port };
     } catch (err) {
       lastErr = err;

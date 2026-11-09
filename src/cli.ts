@@ -39,7 +39,8 @@ Commands:
                            （--document-id と同時指定はエラー）
     --resume               初回待機用。前のセッションが受信済みの status: seen も返す
   resolve-comment <id>     コメントの状態を更新する
-    --status <status>      open|seen|fixed|answered|wontfix|resolved|dismissed（デフォルト: answered）
+    --status <status>      open|seen|working|fixed|answered|wontfix|resolved|dismissed（デフォルト: answered）
+                           working = バックグラウンドで作業中・終わったら返信する（--message で現状を書く）
     --message <text>       agentResponse として保存する返信メッセージ。既に返信済みの
                            コメントでは上書きせず、スレッドに agent の返信を追加する
     --commit <sha>         修正コミットの sha。返信に /commit/<sha> へのリンクを添える（--message 必須）

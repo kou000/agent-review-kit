@@ -170,7 +170,7 @@ export function docRefresh() {
     }
     let unresolved = 0;
     cs.forEach(function (c) {
-      if (c.status === 'open' || c.status === 'seen') unresolved++;
+      if (c.status === 'open' || c.status === 'seen' || c.status === 'working') unresolved++;
     });
     renderBadge({ unresolved: unresolved });
     applySettings(status.settings);

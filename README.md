@@ -258,7 +258,11 @@ agent-review-kit resolve-comment comment_xxx --status fixed --message "修正後
   --image ./before.png --image ./after.png
 ```
 
-status: `open` / `seen` / `fixed` / `answered` / `wontfix` / `resolved` / `dismissed`（AI指摘の見送り）。
+status: `open` / `seen` / `working` / `fixed` / `answered` / `wontfix` / `resolved` / `dismissed`（AI指摘の見送り）。
+`working` は「バックグラウンドで作業が続いていて、終わったら返信する」の意味でエージェントだけが付ける（`--message` で現状を書く）。
+画面のバッジ・未解決の集計では `seen` と同じ「エージェント対応中」として扱い、`wait-comments` では配達しない（`--resume` でも）。
+大元を `--status working` にすると、配下の返信のうち `seen`（配達済み）だけが `working` になる（`open` の返信は配達待ちのまま残す）。
+review-hub は `seen` のまま 3 分・`working` のまま 5 分を超えたスレッドに【催促】コメントを返信する（hub/README.md 参照）。
 解決済みとして扱われるのは `resolved` だけで、`wontfix` / `dismissed` は「対応しない判断の記録」なので**解決済みにはならず、画面では「要確認」として残る**（ただしエージェント側の作業待ちではないので `unresolved` には含まれない）。
 `--message` は `agentResponse` としてコメントに保存され、画面にインライン表示される。
 既に `agentResponse` があるコメントに再度 `--message` を送っても前の返信は上書きされず、同じスレッドに `author: agent` の返信（`body` は空、本文は `agentResponse`）が追加される（出力 JSON の `reply`）。
@@ -337,7 +341,7 @@ agent-review-kit status
   "branch": "feature/xxx",
   "total": 3,
   "unresolved": 1,
-  "counts": { "open": 0, "seen": 1, "fixed": 1, "answered": 0, "wontfix": 0, "resolved": 1, "dismissed": 0 },
+  "counts": { "open": 0, "seen": 1, "working": 0, "fixed": 1, "answered": 0, "wontfix": 0, "resolved": 1, "dismissed": 0 },
   "base": "main",
   "generatedAt": "2026-07-08T05:00:00.000Z",
   "settings": { "snapshotsEnabled": true, "readOnlyMode": false },
@@ -346,10 +350,10 @@ agent-review-kit status
 }
 ```
 
-`unresolved` は `open + seen` の件数（論理削除済みは全集計から除外）。エージェント側の作業待ちを表す。
+`unresolved` は `open + seen + working` の件数（論理削除済みは全集計から除外）。エージェント側の作業待ちを表す。
 `wontfix`（対応しない判断）と `dismissed`（AI指摘の見送り）は解決の記録ではないので**解決済みにはならず、画面では「要確認」として残る**が、
 待っているのはユーザーの確認でありエージェントの作業ではないため `unresolved` には数えない（解決済みは `resolved` だけ）。
-`wait-comments` の配達対象も `open`（`--resume` 時は `seen`）のみで、`wontfix` / `dismissed` は配達されない。
+`wait-comments` の配達対象も `open`（`--resume` 時は `seen`）のみで、`working` / `wontfix` / `dismissed` は配達されない。
 `finished` はレビュー終了ボタンが押された時刻（`generate` でリセット）。
 
 ### 8. 設定のデフォルト（.env）

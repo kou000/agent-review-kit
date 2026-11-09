@@ -273,6 +273,10 @@ body {
   cursor: pointer;
 }
 .waiting-tab:hover { border-color: #8b949e; color: #fff; background: #444c56; }
+/* エージェント対応中・未配達の警告（hub/lib/agentWatch.js の集計） */
+#agent-watch { display: flex; gap: 10px; flex-shrink: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#agent-watch .watch-active { color: #d29922; }
+#agent-watch .watch-undelivered { color: #ff7b72; font-weight: 700; overflow: hidden; text-overflow: ellipsis; }
 #status-meta { white-space: nowrap; color: #8b949e; }
 #status-bar.interrupted #status-meta { color: #d4a72c; font-weight: 600; }
 #interrupt-btn {

@@ -23,6 +23,7 @@
     waitingBtn: document.getElementById('waiting-btn'),
     waitingCount: document.getElementById('waiting-count'),
     waitingMenu: document.getElementById('waiting-menu'),
+    agentWatch: document.getElementById('agent-watch'),
     statusMeta: document.getElementById('status-meta'),
     interruptBtn: document.getElementById('interrupt-btn'),
     memoBtn: document.getElementById('memo-btn'),
@@ -272,7 +273,9 @@
     const st = session.status || {};
     const interrupted = session.interrupted || null;
     const waitingItems = (session.waiting && session.waiting.items) || [];
-    const visible = phases.length > 0 || st.phase || st.note || interrupted || waitingItems.length > 0;
+    const watch = session.agentWatch || null;
+    const watching = Boolean(watch && (watch.active > 0 || watch.undelivered > 0));
+    const visible = phases.length > 0 || st.phase || st.note || interrupted || waitingItems.length > 0 || watching;
     el.statusBar.hidden = !visible;
     if (!visible) return;
     el.statusBar.classList.toggle('interrupted', Boolean(interrupted));
@@ -295,6 +298,7 @@
     el.statusNote.textContent = st.note || '';
     el.statusNote.title = st.note || '';
     renderWaiting();
+    renderAgentWatch(watch);
 
     const parts = [];
     if (interrupted) {
@@ -312,6 +316,45 @@
     el.statusMeta.textContent = parts.join('　');
 
     el.interruptBtn.hidden = Boolean(interrupted);
+  }
+
+  // 経過時間の表示（分単位。1 分未満は秒）
+  function formatElapsed(ms) {
+    const sec = Math.floor(ms / 1000);
+    if (sec < 60) return `${sec}秒`;
+    const min = Math.floor(sec / 60);
+    if (min < 60) return `${min}分`;
+    return `${Math.floor(min / 60)}時間${min % 60}分`;
+  }
+
+  const WATCH_STATE_LABEL = { seen: '対応中', working: '作業中', open: '未配達' };
+
+  // エージェント対応中（seen・working）の件数と最長経過、未配達（open のまま 3 分超）の警告。
+  // 集計は hub サーバが ark のコメントから出す（hub/lib/agentWatch.js）。対応中が長いスレッドには
+  // hub が自動で【催促】を返信する。未配達は待ち受けが止まっているので催促が届かず、ここで知らせるしかない
+  function renderAgentWatch(watch) {
+    const box = el.agentWatch;
+    box.textContent = '';
+    const active = watch ? watch.active : 0;
+    const undelivered = watch ? watch.undelivered : 0;
+    box.hidden = active === 0 && undelivered === 0;
+    if (box.hidden) return;
+    if (active > 0) {
+      const span = document.createElement('span');
+      span.className = 'watch-active';
+      const working = watch.working > 0 ? `・うち作業中 ${watch.working}件` : '';
+      span.textContent = `エージェント対応中 ${active}件${working}（最長 ${formatElapsed(watch.activeLongestMs)}）`;
+      box.appendChild(span);
+    }
+    if (undelivered > 0) {
+      const span = document.createElement('span');
+      span.className = 'watch-undelivered';
+      span.textContent = `⚠ 未配達 ${undelivered}件（最長 ${formatElapsed(watch.undeliveredLongestMs)}）: 待ち受けが止まっている可能性があります。エージェントに「コメントを確認して」と伝えてください`;
+      box.appendChild(span);
+    }
+    box.title = (watch.threads || [])
+      .map((t) => `${WATCH_STATE_LABEL[t.state] || t.state} ${formatElapsed(t.elapsedMs)}${t.approval ? '（承認）' : ''}${t.nudgePending ? '（催促済み）' : ''} — ${t.projectDir || ''}`)
+      .join('\n');
   }
 
   // ステータスバーの「返事待ち N件 ▾」とその一覧。中身はエージェントが set-waiting で書いたものだけで、

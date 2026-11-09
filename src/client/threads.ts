@@ -144,7 +144,8 @@ export function isThreadCollapsed(top, replies) {
 
 // Rolls a whole thread up into one of three states, so the sidebar can say
 // whose turn it is at a glance:
-//   open    — something is still on the agent (an open/seen user comment)
+//   open    — something is still on the agent (an open/seen user comment,
+//             or any working comment — the agent said it is on it)
 //   check   — the ball is in the user's court: the agent answered/fixed, a
 //             wontfix/dismissed judgement awaits confirmation, or an AI review
 //             finding (open/seen agent comment) awaits a reply
@@ -154,6 +155,10 @@ export function threadState(top, replies) {
   let needsCheck = false;
   for (let i = 0; i < all.length; i++) {
     const st = all[i].status;
+    // working is set only by the agent (resolve-comment --status working),
+    // on its own reply or on the user's comment: either way the agent is on
+    // it, so the thread is 未解決 whoever wrote the comment.
+    if (st === 'working') return 'open';
     if (st === 'open' || st === 'seen') {
       // An open agent comment is an AI finding waiting on the user, not on
       // the agent (wait-comments never delivers agent comments), so it must
@@ -429,11 +434,12 @@ export function commentCard(c: any, isReply?: boolean) {
     // エージェントへ「もう一度届ける」唯一の手段: open に戻して wait-comments
     // に再配達させる。対象は 2 つの状況 —
     //   seen     … 配達済みだが応答が返ってこないまま止まっている（手動リカバリ）
+    //   working  … 「作業中・終わったら返信する」のまま止まっている（同上）
     //   answered … 応答済み、または Unresolve で解決を取り消した後の再依頼
     // エージェント処理中に押すと同じ id で二重に届く点は変わらないので、
     // あくまで手動の再依頼と位置づける。wait-comments はユーザーのコメントしか
     // 配達しないため、AI 指摘（agent 発）では押しても何も起きない = 出さない。
-    if (!isAgentComment(c) && (c.status === 'seen' || c.status === 'answered')) {
+    if (!isAgentComment(c) && (c.status === 'seen' || c.status === 'working' || c.status === 'answered')) {
       const resend = document.createElement('button');
       resend.textContent = 'エージェントに再送';
       resend.title = 'このコメントを open に戻してエージェントに再度配達する（応答が止まったときの再送・解決取り消し後の再依頼）';
