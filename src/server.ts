@@ -28,6 +28,7 @@ import {
   newCommentImageId,
   sniffImageExt,
 } from './image';
+import { encodeEnvValue, envValueRoundTrips, resolveDefaultSettings, writeEnvEntries } from './envDefaults';
 import { ensureDir, ReviewPaths, reviewPaths } from './paths';
 import {
   renderCommitHtml,
@@ -800,8 +801,13 @@ async function handle(
     return;
   }
 
+  // envFile is shown in the settings panel next to the 「env に保存」 button,
+  // so the user knows which file that button rewrites.
   if (method === 'GET' && p === '/api/settings') {
-    json(res, 200, { settings: loadSettings(paths.settings, paths.envFile) });
+    json(res, 200, {
+      settings: loadSettings(paths.settings, paths.envFile),
+      envFile: paths.envFile,
+    });
     return;
   }
 
@@ -824,6 +830,43 @@ async function handle(
         s.prPendingCommentEnabled = body.prPendingCommentEnabled;
     }, paths.envFile);
     json(res, 200, { settings });
+    return;
+  }
+
+  // Writes the delivery note (text and on/off) into the per-user env file, so
+  // the value becomes the default for every review, not just this branch's
+  // settings.json. Only these two keys are touched; every other line stays.
+  if (method === 'PUT' && p === '/api/settings/env') {
+    const body = await readBody(req);
+    const entries: Record<string, string> = {};
+    if (typeof body.deliveryNoteEnabled === 'boolean')
+      entries.ARK_DELIVERY_NOTE_ENABLED = String(body.deliveryNoteEnabled);
+    if (typeof body.deliveryNoteText === 'string') {
+      const text = body.deliveryNoteText.slice(0, MAX_TARGET_FIELD);
+      if (!envValueRoundTrips(text)) {
+        json(res, 400, {
+          error: 'deliveryNoteText に「\\n」の文字列が含まれていると .env では改行と区別できないため保存できません',
+        });
+        return;
+      }
+      entries.ARK_DELIVERY_NOTE_TEXT = encodeEnvValue(text);
+    }
+    if (Object.keys(entries).length === 0) {
+      json(res, 400, { error: 'deliveryNoteEnabled (boolean) か deliveryNoteText (string) が必要です' });
+      return;
+    }
+    try {
+      writeEnvEntries(paths.envFile, entries);
+    } catch (e) {
+      json(res, 500, { error: `${paths.envFile} に書き込めませんでした: ${(e as Error).message}` });
+      return;
+    }
+    json(res, 200, {
+      status: 'written',
+      envFile: paths.envFile,
+      keys: Object.keys(entries),
+      defaults: resolveDefaultSettings(paths.envFile),
+    });
     return;
   }
 

@@ -3,7 +3,13 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { test } from 'node:test';
-import { parseEnvFile, resolveDefaultSettings } from '../src/envDefaults';
+import {
+  encodeEnvValue,
+  envValueRoundTrips,
+  parseEnvFile,
+  resolveDefaultSettings,
+  writeEnvEntries,
+} from '../src/envDefaults';
 import { loadSettings, mutateSettings } from '../src/store';
 import { DEFAULT_SETTINGS } from '../src/types';
 
@@ -162,6 +168,102 @@ test('parseEnvFile はクォート・コメント・空行を扱える', () => {
     assert.equal(env.A, 'single \\n stays'); // シングルクォートはエスケープ展開しない
     assert.equal(env.B, 'bare value');
     assert.equal(Object.keys(env).length, 2);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('writeEnvEntries は指定キーの行だけ書き換え、他の行・コメントは残す', () => {
+  const tmp = makeTmpDir();
+  try {
+    const envFile = path.join(tmp, '.env');
+    const original = [
+      '# 共有の既定値',
+      'ARK_SNAPSHOTS_ENABLED=false',
+      'ARK_DELIVERY_NOTE_ENABLED=false # 旧値',
+      'ARK_DELIVERY_NOTE_TEXT="旧テキスト"',
+      '',
+      '# --- .env.local ---',
+      'export ARK_DELIVERY_NOTE_TEXT="ローカルの旧テキスト"',
+      'ARK_EDITOR_URI_TEMPLATE="cursor://file{path}"',
+      '',
+    ].join('\n');
+    fs.writeFileSync(envFile, original);
+    writeEnvEntries(envFile, {
+      ARK_DELIVERY_NOTE_ENABLED: 'true',
+      ARK_DELIVERY_NOTE_TEXT: encodeEnvValue('新しい指示\n2行目'),
+    });
+    const after = fs.readFileSync(envFile, 'utf8');
+    assert.equal(
+      after,
+      [
+        '# 共有の既定値',
+        'ARK_SNAPSHOTS_ENABLED=false',
+        'ARK_DELIVERY_NOTE_ENABLED=true',
+        // 後勝ちなので、有効な最後の出現だけを書き換える
+        'ARK_DELIVERY_NOTE_TEXT="旧テキスト"',
+        '',
+        '# --- .env.local ---',
+        'export ARK_DELIVERY_NOTE_TEXT="新しい指示\\n2行目"',
+        'ARK_EDITOR_URI_TEMPLATE="cursor://file{path}"',
+        '',
+      ].join('\n')
+    );
+    const defaults = resolveDefaultSettings(envFile);
+    assert.equal(defaults.deliveryNoteEnabled, true);
+    assert.equal(defaults.deliveryNoteText, '新しい指示\n2行目');
+    assert.equal(defaults.snapshotsEnabled, false);
+    assert.equal(defaults.editorUriTemplate, 'cursor://file{path}');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('writeEnvEntries は無いキーを末尾に足し、ファイルもディレクトリも無ければ作る', () => {
+  const tmp = makeTmpDir();
+  try {
+    const envFile = path.join(tmp, 'nested', '.env');
+    writeEnvEntries(envFile, { ARK_DELIVERY_NOTE_TEXT: encodeEnvValue('') });
+    assert.equal(fs.readFileSync(envFile, 'utf8'), 'ARK_DELIVERY_NOTE_TEXT=""\n');
+    // 空文字も「空の note」として読み戻せる（組み込みデフォルトに落ちない）
+    assert.equal(resolveDefaultSettings(envFile).deliveryNoteText, '');
+
+    fs.writeFileSync(envFile, 'ARK_READ_ONLY_MODE=true'); // 末尾改行なし
+    writeEnvEntries(envFile, { ARK_DELIVERY_NOTE_ENABLED: 'false' });
+    assert.equal(
+      fs.readFileSync(envFile, 'utf8'),
+      'ARK_READ_ONLY_MODE=true\nARK_DELIVERY_NOTE_ENABLED=false\n'
+    );
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('writeEnvEntries は CRLF の改行を保ち、symlink はリンク先を書き換える', () => {
+  const tmp = makeTmpDir();
+  try {
+    const realFile = path.join(tmp, 'shared.env');
+    const link = path.join(tmp, '.env');
+    fs.writeFileSync(realFile, '# c\r\nARK_DELIVERY_NOTE_ENABLED=false\r\n');
+    fs.symlinkSync(realFile, link);
+    writeEnvEntries(link, { ARK_DELIVERY_NOTE_ENABLED: 'true' });
+    assert.ok(fs.lstatSync(link).isSymbolicLink());
+    assert.equal(fs.readFileSync(realFile, 'utf8'), '# c\r\nARK_DELIVERY_NOTE_ENABLED=true\r\n');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('encodeEnvValue はクォートや # を含む文字列も parseEnvFile で同じ値に戻る', () => {
+  const tmp = makeTmpDir();
+  try {
+    const envFile = path.join(tmp, '.env');
+    const text = '"引用" と # 記号\r\n行2 \'single\' ';
+    assert.equal(envValueRoundTrips(text), true);
+    writeEnvEntries(envFile, { ARK_DELIVERY_NOTE_TEXT: encodeEnvValue(text) });
+    assert.equal(parseEnvFile(envFile).ARK_DELIVERY_NOTE_TEXT, '"引用" と # 記号\n行2 \'single\' ');
+    // 文字列としての「\n」は .env では改行と区別できない
+    assert.equal(envValueRoundTrips('C:\\new'), false);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

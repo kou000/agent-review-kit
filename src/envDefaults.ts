@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as path from 'path';
 import { DEFAULT_SETTINGS, ReviewSettings } from './types';
 
 // Same cap as MAX_TARGET_FIELD on the PUT /api/settings path, so a huge env
@@ -69,4 +70,69 @@ export function resolveDefaultSettings(envFile: string): ReviewSettings {
     prPendingCommentEnabled:
       envBool(env.ARK_PR_PENDING_COMMENT) ?? DEFAULT_SETTINGS.prPendingCommentEnabled,
   };
+}
+
+// The only value form parseEnvFile can read back losslessly for arbitrary
+// text: double quotes, newlines as `\n`. A literal backslash-n in the text
+// has no escape and would come back as a newline, so callers check
+// envValueRoundTrips first.
+export function encodeEnvValue(value: string): string {
+  return '"' + value.replace(/\r\n?/g, '\n').replace(/\n/g, '\\n') + '"';
+}
+
+export function envValueRoundTrips(value: string): boolean {
+  const normalized = value.replace(/\r\n?/g, '\n');
+  return encodeEnvValue(normalized).slice(1, -1).replace(/\\n/g, '\n') === normalized;
+}
+
+/**
+ * Rewrites only the given ARK_* keys in the env file, leaving every other
+ * line (comments, other keys, a concatenated .env.local section) as it was.
+ * parseEnvFile is last-wins, so the last occurrence of a key is the one
+ * replaced; a missing key is appended. Values are written as-is, so the
+ * caller passes already-encoded values (see encodeEnvValue).
+ */
+export function writeEnvEntries(file: string, entries: Record<string, string>): void {
+  let raw = '';
+  try {
+    raw = fs.readFileSync(file, 'utf8');
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+  }
+  const eol = raw.includes('\r\n') ? '\r\n' : '\n';
+  const lines = raw === '' ? [] : raw.split(/\r?\n/);
+  if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+  for (const [key, value] of Object.entries(entries)) {
+    const re = new RegExp(`^(\\s*(?:export\\s+)?)${key}\\s*=`);
+    let idx = -1;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (re.test(lines[i])) {
+        idx = i;
+        break;
+      }
+    }
+    if (idx >= 0) {
+      const prefix = re.exec(lines[idx])![1];
+      lines[idx] = `${prefix}${key}=${value}`;
+    } else {
+      lines.push(`${key}=${value}`);
+    }
+  }
+  // A symlinked .env (older setups) is written through to its target rather
+  // than replaced by a regular file.
+  let target = file;
+  try {
+    target = fs.realpathSync(file);
+  } catch {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+  }
+  let mode: number | undefined;
+  try {
+    mode = fs.statSync(target).mode & 0o777;
+  } catch {
+    mode = undefined;
+  }
+  const tmp = path.join(path.dirname(target), `.${path.basename(target)}.tmp-${process.pid}`);
+  fs.writeFileSync(tmp, lines.join(eol) + eol, mode === undefined ? undefined : { mode });
+  fs.renameSync(tmp, target);
 }
