@@ -197,6 +197,25 @@ body {
 #phase-steps .sep { color: #57606a; margin: 0 7px; }
 #phase-steps .step.done { color: #57ab5a; }
 #phase-steps .step.current { color: #fff; font-weight: 700; }
+/* 作業の単位（MR1・MR2…）。開始ボタンは中断ボタンと同じ枠線だけの形で、色は完了フェーズの緑 */
+#units { display: flex; align-items: center; gap: 8px; flex-shrink: 0; padding-left: 14px; border-left: 1px solid #444c56; white-space: nowrap; }
+.unit-start {
+  padding: 2px 10px;
+  border: 1px solid #57ab5a;
+  border-radius: 6px;
+  background: transparent;
+  color: #57ab5a;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.unit-start:hover:not(:disabled) { background: #57ab5a22; }
+.unit-start:disabled { opacity: 0.5; cursor: default; }
+.unit { color: #8b949e; }
+.unit-started { color: #539bf5; }
+.unit-mr-created { color: #d29922; }
+.unit-mr-created a { color: inherit; display: inline-block; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+.unit-done { color: #57ab5a; }
 #status-note {
   flex: 1;
   min-width: 0;

@@ -105,6 +105,30 @@ async function postApprovalComment(session, tab, note) {
   return { ok: false, error: errors.join(' / ') || '投稿先の ark がありません' };
 }
 
+// 作業の単位（MR1・MR2…）の開始ボタン。2 本目以降の MR でエージェントがスキルの手順
+// （差分タブ・AI レビュー・検証タブなど）を飛ばさないよう、SKILL.md の全体の読み直しを指示する
+// コメントを docspace の全体コメントとして投稿する（承認ボタンと同じく wait-comments で届く）
+const START_PREFIX = agentWatch.START_PREFIX;
+
+function startUnitBody(unit, skill) {
+  const head = `${START_PREFIX}「${unit.label}」（${unit.key}）の作業を始めてください`;
+  const target =
+    skill && skill.name
+      ? `実行中のスキル ${skill.name} の SKILL.md（${skill.path}）`
+      : '実行中のフローのスキルの SKILL.md ';
+  const body =
+    `作業を始める前に、${target}を Read で全体を読み直し、これから進める Step の手順をこのスレッドに書き出してから、` +
+    'Step 5（ブランチ作成）から順に進めること。差分タブを追加したら、AI レビューの前にすぐ hub の URL を案内すること。';
+  return `${head}\n\n${body}`;
+}
+
+async function postStartComment(session, unit) {
+  if (!session.docspaceDir) return { ok: false, error: 'docspace がありません' };
+  const r = await ark.postArkComment(session.docspaceDir, { body: startUnitBody(unit, session.skill), intent: 'fix' });
+  if (r.ok) return { ok: true, delivery: { projectDir: session.docspaceDir, commentId: r.commentId } };
+  return { ok: false, error: r.error };
+}
+
 function shellPage(sessionId) {
   const template = fs.readFileSync(path.join(CLIENT_DIR, 'shell.html'), 'utf8');
   // セッション ID は英数と ._- のみ（validateSessionId 済み）なので文字列連結で安全
@@ -195,6 +219,45 @@ async function handle(req, res, hubPort) {
     try {
       const { tab } = store.approveTab(apiApprove[1], body.tabId, body.note, 'browser', delivered.delivery);
       json(res, 200, { status: 'approved', tab });
+    } catch (err) {
+      json(res, 400, { error: err.message });
+    }
+    return;
+  }
+
+  const apiStartUnit = /^\/api\/session\/([^/]+)\/start-unit$/.exec(p);
+  if (method === 'POST' && apiStartUnit) {
+    let body;
+    try {
+      body = await readBody(req);
+    } catch (err) {
+      json(res, 400, { error: err.message });
+      return;
+    }
+    if (!body.key) {
+      json(res, 400, { error: 'key is required' });
+      return;
+    }
+    const session = store.loadSession(apiStartUnit[1]);
+    const unit = session && (session.units || []).find((u) => u.key === body.key);
+    if (!unit) {
+      json(res, 400, { error: `unit not found: ${body.key}` });
+      return;
+    }
+    // 二重押し・別ウィンドウからの再押下で開始コメントを重複投稿しない
+    if (unit.state !== 'pending') {
+      json(res, 200, { status: 'already', unit });
+      return;
+    }
+    const delivered = await postStartComment(session, unit);
+    if (!delivered.ok) {
+      // 着手として記録しない（ボタンを残してユーザーが押し直せるようにする）
+      json(res, 502, { error: `エージェントに開始を届けられませんでした: ${delivered.error}` });
+      return;
+    }
+    try {
+      const result = store.setUnitState(apiStartUnit[1], body.key, { state: 'started' }, 'browser', delivered.delivery);
+      json(res, 200, { status: 'started', unit: result.unit });
     } catch (err) {
       json(res, 400, { error: err.message });
     }
@@ -324,4 +387,4 @@ async function startServer(requestedPort) {
   throw lastErr || new Error('no free port');
 }
 
-module.exports = { startServer, DEFAULT_PORT };
+module.exports = { startServer, startUnitBody, START_PREFIX, DEFAULT_PORT };

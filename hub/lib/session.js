@@ -13,6 +13,8 @@ const HUB_ROOT = process.env.REVIEW_HUB_STATE_DIR || path.join(os.homedir(), '.r
 const SESSION_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const TAB_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const TAB_TYPES = ['ark-doc', 'ark-diff', 'static'];
+const UNIT_KEY_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const UNIT_STATES = ['pending', 'started', 'mr-created', 'done'];
 
 // 既定フェーズ（計画→実装→PR の流れ）。フローに合わせて start --phases で差し替え可
 const DEFAULT_PHASES = ['計画', '実装', '差分レビュー', 'E2E', 'PR'];
@@ -54,6 +56,18 @@ function validateSessionId(id) {
 function validateTabId(id) {
   if (!id || !TAB_ID_RE.test(id)) {
     throw new Error(`invalid tab id: ${JSON.stringify(id)} (allowed: ${TAB_ID_RE})`);
+  }
+}
+
+function validateUnitKey(key) {
+  if (!key || !UNIT_KEY_RE.test(key)) {
+    throw new Error(`invalid unit key: ${JSON.stringify(key)} (allowed: ${UNIT_KEY_RE})`);
+  }
+}
+
+function validateUnitState(state) {
+  if (!UNIT_STATES.includes(state)) {
+    throw new Error(`invalid unit state: ${JSON.stringify(state)} (allowed: ${UNIT_STATES.join(', ')})`);
   }
 }
 
@@ -210,6 +224,7 @@ function createSession(id, title, phases, skill) {
       waiting: { items: [], updatedAt: null },
       interrupted: null,
       skill: skill ? { ...skill, setAt: new Date().toISOString() } : null,
+      units: [],
       tabs: [],
     };
     atomicWriteJson(sessionJsonPath(id), session);
@@ -366,14 +381,74 @@ function setStatus(sessionId, { phase, note }) {
   return result;
 }
 
-// 実行中のスキル（名前と SKILL.md のパス）。会話の要約や再開のあとにエージェントが
-// スキルの手順を読み直せるよう、status と SessionStart フックが出す。null で解除
+// 実行中のスキル（名前と SKILL.md のパス）。【開始】ボタンの指示文（読み直す SKILL.md）と
+// status に使う。null で解除
 function setSkill(sessionId, skill) {
   const result = mutateSession(sessionId, (session) => {
     session.skill = skill ? { ...skill, setAt: new Date().toISOString() } : null;
     return { skill: session.skill };
   });
   appendEvent(sessionId, 'skill', { skill: result.skill });
+  return result;
+}
+
+// 作業の単位（MR1・MR2… など）の一覧を置き換えた結果を返す。同じ key の既存の
+// state・mr・startedAt・updatedAt は引き継ぐ（説明だけ直したときに状態が消えないように）。
+// units: [{ key, label }]
+function mergeUnits(prevUnits, units, now) {
+  const seen = new Set();
+  for (const u of units) {
+    validateUnitKey(u && u.key);
+    if (seen.has(u.key)) throw new Error(`duplicate unit key: ${u.key}`);
+    seen.add(u.key);
+    if (typeof u.label !== 'string' || !u.label.trim()) throw new Error(`unit label is required: ${u.key}`);
+  }
+  const prev = new Map((Array.isArray(prevUnits) ? prevUnits : []).map((u) => [u.key, u]));
+  return units.map((u) => {
+    const p = prev.get(u.key);
+    return {
+      key: u.key,
+      label: u.label.trim(),
+      state: p && UNIT_STATES.includes(p.state) ? p.state : 'pending',
+      mr: (p && p.mr) || null,
+      updatedAt: (p && p.updatedAt) || now,
+      startedAt: (p && p.startedAt) || null,
+    };
+  });
+}
+
+function setUnits(sessionId, units) {
+  const result = mutateSession(sessionId, (session) => {
+    session.units = mergeUnits(session.units, units, new Date().toISOString());
+    return { units: session.units };
+  });
+  appendEvent(sessionId, 'units', { units: result.units.map((u) => ({ key: u.key, label: u.label, state: u.state })) });
+  return result;
+}
+
+// 作業の単位の状態。mr は undefined なら据え置き。started は最初に着手した時刻を startedAt に残し、
+// pending に戻したときは消す（もう一度開始ボタンを押せるようにする）
+function setUnitState(sessionId, key, { state, mr }, source, delivery) {
+  validateUnitKey(key);
+  validateUnitState(state);
+  const result = mutateSession(sessionId, (session) => {
+    const unit = (session.units || []).find((u) => u.key === key);
+    if (!unit) throw new Error(`unit not found: ${key}`);
+    const now = new Date().toISOString();
+    unit.state = state;
+    if (mr !== undefined) unit.mr = mr || null;
+    if (state === 'started' && !unit.startedAt) unit.startedAt = now;
+    if (state === 'pending') unit.startedAt = null;
+    unit.updatedAt = now;
+    return { unit };
+  });
+  appendEvent(sessionId, 'unit-state', {
+    key,
+    state: result.unit.state,
+    mr: result.unit.mr,
+    source: source || 'cli',
+    ...(delivery ? { delivery } : {}),
+  });
   return result;
 }
 
@@ -456,6 +531,9 @@ module.exports = {
   waiterScopes,
   setStatus,
   setSkill,
+  mergeUnits,
+  setUnits,
+  setUnitState,
   setWaiting,
   interruptSession,
   resumeSession,
@@ -466,5 +544,7 @@ module.exports = {
   removeServerInfo,
   validateSessionId,
   validateTabId,
+  validateUnitKey,
+  UNIT_STATES,
   DEFAULT_PHASES,
 };

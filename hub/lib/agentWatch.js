@@ -15,7 +15,7 @@
 // 経過時間は最新のコメントの updatedAt（状態を変えた時刻）から数える。
 //
 // 催促はユーザー名義の open の返信として ark の POST /api/comments で投稿する
-// （承認ボタンの【承認】コメントと同じ経路）。wait-comments に配達され、止まっている
+// （承認ボタンの【承認】・作業の単位の開始ボタンの【開始】コメントと同じ経路）。wait-comments に配達され、止まっている
 // エージェントのターンが始まる。本文の先頭【催促】で hub の自動投稿だと分かるようにし、
 // 重複防止にも使う: 最新のコメントが未対応（open/seen）の催促なら、エージェントが状態を
 // 更新するまで再催促しない。エージェントが催促や元のコメントの状態を変える（working にする・
@@ -30,6 +30,7 @@ const WATCH_INTERVAL_MS = 30 * 1000;
 
 const NUDGE_PREFIX = '【催促】';
 const APPROVAL_PREFIX = '【承認】';
+const START_PREFIX = '【開始】';
 
 function authorOf(c) {
   return c.author || 'user';
@@ -62,11 +63,12 @@ function latestComment(thread) {
   return latest;
 }
 
-// エージェント待ちのスレッドなら { topId, state, commentId, since, elapsedMs, nudgePending, approval, documentId }、
+// エージェント待ちのスレッドなら { topId, state, commentId, since, elapsedMs, nudgePending, approval, start, documentId }、
 // そうでなければ null。
 //   state        — 'open' | 'seen' | 'working'（最新のコメントの状態）
 //   nudgePending — 最新のコメントが未対応（open/seen）の催促。エージェントがまだ状態を更新していない
 //   approval     — 承認ボタンのコメント（トップレベルの本文が【承認】で始まる）のスレッド
+//   start        — 作業の単位の開始ボタンのコメント（トップレベルの本文が【開始】で始まる）のスレッド
 // エージェント名義の open/seen は AI 指摘でユーザーの返事待ちなので対象外。
 // working はエージェントしか付けないので、誰の名義でも対象
 function threadWait(topId, thread, now) {
@@ -88,6 +90,7 @@ function threadWait(topId, thread, now) {
     elapsedMs: Math.max(0, now - sinceMs),
     nudgePending: isNudge(latest) && (st === 'open' || st === 'seen'),
     approval: Boolean(top && typeof top.body === 'string' && top.body.startsWith(APPROVAL_PREFIX)),
+    start: Boolean(top && typeof top.body === 'string' && top.body.startsWith(START_PREFIX)),
     documentId: (top && top.documentId) || latest.documentId || null,
   };
 }
@@ -228,6 +231,7 @@ function createAgentWatch(deps) {
             state: w.state,
             elapsedMs: w.elapsedMs,
             approval: w.approval,
+            start: w.start,
             ok: Boolean(r && r.ok),
             commentId: r && r.ok ? r.commentId : undefined,
             error: r && !r.ok ? r.error : undefined,
@@ -286,6 +290,7 @@ module.exports = {
   OPEN_LIMIT_MS,
   WATCH_INTERVAL_MS,
   NUDGE_PREFIX,
+  START_PREFIX,
   isNudge,
   groupThreads,
   latestComment,

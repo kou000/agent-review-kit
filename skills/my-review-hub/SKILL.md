@@ -1,6 +1,6 @@
 ---
 name: my-review-hub
-description: "計画・差分レビュー・E2E計画・E2E結果を 1 つのブラウザページ（タブ切替）に統合表示する review-hub の操作手順。agent-review-kit のページを iframe で束ね、タブごとの承認ボタン（計画承認・E2E実行承認・PR作成承認）を ark のコメント（【承認】）として wait-comments で受け取る。ステータスバー（フェーズ進行・作業メモ）と中断ボタン、セッション再開手順（status / resume）も定義する。計画→実装→PR のように承認ゲートを挟むフロー系スキルから参照される。Use when a skill needs to show plans, diffs, or E2E results in one tabbed browser page, wait for a browser-side approval gate, or resume an interrupted review session."
+description: "計画・差分レビュー・E2E計画・E2E結果を 1 つのブラウザページ（タブ切替）に統合表示する review-hub の操作手順。agent-review-kit のページを iframe で束ね、タブごとの承認ボタン（計画承認・E2E実行承認・PR作成承認）を ark のコメント（【承認】）として wait-comments で受け取る。ステータスバー（フェーズ進行・作業メモ・作業の単位 MR1・MR2… ごとの開始ボタン＝【開始】コメント）と中断ボタン、セッション再開手順（status / resume）も定義する。計画→実装→PR のように承認ゲートを挟むフロー系スキルから参照される。Use when a skill needs to show plans, diffs, or E2E results in one tabbed browser page, wait for a browser-side approval gate, or resume an interrupted review session."
 allowed-tools: [Bash, Read, Write]
 ---
 
@@ -59,8 +59,8 @@ $RH start --session TICKET-123 --title "TICKET-123 ○○の修正" --phases "�
   `計画,実装,差分レビュー,E2E,PR`。バグ修正フローなら `再現,設計,修正,E2E,PR` のように
   実際の流れに合わせる。既存セッションに `--phases` 付きで start し直すと差し替えられる
 - `--skill` / `--skill-path` は、このセッションで実行しているフロー系スキルの名前と SKILL.md のパス（対で指定する）。
-  `$RH status --session <id>` の `skill` / `skillReminder` に出るほか、SessionStart フック
-  （session-skill-reminder.sh、matcher: compact / resume）が会話の要約・再開の直後に「SKILL.md を読み直す」よう伝える。
+  作業の単位の【開始】ボタンの指示文（読み直す SKILL.md。手順 3「作業の単位と開始ボタン」）と、
+  `$RH status --session <id>` の `skill` / `skillReminder` に使う。
   start の後から付けるときや付け替えるときは `$RH set-skill --session <id> --skill <name> --skill-path <path>`
 
 計画・E2E計画・E2Eサマリなどの**ドキュメント類は必ず docspace に publish する**。
@@ -162,6 +162,45 @@ $RH set-waiting --session TICKET-123 --clear
 - 呼ぶたびに一覧を丸ごと置き換える。片付いたら残りだけで呼び直し、無くなったら `--clear` で空にする
 - 一覧に載せるのは返事待ちと判断したものだけ（作業メモ・承認待ち・コメント件数は載せない。承認とコメントはバーに自動で出る）
 
+### 作業の単位と開始ボタン（MR1・MR2…）
+
+計画で作業を複数の MR に分けたら、その単位をステータスバーに出す。2 本目以降の MR は、ユーザーが hub の
+「<key> を開始」ボタンを押したときに始める（ボタンが、スキルの手順を読み直して Step 5 から進める指示を届ける。
+2 本目以降で差分タブ・AI レビュー・検証タブなどの手順を飛ばさないため）:
+
+```bash
+$RH set-units --session TICKET-123 --unit "MR1:IAM ロールの作成" --unit "MR2:バッチの切り替え" --unit "MR3:ECS と RDS Proxy"
+$RH set-unit --session TICKET-123 --key MR1 --state mr-created --mr '!441'
+$RH set-unit --session TICKET-123 --key MR1 --state done
+$RH set-units --session TICKET-123 --clear
+```
+
+- `--unit "<key>:<label>"` は繰り返し指定する。key は英数と `._-`（`MR1` など）、label は説明。
+  呼ぶたびに一覧を丸ごと置き換えるが、同じ key の状態（state・mr・着手時刻）は引き継ぐ。説明だけ直すときも全件を渡し直す
+- state は `pending`（未着手）・`started`（着手済み）・`mr-created`（MR 作成済み）・`done`（完了）。
+  ステータスバーには pending だけ「<key> を開始」ボタン、ほかは「<key> 着手済み」「<key> MR 作成済み <mr>」「<key> 完了」と出る
+- `status --session` の `units` にも出る
+- ボタンを押すと、hub が docspace の全体コメントとして【開始】コメントを投稿し、state を `started` にする
+  （投稿できなければ state は変えずにエラーを出す。ボタンが残るので押し直せる）。本文:
+
+  ```
+  【開始】「<label>」（<key>）の作業を始めてください
+
+  作業を始める前に、実行中のスキル <スキル名> の SKILL.md（<パス>）を Read で全体を読み直し、これから進める Step の手順をこのスレッドに書き出してから、Step 5（ブランチ作成）から順に進めること。差分タブを追加したら、AI レビューの前にすぐ hub の URL を案内すること。
+  ```
+
+**【開始】コメントが届いたら**（docspace の wait-comments に届く）:
+
+1. `resolve-comment <id> --status answered --message "<key> の作業を始めます。SKILL.md を読み直して手順を書き出します"` で受領を返す
+2. 本文にある SKILL.md を Read で**全体**読み直す（途中の Step だけを拾い読みしない）
+3. これから進める Step の手順をそのスレッドに書き出す（`resolve-comment` で同じスレッドに返信する）
+4. Step 5（ブランチ作成）から順に進める。差分タブを追加したら、AI レビューの前にすぐ hub の URL を案内する
+5. MR を作ったら `$RH set-unit --session <id> --key <key> --state mr-created --mr '!NNN'`、
+   マージ・適用まで済んだら `--state done` にする
+
+最初の単位（MR1）は計画承認からそのまま始めてよい（ボタンを待たない）。その場合は着手時に
+`$RH set-unit --session <id> --key MR1 --state started` を自分で呼ぶ。
+
 ## 4. タブ登録（3 種）
 
 ```bash
@@ -217,6 +256,9 @@ ark `wait-comments` だけで待つ（**`wait-approval` は使わない**。承�
 cd <docspaceDir> && $ARK wait-comments --timeout 6600          # docspace 宛（全 doc）で 1 本
 cd <repoDir> && $ARK wait-comments --diff-only --timeout 6600         # 差分レビュー用に repo ごと 1 本
 ```
+
+作業の単位の開始ボタンの**【開始】コメント**も同じ経路（docspace の全体コメント）で届く。届いたときの動きは
+手順 3「作業の単位と開始ボタン」に従う。
 
 **承認コメント**: 本文が `【承認】` で始まるコメント（`【承認】「<ボタンのラベル>」が押されました（タブ: <タブ名>）`）。
 投稿先はタブ種別で決まる: ark-doc タブ → そのドキュメント宛（`documentId` 付き）、ark-diff タブ → その repo の
@@ -379,7 +421,7 @@ ark ページ内の「レビュー終了」ボタンは **ark サーバ自体を
 - セッション終了（PR 作成完了）後、docspace / 各リポの ark serve は kill してよい。
   切り離して起動しているのでタスクとしては止められない。各 cwd の `.agent-review/server.json` の pid を kill する
   （`kill $(node -p "require('./.agent-review/server.json').pid")`）。hub は `$RH stop`（`~/.review-hub/server.json` の pid を止める）
-- フローが終わったら `$RH set-skill --session <id> --clear` で実行中のスキルを外す（読み直しの案内を止める）
+- フローが終わったら `$RH set-skill --session <id> --clear` で実行中のスキルを外す（【開始】の指示文と status から外れる）
 - ark serve をすべて止めたら `rm -f ~/.review-hub/waiter-owner-session`（waiter 監視フックの解除）。
   中断ボタン経由の停止時（手順 6）も同様に削除する
 - hub サーバは常駐可。セッションデータは `~/.review-hub/sessions/<id>/` に残る

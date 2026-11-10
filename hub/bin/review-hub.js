@@ -14,12 +14,15 @@ function usage() {
     '  serve [--port N]                                 hub サーバを起動（フォアグラウンド常駐）',
     '  start --session <id> [--title <t>]               セッション作成（docspace も作成、既存なら再利用）',
     '        [--phases <a,b,c>]                          フェーズ列（省略時: 計画,実装,差分レビュー,E2E,PR）',
-    '        [--skill <name> --skill-path <SKILL.md>]    実行中のスキル（status と再開・要約後のフックが読み直しを促す）',
+    '        [--skill <name> --skill-path <SKILL.md>]    実行中のスキル（【開始】ボタンの指示文と status に使う）',
     '  set-skill --session <id> --skill <name> --skill-path <SKILL.md>  実行中のスキルを設定する',
     '  set-skill --session <id> --clear               実行中のスキルを外す（フロー完了時）',
     '  set-status --session <id> [--phase <p>] [--note <t>]  現在フェーズ・作業メモを更新（ステータスバーに表示）',
     '  set-waiting --session <id> --item <文> [--item <tabId>::<文> ...]  返事待ち一覧を丸ごと置き換える（ステータスバーに表示）',
     '  set-waiting --session <id> --clear              返事待ち一覧を空にする',
+    '  set-units --session <id> --unit "<key>:<label>" [--unit ...]  作業の単位（MR1・MR2…）を丸ごと置き換える（同じ key の状態は引き継ぐ。ステータスバーに開始ボタン）',
+    '  set-units --session <id> --clear                作業の単位を空にする',
+    '  set-unit --session <id> --key <key> --state <pending|started|mr-created|done> [--mr <text>]  作業の単位の状態を更新する',
     '  interrupt --session <id> [--note <t>] [--all]    中断を記録し、このセッションの ark serve・wait-comments を停止（--all: 全セッション・全 hub を停止）',
     '  resume --session <id>                            中断状態を解除（再開時に実行）',
     '  add-tab --session <id> --id <tabId> --title <t>',
@@ -87,6 +90,13 @@ function parseWaitingItem(value) {
     }
   }
   return { text: value };
+}
+
+// --unit の値「<key>:<label>」。key は英数と ._- なので最初の「:」で分ける（label 側の「:」はそのまま）
+function parseUnit(value) {
+  const idx = value.indexOf(':');
+  if (idx <= 0) fail(`--unit must be "<key>:<label>": ${JSON.stringify(value)}`);
+  return { key: value.slice(0, idx), label: value.slice(idx + 1) };
 }
 
 function out(value) {
@@ -239,6 +249,29 @@ async function main() {
       break;
     }
 
+    case 'set-units': {
+      // 作業の単位の一覧を丸ごと置き換える。空にするのは set-waiting と同じく --clear の明示だけ
+      require_(args, ['session']);
+      const values = repeatedValues(rest, '--unit');
+      if (args.clear && values.length > 0) fail('--clear and --unit cannot be used together');
+      if (!args.clear && values.length === 0) fail('--unit or --clear is required');
+      store.requireSession(args.session);
+      const { units } = store.setUnits(args.session, values.map(parseUnit));
+      out({ status: 'ok', units });
+      break;
+    }
+
+    case 'set-unit': {
+      require_(args, ['session', 'key', 'state']);
+      store.requireSession(args.session);
+      const { unit } = store.setUnitState(args.session, args.key, {
+        state: args.state,
+        mr: typeof args.mr === 'string' ? args.mr : undefined,
+      });
+      out({ status: 'ok', unit });
+      break;
+    }
+
     case 'interrupt': {
       // 中断（ブラウザの中断ボタンと同じ）: このセッションの ark serve と wait-comments を止める。
       // 稼働中の他セッションが使うスコープは残し、hub は稼働中の他セッションが無いときだけ止める
@@ -368,6 +401,7 @@ async function main() {
           phases: session.phases || [],
           current: session.status || null,
           waiting: session.waiting || { items: [], updatedAt: null },
+          units: session.units || [],
           interrupted: session.interrupted || null,
           lastInterrupt: session.lastInterrupt || null,
           pendingApprovals: tabs.filter((t) => t.approval && !t.approval.approvedAt).map((t) => t.approval.label || t.id),

@@ -19,6 +19,7 @@
     conn: document.getElementById('conn'),
     statusBar: document.getElementById('status-bar'),
     phaseSteps: document.getElementById('phase-steps'),
+    units: document.getElementById('units'),
     statusNote: document.getElementById('status-note'),
     waitingBtn: document.getElementById('waiting-btn'),
     waitingCount: document.getElementById('waiting-count'),
@@ -49,6 +50,8 @@
   let waitingMenuOpen = false;
   let waitingMenuKey = null; // 一覧の中身が変わったときだけ作り直す（ポーリングのたびに行を差し替えない）
   let contextTabId = null; // 右クリックメニューの対象タブ
+  let unitsKey = null; // 作業の単位の表示は中身が変わったときだけ作り直す（ポーリングのたびにボタンを差し替えない）
+  let startingUnitKey = null; // 開始の送信中の単位（二重押し防止）
   const frames = new Map(); // tabId -> {iframe, url, overlay}
 
   function api(path, options) {
@@ -275,7 +278,8 @@
     const waitingItems = (session.waiting && session.waiting.items) || [];
     const watch = session.agentWatch || null;
     const watching = Boolean(watch && (watch.active > 0 || watch.undelivered > 0));
-    const visible = phases.length > 0 || st.phase || st.note || interrupted || waitingItems.length > 0 || watching;
+    const units = Array.isArray(session.units) ? session.units : [];
+    const visible = phases.length > 0 || st.phase || st.note || interrupted || waitingItems.length > 0 || watching || units.length > 0;
     el.statusBar.hidden = !visible;
     if (!visible) return;
     el.statusBar.classList.toggle('interrupted', Boolean(interrupted));
@@ -295,6 +299,7 @@
       el.phaseSteps.appendChild(step);
     });
 
+    renderUnits(units);
     el.statusNote.textContent = st.note || '';
     el.statusNote.title = st.note || '';
     renderWaiting();
@@ -316,6 +321,69 @@
     el.statusMeta.textContent = parts.join('　');
 
     el.interruptBtn.hidden = Boolean(interrupted);
+  }
+
+  // 作業の単位（MR1・MR2…）。未着手は開始ボタン、それ以外は状態の表示。押すと hub が
+  // 【開始】コメント（スキルの SKILL.md を読み直して Step 5 から進める指示）をエージェントに届ける
+  function renderUnits(units) {
+    el.units.hidden = units.length === 0;
+    const key = JSON.stringify([units, startingUnitKey]);
+    if (key === unitsKey) return;
+    unitsKey = key;
+    el.units.textContent = '';
+    for (const unit of units) {
+      const hover = `${unit.key}: ${unit.label}`;
+      if (unit.state === 'pending') {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'unit-start';
+        btn.textContent = startingUnitKey === unit.key ? `${unit.key} を開始中…` : `${unit.key} を開始`;
+        btn.title = hover;
+        btn.disabled = startingUnitKey !== null;
+        btn.addEventListener('click', () => startUnit(unit));
+        el.units.appendChild(btn);
+        continue;
+      }
+      const span = document.createElement('span');
+      span.className = `unit unit-${unit.state}`;
+      span.title = unit.startedAt ? `${hover}\n着手 ${new Date(unit.startedAt).toLocaleString()}` : hover;
+      if (unit.state === 'started') span.textContent = `${unit.key} 着手済み`;
+      else if (unit.state === 'done') span.textContent = `${unit.key} 完了`;
+      else if (unit.state === 'mr-created') {
+        span.textContent = `${unit.key} MR 作成済み`;
+        if (unit.mr) {
+          span.appendChild(document.createTextNode(' '));
+          if (/^https?:\/\//.test(unit.mr)) {
+            const a = document.createElement('a');
+            a.href = unit.mr;
+            a.target = '_blank';
+            a.rel = 'noopener';
+            a.textContent = unit.mr;
+            span.appendChild(a);
+          } else {
+            span.appendChild(document.createTextNode(unit.mr));
+          }
+        }
+      } else span.textContent = `${unit.key} ${unit.state}`;
+      el.units.appendChild(span);
+    }
+  }
+
+  function startUnit(unit) {
+    if (startingUnitKey) return;
+    if (!window.confirm(`${unit.key}: ${unit.label} を開始しますか？`)) return;
+    startingUnitKey = unit.key;
+    render();
+    api(`/api/session/${encodeURIComponent(sessionId)}/start-unit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: unit.key }),
+    })
+      .catch((err) => window.alert(`開始に失敗しました: ${err.message}`))
+      .then(() => {
+        startingUnitKey = null;
+        return refresh();
+      });
   }
 
   // 経過時間の表示（分単位。1 分未満は秒）
@@ -353,7 +421,7 @@
       box.appendChild(span);
     }
     box.title = (watch.threads || [])
-      .map((t) => `${WATCH_STATE_LABEL[t.state] || t.state} ${formatElapsed(t.elapsedMs)}${t.approval ? '（承認）' : ''}${t.nudgePending ? '（催促済み）' : ''} — ${t.projectDir || ''}`)
+      .map((t) => `${WATCH_STATE_LABEL[t.state] || t.state} ${formatElapsed(t.elapsedMs)}${t.approval ? '（承認）' : ''}${t.start ? '（開始）' : ''}${t.nudgePending ? '（催促済み）' : ''} — ${t.projectDir || ''}`)
       .join('\n');
   }
 

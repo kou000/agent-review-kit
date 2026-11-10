@@ -58,7 +58,7 @@ hub サーバは 30 秒ごとに、中断されていない各セッションの
   wait-comments に配達され、止まっているエージェントのターンが始まる。本文は `【催促】（review-hub の自動投稿）…` で始まる
 - 重複防止: 最新のコメントが未対応（open/seen）の催促なら再催促しない。エージェントが催促や大元を
   `working` にする・返信するなどして状態を更新すると、その時刻から数え直す
-- 承認ボタンのコメント（【承認】）も同じ規則。エージェント名義の open/seen（AI 指摘）は対象外。削除済み・手動修正の通知も対象外
+- 承認ボタンのコメント（【承認】）・作業の単位の開始ボタンのコメント（【開始】）も同じ規則。エージェント名義の open/seen（AI 指摘）は対象外。削除済み・手動修正の通知も対象外
 - 催促の投稿は `events.jsonl` に `nudged`（失敗は `nudge-failed`）として残る
 - ステータスバーには対応中（seen・working）の件数と最長の経過時間、3 分を超えた未配達の件数を出す。
   `status --session` の `agentWatch` にも同じ集計が出る（中断中は `null`）
@@ -68,7 +68,7 @@ hub サーバは 30 秒ごとに、中断されていない各セッションの
 1 セッション = 1 チケット（フロー 1 回）。複数リポジトリ（backend / frontend / E2E）を跨ぐため、
 状態は対象リポジトリではなく `~/.review-hub/sessions/<id>/` に置く。
 
-- `session.json` — タブ定義・承認状態・フェーズ/ステータス・返事待ち一覧・中断状態
+- `session.json` — タブ定義・承認状態・フェーズ/ステータス・返事待ち一覧・作業の単位・実行中のスキル・中断状態
 - `events.jsonl` — 操作イベントログ（作成・タブ・承認・ステータス・中断/再開）。`status --session` の直近イベント欄の元
 - `docspace/` — ドキュメント類（計画・E2E計画等）の publish 先として使う **非 git ディレクトリ**。
   ここで ark serve を起動すると ark のデータが固定スコープ（`no-git`）になり、
@@ -91,6 +91,12 @@ $RH set-waiting --session TICKET-123 \
                                   # --item は繰り返し可。「<タブid>::<文>」で関係するタブを付けると、一覧の行の右のタブ名チップを押してそのタブに切り替わる
                                   # 中身はエージェントが書いたものだけ（承認待ち・コメント件数は混ぜない）。status の waiting にも出る
 $RH set-waiting --session TICKET-123 --clear       # 返事待ち一覧を空にする
+$RH set-skill --session TICKET-123 --skill my-feature-ct \
+    --skill-path ~/.claude/skills/my-feature-ct/SKILL.md   # 実行中のスキル（【開始】ボタンの指示文と status に使う）。--clear で外す
+$RH set-units --session TICKET-123 \
+    --unit "MR1:IAM ロールの作成" --unit "MR2:バッチの切り替え"  # 作業の単位を丸ごと置き換え（ステータスバーに「<key> を開始」ボタン）
+                                  # --unit は繰り返し可。key は英数と ._-。同じ key の state・mr・着手時刻は引き継ぐ。--clear で空にする
+$RH set-unit --session TICKET-123 --key MR1 --state mr-created --mr '!441'  # 状態: pending|started|mr-created|done
 $RH interrupt --session TICKET-123 [--note "..."] [--all]  # 中断を記録し、このセッションの ark serve・wait-comments を停止（note は自分用メモ）
                                   # 稼働中の他セッションが使う ark は残す。hub は稼働中の他セッションが無いときだけ止める
                                   # --all: 全セッションに中断を記録し、全 ark・同じホストの全 hub を停止（サインアウト前用）
@@ -112,6 +118,22 @@ $RH stop
 ```
 
 すべて JSON を stdout に返す。`add-tab` は同じ `--id` で再実行すると定義更新（承認状態は保持）。
+
+### 作業の単位の開始ボタン
+
+計画を複数の MR に分けたとき、`set-units` で単位（MR1・MR2…）をステータスバーに並べる。未着手（pending）の単位には
+「<key> を開始」ボタンが出て、押すと確認のうえ hub が docspace の ark の全体コメントとして次の本文を投稿し（intent: fix）、
+state を `started` にする。投稿できなければ state を変えずにエラーを返す（ボタンが残るので押し直せる）。
+着手済み以降の単位を押し直しても（別ウィンドウなど）コメントは重ねて投稿しない。
+
+```
+【開始】「<label>」（<key>）の作業を始めてください
+
+作業を始める前に、実行中のスキル <skill.name> の SKILL.md（<skill.path>）を Read で全体を読み直し、これから進める Step の手順をこのスレッドに書き出してから、Step 5（ブランチ作成）から順に進めること。差分タブを追加したら、AI レビューの前にすぐ hub の URL を案内すること。
+```
+
+`set-skill`（または `start --skill`）が無いときは 2 段落目がスキル名なしの「実行中のフローのスキルの SKILL.md を Read で…」になる。
+エージェントは承認と同じく docspace の `wait-comments` で受け取る。
 
 ### 承認の届き方
 
@@ -140,6 +162,7 @@ $RH stop
 | `GET /api/sessions` | セッション一覧 |
 | `GET /api/session/<id>` | タブ定義 + 解決済み iframe URL + ark 死活/未解決数 |
 | `POST /api/session/<id>/approve` | `{tabId, note?}` で承認。ark へ承認コメントを投稿してから記録する（投稿できなければ 502 で記録しない） |
+| `POST /api/session/<id>/start-unit` | `{key}` で作業の単位を開始。docspace の ark へ【開始】コメントを投稿してから state を `started` にする（投稿できなければ 502 で記録しない。pending 以外は投稿せず `already` を返す） |
 | `POST /api/session/<id>/tab-visibility` | `{tabId, hidden}` でタブの非表示を記録（タブの右クリックメニュー / 「非表示 N ▾」メニュー） |
 | `POST /api/session/<id>/interrupt` | `{note?}` で中断記録 + このセッションの ark serve・その wait-comments を停止（ステータスバーの中断ボタン。wait-comments は `interrupted` を返す）。稼働中の他セッションが使う ark は残し、hub 自身は別の hub が動いているか稼働中の他セッションが無いときだけ終了する |
 | `GET /static/<sessionId>/<tabId>/<path>` | static タブの配信（Range 対応） |
