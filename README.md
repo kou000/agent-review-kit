@@ -323,7 +323,13 @@ agent-review-kit add-comment --file src/foo.ts --line 42 --body "..." \
 
 #### PR への下書き投稿依頼
 
-設定 `prPendingCommentEnabled` が `true` で、かつ `set-pr` で PR/MR が登録されている間だけ、コメントカード（AI 指摘・ユーザーのコメント・返信のすべて）と行・行範囲コメントのフォームに「PR に下書き投稿」ボタンが出る。設定は `PUT /api/settings`（`{"prPendingCommentEnabled": true}`）、`serve --pr-pending-comment`、`.env` の `ARK_PR_PENDING_COMMENT` のいずれかで ON にする。他人の PR/MR をレビューするとき（my-interactive-review-peer スキル）用なので、歯車メニューには出さない。
+設定 `prPendingCommentEnabled` が `true` で、かつ `set-pr` で PR/MR が登録されている間だけ、コメントカード（AI 指摘・ユーザーのコメント・返信のすべて）と行・行範囲コメントのフォームに「PR に下書き投稿」ボタンが出る。設定は `set-settings --pr-pending-comment`、`serve --pr-pending-comment`、`PUT /api/settings`（`{"prPendingCommentEnabled": true}`）、`.env` の `ARK_PR_PENDING_COMMENT` のいずれかで ON にする。他人の PR/MR をレビューするとき（my-interactive-review-peer スキル）用なので、歯車メニューには出さない。
+
+```bash
+agent-review-kit set-settings --read-only --pr-pending-comment
+```
+
+`set-settings` は現在のブランチの `settings.json` を書き換えて、指定した設定を ON にする。serve はリクエストのたびにこのファイルを読み直すので、起動中の serve にもそのまま効く。出力は反映後の設定の JSON。OFF にする指定は無い。エージェントが CLI から読み取り専用モードを解除できないようにするためで、OFF はブラウザの歯車メニューから行う。
 
 - コメントカードのボタン: そのコメントの本文を初期値にした入力欄が開く（AI 指摘は先頭の `[Critical] ` / `[Warning] ` / `[Info] ` を除く）。送信すると、本文が `【PR Pending コメント依頼】` の行で始まり次の行から文面が続く返信が、そのスレッドに `intent: "question"` で投稿される（位置は親コメントから引き継ぐ）。
 - 行コメントフォームのボタン: 入力した本文の先頭に `【PR Pending コメント依頼】` の行を付けて、同じ位置にコメントを作る。
@@ -377,7 +383,7 @@ ARK_PR_PENDING_COMMENT=false       # 「PR に下書き投稿」ボタンを出�
 
 `ARK_EDITOR_URI_TEMPLATE` は「リポジトリのファイル」見出しに並ぶ**「VS Code で開く」ボタン**（レビューページのサイドバーと `/files` ページ。ファイルごとではなくリポジトリ単位で1つ）が開く URI のテンプレートで、`{path}` がプロジェクトのルートディレクトリの絶対パスに置き換わる。既定は `vscode://file{path}`。WSL 上のリポジトリを Windows 側の VS Code で開くなら `vscode://vscode-remote/wsl+Ubuntu{path}`、Cursor なら `cursor://file{path}` のように差し替える。マシンごとのパス変換という位置づけなので、このキーだけは**ブラウザの設定パネル（歯車メニュー）からは変更できない**（`PUT /api/settings` は無視する）`.env` 専用の設定（`GET /api/status` / `GET /api/settings` のレスポンスには載る）。値がそのまま href に入るため、ブラウザ側で許可するのは `vscode:` / `vscode-insiders:` / `vscodium:` / `cursor:` / `windsurf:` のみで、それ以外のスキームならボタン自体を出さない。
 
-`ARK_PR_PENDING_COMMENT`（設定キー `prPendingCommentEnabled`）は歯車メニューには出さない設定で、`.env` のほか `PUT /api/settings` と `serve --pr-pending-comment` でも ON にできる（「PR への下書き投稿依頼」参照）。
+`ARK_PR_PENDING_COMMENT`（設定キー `prPendingCommentEnabled`）は歯車メニューには出さない設定で、`.env` のほか `set-settings --pr-pending-comment`・`serve --pr-pending-comment`・`PUT /api/settings` でも ON にできる（「PR への下書き投稿依頼」参照）。
 
 歯車メニューの「同梱する指示テキスト」の下にある**「env にも保存」ボタン**は、画面に今出ている「コメント配信時に指示（note）を同梱」の ON/OFF と指示テキストを、`ARK_DELIVERY_NOTE_ENABLED` / `ARK_DELIVERY_NOTE_TEXT` として `~/.agent-review/.env` に書き込む（`PUT /api/settings/env`。書き込み先のパスはボタンの横に出る）。歯車メニューでの変更はそのブランチの `settings.json` にしか残らないので、全ブランチの初期値にしたいときに使う。書き換えるのはこの 2 キーの行だけで、他の行・コメントはそのまま残す。同じキーが複数行あるときは有効な（後勝ちの）最後の行を書き換え、無ければ末尾に足す（ファイルが無ければ作る）。テキストは `"..."` で囲み、改行は `\n` にして書く。`.env` の書式では文字列としての `\n`（バックスラッシュ + n）を改行と区別できないため、それを含むテキストは保存せずエラーにする。書き込んだ値は、まだ歯車メニューで設定を変えていないブランチ（`settings.json` の無いブランチ）で効く。今のブランチの値はもともと画面で変えたとおりなので変わらない。`serve` の再起動は要らない（`.env` は設定を読むたびに読み直す）。
 

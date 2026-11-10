@@ -5,6 +5,7 @@ import { publishHtml } from './commands/publishHtml';
 import { resolveComment } from './commands/resolveComment';
 import { serve } from './commands/serve';
 import { setPr } from './commands/setPr';
+import { setSettings } from './commands/setSettings';
 import { snapshotBegin, snapshotCreate, snapshotList, snapshotPath } from './commands/snapshot';
 import { status } from './commands/status';
 import { waitComments } from './commands/waitComments';
@@ -67,6 +68,10 @@ Commands:
                            「PRコメント取込」ボタンが出る
     --url <url>            PR/MR の URL（GitHub の /pull/<番号> か GitLab の /-/merge_requests/<番号>）
     --clear                登録を削除する
+  set-settings             現在のブランチの設定を ON にする（起動中の serve にもそのまま効く）。
+                           OFF にする指定は無い（OFF はブラウザの歯車メニューから行う）
+    --read-only            読み取り専用モード（readOnlyMode）を ON にする
+    --pr-pending-comment   「PR に下書き投稿」ボタン（prPendingCommentEnabled）を ON にする
   snapshot begin           修正の適用前に working tree の状態を記録する
   snapshot create          修正の patch を保存し、/snapshot/<id> で差分表示できるようにする
     --comment <id>         対象コメントの id（必須）
@@ -272,6 +277,13 @@ async function main(): Promise<void> {
     case 'set-pr':
       rejectUnknownFlags(flags, ['url', 'clear']);
       setPr({ url: flagStr(flags, 'url'), clear: flagBool(flags, 'clear') });
+      break;
+    case 'set-settings':
+      rejectUnknownFlags(flags, ['read-only', 'pr-pending-comment']);
+      setSettings({
+        readOnly: flagBool(flags, 'read-only'),
+        prPendingComment: flagBool(flags, 'pr-pending-comment'),
+      });
       break;
     case 'snapshot': {
       const sub = positional[0];
