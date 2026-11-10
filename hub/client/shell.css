@@ -268,8 +268,6 @@ body {
   color: #e6edf3;
   font-size: 13px;
 }
-/* 単位のボタンはステータスバーの左寄りにあるので、一覧はボタンの左端にそろえて開く */
-#units-menu { right: auto; left: 0; }
 .waiting-head,
 .units-head { padding: 4px 8px 6px; color: #8b949e; font-size: 11.5px; }
 .waiting-empty { padding: 5px 8px; color: #8b949e; }
