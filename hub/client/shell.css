@@ -197,9 +197,21 @@ body {
 #phase-steps .sep { color: #57606a; margin: 0 7px; }
 #phase-steps .step.done { color: #57ab5a; }
 #phase-steps .step.current { color: #fff; font-weight: 700; }
-/* 作業の単位（MR1・MR2…）。開始ボタンは中断ボタンと同じ枠線だけの形で、色は完了フェーズの緑 */
-#units { display: flex; align-items: center; gap: 8px; flex-shrink: 0; padding-left: 14px; border-left: 1px solid #444c56; white-space: nowrap; }
+/* 作業の単位（MR1・MR2…）。「作業 n/m ▾」から開く一覧で、作り・見た目は返事待ちの一覧にそろえる。
+   未着手の単位があるときはボタンを開始ボタンと同じ緑の枠線で目立たせる */
+#units { position: relative; flex-shrink: 0; }
+#units-btn.has-pending { border-color: #57ab5a; color: #57ab5a; font-weight: 700; }
+#units-btn.has-pending:hover { background: #57ab5a22; border-color: #57ab5a; color: #57ab5a; }
+.unit-name { flex: 1; min-width: 0; line-height: 1.5; overflow-wrap: anywhere; }
+.unit-key { font-weight: 700; margin-right: 6px; }
+.unit-state { flex-shrink: 0; font-size: 12px; white-space: nowrap; color: #8b949e; }
+.unit-started { color: #539bf5; }
+.unit-mr-created { color: #d29922; }
+.unit-done { color: #57ab5a; }
+.unit-mr { flex-shrink: 0; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: #d29922; }
+.unit-mr a { color: inherit; }
 .unit-start {
+  flex-shrink: 0;
   padding: 2px 10px;
   border: 1px solid #57ab5a;
   border-radius: 6px;
@@ -211,11 +223,6 @@ body {
 }
 .unit-start:hover:not(:disabled) { background: #57ab5a22; }
 .unit-start:disabled { opacity: 0.5; cursor: default; }
-.unit { color: #8b949e; }
-.unit-started { color: #539bf5; }
-.unit-mr-created { color: #d29922; }
-.unit-mr-created a { color: inherit; display: inline-block; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
-.unit-done { color: #57ab5a; }
 #status-note {
   flex: 1;
   min-width: 0;
@@ -227,7 +234,8 @@ body {
 /* 返事待ち（エージェントが書いた、ユーザーの返事を待っている事項）。0 件でも常に出し、
    1 件以上は警告色（中断ボタン・承認待ちと同じ #d4a72c）の塗りで目立たせる */
 #waiting { position: relative; flex-shrink: 0; }
-#waiting-btn {
+#waiting-btn,
+#units-btn {
   padding: 2px 10px;
   border: 1px solid #57606a;
   border-radius: 6px;
@@ -237,10 +245,12 @@ body {
   cursor: pointer;
   white-space: nowrap;
 }
-#waiting-btn:hover { border-color: #8b949e; color: #fff; }
+#waiting-btn:hover,
+#units-btn:hover { border-color: #8b949e; color: #fff; }
 #waiting-btn.has-items { border-color: #d4a72c; background: #d4a72c; color: #1c2128; font-weight: 700; }
 #waiting-btn.has-items:hover { background: #e3b341; border-color: #e3b341; color: #1c2128; }
-#waiting-menu {
+#waiting-menu,
+#units-menu {
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
@@ -258,9 +268,13 @@ body {
   color: #e6edf3;
   font-size: 13px;
 }
-.waiting-head { padding: 4px 8px 6px; color: #8b949e; font-size: 11.5px; }
+/* 単位のボタンはステータスバーの左寄りにあるので、一覧はボタンの左端にそろえて開く */
+#units-menu { right: auto; left: 0; }
+.waiting-head,
+.units-head { padding: 4px 8px 6px; color: #8b949e; font-size: 11.5px; }
 .waiting-empty { padding: 5px 8px; color: #8b949e; }
-.waiting-row {
+.waiting-row,
+.unit-row {
   display: flex;
   align-items: baseline;
   gap: 8px;

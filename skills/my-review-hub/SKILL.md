@@ -1,6 +1,6 @@
 ---
 name: my-review-hub
-description: "計画・差分レビュー・E2E計画・E2E結果を 1 つのブラウザページ（タブ切替）に統合表示する review-hub の操作手順。agent-review-kit のページを iframe で束ね、タブごとの承認ボタン（計画承認・E2E実行承認・PR作成承認）を ark のコメント（【承認】）として wait-comments で受け取る。ステータスバー（フェーズ進行・作業メモ・作業の単位 MR1・MR2… ごとの開始ボタン＝【開始】コメント）と中断ボタン、セッション再開手順（status / resume）も定義する。計画→実装→PR のように承認ゲートを挟むフロー系スキルから参照される。Use when a skill needs to show plans, diffs, or E2E results in one tabbed browser page, wait for a browser-side approval gate, or resume an interrupted review session."
+description: "計画・差分レビュー・E2E計画・E2E結果を 1 つのブラウザページ（タブ切替）に統合表示する review-hub の操作手順。agent-review-kit のページを iframe で束ね、タブごとの承認ボタン（計画承認・E2E実行承認・PR作成承認）を ark のコメント（【承認】）として wait-comments で受け取る。ステータスバー（フェーズ進行・作業メモ・「作業 n/m ▾」から開く作業の単位 MR1・MR2… の一覧と開始ボタン＝【開始】コメント）と中断ボタン、セッション再開手順（status / resume）も定義する。計画→実装→PR のように承認ゲートを挟むフロー系スキルから参照される。Use when a skill needs to show plans, diffs, or E2E results in one tabbed browser page, wait for a browser-side approval gate, or resume an interrupted review session."
 allowed-tools: [Bash, Read, Write]
 ---
 
@@ -164,8 +164,8 @@ $RH set-waiting --session TICKET-123 --clear
 
 ### 作業の単位と開始ボタン（MR1・MR2…）
 
-計画で作業を複数の MR に分けたら、その単位をステータスバーに出す。2 本目以降の MR は、ユーザーが hub の
-「<key> を開始」ボタンを押したときに始める（ボタンが、スキルの手順を読み直して Step 5 から進める指示を届ける。
+計画で作業を複数の MR に分けたら、その単位を hub に出す（ステータスバーの「作業 n/m ▾」から一覧が開く）。2 本目以降の MR は、ユーザーが hub の
+一覧の「開始」ボタンを押したときに始める（ボタンが、スキルの手順を読み直して Step 5 から進める指示を届ける。
 2 本目以降で差分タブ・AI レビュー・検証タブなどの手順を飛ばさないため）:
 
 ```bash
@@ -178,10 +178,11 @@ $RH set-units --session TICKET-123 --clear
 - `--unit "<key>:<label>"` は繰り返し指定する。key は英数と `._-`（`MR1` など）、label は説明。
   呼ぶたびに一覧を丸ごと置き換えるが、同じ key の状態（state・mr・着手時刻）は引き継ぐ。説明だけ直すときも全件を渡し直す
 - state は `pending`（未着手）・`started`（着手済み）・`mr-created`（MR 作成済み）・`done`（完了）。
-  ステータスバーには pending だけ「<key> を開始」ボタン、ほかは「<key> 着手済み」「<key> MR 作成済み <mr>」「<key> 完了」と出る
+  ステータスバーには「作業 n/m ▾」（m は単位の数、n は mr-created・done の数。pending があると緑の枠線で目立つ）だけが出て、
+  押すと単位ごとに key・label・状態・mr の一覧が開く。pending の行だけ右端に「開始」ボタンが出る
 - `status --session` の `units` にも出る
 - ボタンを押すと、hub が docspace の全体コメントとして【開始】コメントを投稿し、state を `started` にする
-  （投稿できなければ state は変えずにエラーを出す。ボタンが残るので押し直せる）。本文:
+  （投稿できなければ state は変えずにエラーを出す。開始ボタンが残るので押し直せる）。本文:
 
   ```
   【開始】「<label>」（<key>）の作業を始めてください

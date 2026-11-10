@@ -94,7 +94,7 @@ $RH set-waiting --session TICKET-123 --clear       # 返事待ち一覧を空に
 $RH set-skill --session TICKET-123 --skill my-feature-ct \
     --skill-path ~/.claude/skills/my-feature-ct/SKILL.md   # 実行中のスキル（【開始】ボタンの指示文と status に使う）。--clear で外す
 $RH set-units --session TICKET-123 \
-    --unit "MR1:IAM ロールの作成" --unit "MR2:バッチの切り替え"  # 作業の単位を丸ごと置き換え（ステータスバーに「<key> を開始」ボタン）
+    --unit "MR1:IAM ロールの作成" --unit "MR2:バッチの切り替え"  # 作業の単位を丸ごと置き換え（ステータスバーの「作業 n/m ▾」の一覧に開始ボタン）
                                   # --unit は繰り返し可。key は英数と ._-。同じ key の state・mr・着手時刻は引き継ぐ。--clear で空にする
 $RH set-unit --session TICKET-123 --key MR1 --state mr-created --mr '!441'  # 状態: pending|started|mr-created|done
 $RH interrupt --session TICKET-123 [--note "..."] [--all]  # 中断を記録し、このセッションの ark serve・wait-comments を停止（note は自分用メモ）
@@ -121,9 +121,11 @@ $RH stop
 
 ### 作業の単位の開始ボタン
 
-計画を複数の MR に分けたとき、`set-units` で単位（MR1・MR2…）をステータスバーに並べる。未着手（pending）の単位には
-「<key> を開始」ボタンが出て、押すと確認のうえ hub が docspace の ark の全体コメントとして次の本文を投稿し（intent: fix）、
-state を `started` にする。投稿できなければ state を変えずにエラーを返す（ボタンが残るので押し直せる）。
+計画を複数の MR に分けたとき、`set-units` で単位（MR1・MR2…）を登録する。ステータスバーには「作業 n/m ▾」
+（m は単位の数、n は mr-created・done の数。未着手があると緑の枠線で目立たせる。単位が無ければ出さない）だけを置き、
+押すと返事待ちの一覧と同じ形で単位ごとの key・label・状態・mr の一覧が開く。未着手（pending）の行には
+「開始」ボタンが出て、押すと確認のうえ hub が docspace の ark の全体コメントとして次の本文を投稿し（intent: fix）、
+state を `started` にする。投稿できなければ state を変えずにエラーを返す（開始ボタンが残るので押し直せる）。
 着手済み以降の単位を押し直しても（別ウィンドウなど）コメントは重ねて投稿しない。
 
 ```

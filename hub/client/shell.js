@@ -20,6 +20,9 @@
     statusBar: document.getElementById('status-bar'),
     phaseSteps: document.getElementById('phase-steps'),
     units: document.getElementById('units'),
+    unitsBtn: document.getElementById('units-btn'),
+    unitsCount: document.getElementById('units-count'),
+    unitsMenu: document.getElementById('units-menu'),
     statusNote: document.getElementById('status-note'),
     waitingBtn: document.getElementById('waiting-btn'),
     waitingCount: document.getElementById('waiting-count'),
@@ -50,7 +53,8 @@
   let waitingMenuOpen = false;
   let waitingMenuKey = null; // 一覧の中身が変わったときだけ作り直す（ポーリングのたびに行を差し替えない）
   let contextTabId = null; // 右クリックメニューの対象タブ
-  let unitsKey = null; // 作業の単位の表示は中身が変わったときだけ作り直す（ポーリングのたびにボタンを差し替えない）
+  let unitsMenuOpen = false;
+  let unitsKey = null; // 作業の単位の一覧は中身が変わったときだけ作り直す（ポーリングのたびに行・ボタンを差し替えない）
   let startingUnitKey = null; // 開始の送信中の単位（二重押し防止）
   const frames = new Map(); // tabId -> {iframe, url, overlay}
 
@@ -323,49 +327,70 @@
     el.interruptBtn.hidden = Boolean(interrupted);
   }
 
-  // 作業の単位（MR1・MR2…）。未着手は開始ボタン、それ以外は状態の表示。押すと hub が
-  // 【開始】コメント（スキルの SKILL.md を読み直して Step 5 から進める指示）をエージェントに届ける
+  // 作業の単位（MR1・MR2…）。ステータスバーには「作業 n/m ▾」だけを置き、押すと単位ごとの状態の一覧を開く
+  // （返事待ちの一覧と同じ作り）。未着手の行の開始ボタンを押すと hub が【開始】コメント
+  // （スキルの SKILL.md を読み直して Step 5 から進める指示）をエージェントに届ける
+  const UNIT_STATE_LABEL = { pending: '未着手', started: '着手済み', 'mr-created': 'MR 作成済み', done: '完了' };
+
   function renderUnits(units) {
     el.units.hidden = units.length === 0;
+    if (units.length === 0) unitsMenuOpen = false;
+    const finished = units.filter((u) => u.state === 'mr-created' || u.state === 'done').length;
+    el.unitsCount.textContent = `${finished}/${units.length}`;
+    el.unitsBtn.classList.toggle('has-pending', units.some((u) => u.state === 'pending'));
+    el.unitsMenu.hidden = !unitsMenuOpen;
     const key = JSON.stringify([units, startingUnitKey]);
     if (key === unitsKey) return;
     unitsKey = key;
-    el.units.textContent = '';
+    el.unitsMenu.textContent = '';
+    const head = document.createElement('div');
+    head.className = 'units-head';
+    head.textContent = '作業の単位（MR ごとの状態）';
+    el.unitsMenu.appendChild(head);
     for (const unit of units) {
       const hover = `${unit.key}: ${unit.label}`;
+      const row = document.createElement('div');
+      row.className = 'unit-row';
+      row.title = unit.startedAt ? `${hover}\n着手 ${new Date(unit.startedAt).toLocaleString()}` : hover;
+      const name = document.createElement('span');
+      name.className = 'unit-name';
+      const keySpan = document.createElement('span');
+      keySpan.className = 'unit-key';
+      keySpan.textContent = unit.key;
+      name.appendChild(keySpan);
+      name.appendChild(document.createTextNode(unit.label));
+      row.appendChild(name);
+      const state = document.createElement('span');
+      state.className = `unit-state unit-${unit.state}`;
+      state.textContent = UNIT_STATE_LABEL[unit.state] || unit.state;
+      row.appendChild(state);
+      if (unit.mr) {
+        const mr = document.createElement('span');
+        mr.className = 'unit-mr';
+        mr.title = unit.mr;
+        if (/^https?:\/\//.test(unit.mr)) {
+          const a = document.createElement('a');
+          a.href = unit.mr;
+          a.target = '_blank';
+          a.rel = 'noopener';
+          a.textContent = unit.mr;
+          mr.appendChild(a);
+        } else {
+          mr.textContent = unit.mr;
+        }
+        row.appendChild(mr);
+      }
       if (unit.state === 'pending') {
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'unit-start';
-        btn.textContent = startingUnitKey === unit.key ? `${unit.key} を開始中…` : `${unit.key} を開始`;
-        btn.title = hover;
+        btn.textContent = startingUnitKey === unit.key ? '開始中…' : '開始';
+        btn.title = `${hover} を開始`;
         btn.disabled = startingUnitKey !== null;
         btn.addEventListener('click', () => startUnit(unit));
-        el.units.appendChild(btn);
-        continue;
+        row.appendChild(btn);
       }
-      const span = document.createElement('span');
-      span.className = `unit unit-${unit.state}`;
-      span.title = unit.startedAt ? `${hover}\n着手 ${new Date(unit.startedAt).toLocaleString()}` : hover;
-      if (unit.state === 'started') span.textContent = `${unit.key} 着手済み`;
-      else if (unit.state === 'done') span.textContent = `${unit.key} 完了`;
-      else if (unit.state === 'mr-created') {
-        span.textContent = `${unit.key} MR 作成済み`;
-        if (unit.mr) {
-          span.appendChild(document.createTextNode(' '));
-          if (/^https?:\/\//.test(unit.mr)) {
-            const a = document.createElement('a');
-            a.href = unit.mr;
-            a.target = '_blank';
-            a.rel = 'noopener';
-            a.textContent = unit.mr;
-            span.appendChild(a);
-          } else {
-            span.appendChild(document.createTextNode(unit.mr));
-          }
-        }
-      } else span.textContent = `${unit.key} ${unit.state}`;
-      el.units.appendChild(span);
+      el.unitsMenu.appendChild(row);
     }
   }
 
@@ -580,6 +605,7 @@
     e.stopPropagation();
     hiddenMenuOpen = !hiddenMenuOpen;
     waitingMenuOpen = false;
+    unitsMenuOpen = false;
     render();
   });
   el.hiddenTabsMenu.addEventListener('click', (e) => e.stopPropagation());
@@ -587,15 +613,25 @@
     e.stopPropagation();
     waitingMenuOpen = !waitingMenuOpen;
     hiddenMenuOpen = false;
+    unitsMenuOpen = false;
     render();
   });
   el.waitingMenu.addEventListener('click', (e) => e.stopPropagation());
+  el.unitsBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    unitsMenuOpen = !unitsMenuOpen;
+    hiddenMenuOpen = false;
+    waitingMenuOpen = false;
+    render();
+  });
+  el.unitsMenu.addEventListener('click', (e) => e.stopPropagation());
   // メニュー外クリック・Esc でメニューをすべて閉じる
   function closeMenus() {
     closeTabContextMenu();
-    if (hiddenMenuOpen || waitingMenuOpen) {
+    if (hiddenMenuOpen || waitingMenuOpen || unitsMenuOpen) {
       hiddenMenuOpen = false;
       waitingMenuOpen = false;
+      unitsMenuOpen = false;
       render();
     }
   }
