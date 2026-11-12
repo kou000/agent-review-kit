@@ -213,20 +213,22 @@ $RH add-tab --session TICKET-123 --id plan --title 計画 \
 # (b) 差分レビュー — 作業リポジトリの ark（generate + serve 済み）を埋め込む
 $RH add-tab --session TICKET-123 --id diff-backend --title "差分 (backend)" \
   --type ark-diff --project-dir <repoDir> \
-  --approval-label "差分レビュー完了"
+  --approval-label "PR 作成を承認"    # GitLab なら "MR 作成を承認"
 
 # (c) 静的レポート — E2E フルレポート等のディレクトリを hub が直接配信（動画再生可）
 $RH add-tab --session TICKET-123 --id e2e-report --title "E2E結果" \
   --type static --path <reportDir> --entry index.html \
-  --approval-label "PR 作成を承認"
+  --approval-label "E2E 確認OK"
 ```
 
 - 同じ `--id` で再実行すると定義更新（承認状態は保持）。承認をやり直させたいときは
   `remove-tab` してから add-tab し直す
 - `--approval-label` を付けたタブにだけ承認ボタンが出る。ラベルは「何が起きるか」が
-  分かる文言にする（例:「計画を承認して修正開始」「差分レビュー完了」「E2E 実行を承認」「PR 作成を承認」）
-- 差分タブの「差分レビュー完了」は**ユーザーが差分を見終えた合図**。未解決コメント 0 件は
-  AI 側の完了条件で、ユーザーの完了とは別。PR/MR 作成前に両方が揃っていることを確認する
+  分かる文言にする（例:「計画を承認して修正開始」「PR 作成を承認」「MR 作成を承認」「E2E 実行を承認」「E2E 確認OK」）
+- 差分タブの承認ボタン（「PR 作成を承認」「MR 作成を承認」）が **PR/MR 作成のきっかけ**。押されたら受領を返して
+  PR/MR 作成へ進む（E2E の確認など作成前の条件は呼び出し元のフロー系スキルに従う）
+- E2E結果タブのボタンは「E2E 確認OK」。ユーザーが E2E 結果を確認したことを**記録するだけ**で、押されても
+  次の処理（PR/MR 作成など）は始めない。届いたら受領だけ返す
 - **タブの非表示**: ユーザーはタブを右クリックして非表示にできる（ヘッダの「非表示 N ▾」から再表示）。
   非表示は session.json に記録され、`$RH status --session <id>` の `tabs[].hidden` と
   `waiterScopes[]`（ark タブを projectDir = waiter スコープごとに束ねたもの。`allHidden` 付き）で分かる。
@@ -275,7 +277,7 @@ docspace の全体コメントに回る。届いたら:
    追加指示があれば、それをどう扱うかも書く（例:「承認と追加指示を受けて、実装から MR 作成まで続けて進めます」）
    （返信するまで未解決として残り、ユーザーには「受け取られていない」ように見える。
    スレッドを閉じるのはユーザーなので `--status resolved` にはしない）
-4. 次フェーズへ進む（`set-status` でフェーズも更新する）
+4. 次フェーズへ進む（`set-status` でフェーズも更新する）。「E2E 確認OK」のような記録だけのボタンは受領を返すだけで進まない
 
 hub の承認バーには承認コメントの配達状況（受信待ち / 受信済み）が出る。1 分以上未受信だと警告が出て、
 ユーザーは「承認を確認して」と言ってくる。そのときは waiter の棚卸し（下記）をして欠けたスコープを再起動する
