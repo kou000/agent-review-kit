@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
+import { resolveInterruptInstructions } from '../envDefaults';
 import { ensureDir, ReviewPaths, reviewPaths } from '../paths';
 import { loadComments, loadFinished, loadSettings, mutateComments, nowIso } from '../store';
 import { ReviewComment, ReviewSettings, commentAuthor } from '../types';
@@ -647,11 +648,14 @@ export async function waitComments(opts: WaitOptions = {}): Promise<void> {
   const timeoutSec = opts.timeout ?? 0;
   const deadline = timeoutSec > 0 ? Date.now() + timeoutSec * 1000 : null;
   const waitLock = acquireWaitLock(cwd);
+  const { envFile } = reviewPaths(cwd);
 
   // SIGTERM/SIGINT here means the user stopped the session (interrupt button,
   // shell teardown), not a crash. Without a handler the process dies with exit
   // 143, which agents have misread as a failure and "recovered" by restarting
   // everything. Exit 0 with an explicit status so the intent is unambiguous.
+  // The user's own wrap-up steps (ARK_INTERRUPT_INSTRUCTIONS_FILE) ride along
+  // as `instructions`; read at signal time so edits during the wait apply.
   for (const sig of ['SIGINT', 'SIGTERM'] as const) {
     process.on(sig, () => {
       try {
@@ -660,11 +664,13 @@ export async function waitComments(opts: WaitOptions = {}): Promise<void> {
         // The lock dies with the process anyway (FIFO witness closes on exit);
         // never let cleanup mask the intentional-stop status below.
       }
+      const instructions = resolveInterruptInstructions(envFile);
       console.log(
         JSON.stringify(
           {
             status: 'interrupted',
             note: 'ユーザー操作（シグナル）による停止。エージェントは自動で再起動しないこと。',
+            ...(instructions && { instructions }),
             comments: [],
           },
           null,

@@ -8,6 +8,7 @@ import {
   envValueRoundTrips,
   parseEnvFile,
   resolveDefaultSettings,
+  resolveInterruptInstructions,
   writeEnvEntries,
 } from '../src/envDefaults';
 import { loadSettings, mutateSettings } from '../src/store';
@@ -264,6 +265,55 @@ test('encodeEnvValue はクォートや # を含む文字列も parseEnvFile で
     assert.equal(parseEnvFile(envFile).ARK_DELIVERY_NOTE_TEXT, '"引用" と # 記号\n行2 \'single\' ');
     // 文字列としての「\n」は .env では改行と区別できない
     assert.equal(envValueRoundTrips('C:\\new'), false);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('resolveInterruptInstructions はファイルを読み、${KEY} を同じ .env の値（後勝ち）に置き換える', () => {
+  const tmp = makeTmpDir();
+  try {
+    const envFile = path.join(tmp, '.env');
+    fs.writeFileSync(path.join(tmp, 'interrupt.md'), '\n進捗を ${MEMO_URL} に書く。${UNDEFINED_KEY} はそのまま\n');
+    fs.writeFileSync(
+      envFile,
+      ['ARK_INTERRUPT_INSTRUCTIONS_FILE=interrupt.md', 'MEMO_URL=https://shared.example', 'MEMO_URL=https://local.example'].join('\n')
+    );
+    assert.equal(
+      resolveInterruptInstructions(envFile),
+      '進捗を https://local.example に書く。${UNDEFINED_KEY} はそのまま'
+    );
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('resolveInterruptInstructions は ~/ をホームとして解決する', () => {
+  const tmp = makeTmpDir();
+  const home = process.env.HOME;
+  try {
+    process.env.HOME = tmp;
+    fs.writeFileSync(path.join(tmp, 'interrupt.md'), 'メモを書く');
+    const envFile = path.join(tmp, 'sub', '.env');
+    fs.mkdirSync(path.dirname(envFile));
+    fs.writeFileSync(envFile, 'ARK_INTERRUPT_INSTRUCTIONS_FILE=~/interrupt.md\n');
+    assert.equal(resolveInterruptInstructions(envFile), 'メモを書く');
+  } finally {
+    process.env.HOME = home;
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('resolveInterruptInstructions はキー未設定・ファイル無し・空ファイルなら undefined', () => {
+  const tmp = makeTmpDir();
+  try {
+    const envFile = path.join(tmp, '.env');
+    assert.equal(resolveInterruptInstructions(envFile), undefined);
+    fs.writeFileSync(envFile, 'ARK_INTERRUPT_INSTRUCTIONS_FILE=missing.md\n');
+    assert.equal(resolveInterruptInstructions(envFile), undefined);
+    fs.writeFileSync(path.join(tmp, 'blank.md'), '  \n');
+    fs.writeFileSync(envFile, 'ARK_INTERRUPT_INSTRUCTIONS_FILE=blank.md\n');
+    assert.equal(resolveInterruptInstructions(envFile), undefined);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

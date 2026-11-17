@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { DEFAULT_SETTINGS, ReviewSettings } from './types';
 
@@ -70,6 +71,34 @@ export function resolveDefaultSettings(envFile: string): ReviewSettings {
     prPendingCommentEnabled:
       envBool(env.ARK_PR_PENDING_COMMENT) ?? DEFAULT_SETTINGS.prPendingCommentEnabled,
   };
+}
+
+/**
+ * Extra instructions attached to wait-comments' `interrupted` output, read
+ * from the file named by ARK_INTERRUPT_INSTRUCTIONS_FILE in ~/.agent-review/.env
+ * (`~/` is the home directory; a relative path is relative to the .env's
+ * directory). `${KEY}` in the file is replaced by KEY's value in the same .env,
+ * so one shared file can carry per-machine values (URLs etc.) from .env.local;
+ * an undefined KEY is left as written. Returns undefined when the key is unset
+ * or empty, or the file is missing or blank — interruption must never fail
+ * over this optional extra.
+ */
+export function resolveInterruptInstructions(envFile: string): string | undefined {
+  try {
+    const env = parseEnvFile(envFile);
+    const file = env.ARK_INTERRUPT_INSTRUCTIONS_FILE?.trim();
+    if (!file) return undefined;
+    const resolved = file.startsWith('~/')
+      ? path.join(os.homedir(), file.slice(2))
+      : path.resolve(path.dirname(envFile), file);
+    const text = fs
+      .readFileSync(resolved, 'utf8')
+      .replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (m, key: string) => env[key] ?? m)
+      .trim();
+    return text ? text.slice(0, MAX_TEXT) : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 // The only value form parseEnvFile can read back losslessly for arbitrary

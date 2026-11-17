@@ -377,11 +377,14 @@ ARK_DELIVERY_NOTE_ENABLED=true     # wait-comments 受信出力に処理指示�
 ARK_DELIVERY_NOTE_TEXT="修正時はテストも更新すること"  # note の本文（既定は委譲指示。空文字なら note なし）
 ARK_EDITOR_URI_TEMPLATE="vscode://vscode-remote/wsl+Ubuntu{path}"  # 「VS Code で開く」ボタンのURI（組み込み既定は vscode://file{path}）
 ARK_PR_PENDING_COMMENT=false       # 「PR に下書き投稿」ボタンを出す（PR/MR 登録中のみ表示。歯車メニューには無い）
+ARK_INTERRUPT_INSTRUCTIONS_FILE=~/.agent-review/interrupt.md  # 中断時に wait-comments が instructions として渡す指示のファイル（既定は無し）
 ```
 
 優先順位は **settings.json の明示値 > `.env` > 組み込みデフォルト**。`.env` はあくまで「初期値」で、ブラウザの歯車メニューで一度設定を変更すると全キーが `settings.json` に確定するため、以降そのブランチには `.env` の変更は反映されない（新しいブランチのレビューには反映される）。bool は `true/false/1/0` のみ有効で、それ以外の値は無視して組み込みデフォルトに落ちる。
 
 `ARK_EDITOR_URI_TEMPLATE` は「リポジトリのファイル」見出しに並ぶ**「VS Code で開く」ボタン**（レビューページのサイドバーと `/files` ページ。ファイルごとではなくリポジトリ単位で1つ）が開く URI のテンプレートで、`{path}` がプロジェクトのルートディレクトリの絶対パスに置き換わる。既定は `vscode://file{path}`。WSL 上のリポジトリを Windows 側の VS Code で開くなら `vscode://vscode-remote/wsl+Ubuntu{path}`、Cursor なら `cursor://file{path}` のように差し替える。マシンごとのパス変換という位置づけなので、このキーだけは**ブラウザの設定パネル（歯車メニュー）からは変更できない**（`PUT /api/settings` は無視する）`.env` 専用の設定（`GET /api/status` / `GET /api/settings` のレスポンスには載る）。値がそのまま href に入るため、ブラウザ側で許可するのは `vscode:` / `vscode-insiders:` / `vscodium:` / `cursor:` / `windsurf:` のみで、それ以外のスキームならボタン自体を出さない。
+
+`ARK_INTERRUPT_INSTRUCTIONS_FILE` は、中断（SIGTERM / SIGINT）で止められた `wait-comments` が返す `{"status":"interrupted"}` に、エージェントへの追加の指示を `instructions` として載せるための設定で、指示を書いたファイルのパスを指定する（`~/` はホームディレクトリ、相対パスは `.env` のあるディレクトリから解決する）。中断時に作業記録を残させるなど、利用者ごとの後始末をスキルを変えずに足せる。ファイル中の `${KEY}` は同じ `.env` の `KEY` の値に置き換わるので、共有の指示ファイルに端末ごとの値（URL など）を差し込める（`.env` に無い `KEY` は書いたまま残る）。ファイルは止められた時点で読むので、待機中に書き換えても次の中断から効く。キーが未設定・ファイルが無い・中身が空のときは `instructions` を付けない。設定の画面や `settings.json` とは関係しない `.env` 専用の設定。
 
 `ARK_PR_PENDING_COMMENT`（設定キー `prPendingCommentEnabled`）は歯車メニューには出さない設定で、`.env` のほか `set-settings --pr-pending-comment`・`serve --pr-pending-comment`・`PUT /api/settings` でも ON にできる（「PR への下書き投稿依頼」参照）。
 

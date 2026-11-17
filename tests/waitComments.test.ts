@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -424,5 +424,39 @@ test('質問のコメント（返信を含む）は配達時だけ body の末�
     assert.equal(stored.find((c) => c.id === 'q4')?.body, '直す前に、影響範囲は？');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('SIGTERM で interrupted を返し、ARK_INTERRUPT_INSTRUCTIONS_FILE の内容を instructions に載せる', async () => {
+  const tmp = makeTmpRepo();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ark-home-'));
+  try {
+    fs.mkdirSync(path.join(home, '.agent-review'));
+    fs.writeFileSync(path.join(home, 'interrupt.md'), '進捗メモを ${MEMO_URL} に書く\n');
+    fs.writeFileSync(
+      path.join(home, '.agent-review', '.env'),
+      'ARK_INTERRUPT_INSTRUCTIONS_FILE=~/interrupt.md\nMEMO_URL=https://memo.example\n'
+    );
+    const child = spawn(
+      process.execPath,
+      [path.join(__dirname, '..', 'node_modules', 'tsx', 'dist', 'cli.mjs'), path.join(__dirname, '..', 'src', 'cli.ts'), 'wait-comments'],
+      { cwd: tmp, env: { ...process.env, HOME: home }, stdio: ['ignore', 'pipe', 'pipe'] }
+    );
+    let stdout = '';
+    child.stdout.on('data', (d) => (stdout += d));
+    const exited = new Promise<number | null>((resolve) => child.on('exit', resolve));
+    // 待ち受けに入った（ロックを取った）のを確かめてから止める
+    const lockDir = path.join(tmp, '.agent-review', '.wait-comments.lock');
+    for (let i = 0; i < 200 && !fs.existsSync(lockDir); i++) await new Promise((r) => setTimeout(r, 50));
+    assert.ok(fs.existsSync(lockDir), 'wait-comments が待ち受けに入らなかった');
+    child.kill('SIGTERM');
+    assert.equal(await exited, 0);
+    const out = JSON.parse(stdout);
+    assert.equal(out.status, 'interrupted');
+    assert.equal(out.instructions, '進捗メモを https://memo.example に書く');
+    assert.deepEqual(out.comments, []);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });
