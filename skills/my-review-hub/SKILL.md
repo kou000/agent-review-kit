@@ -85,12 +85,15 @@ cd <docspaceDir> && setsid nohup $ARK serve > ~/.review-hub/logs/ark-<セッシ�
   コメントの配達は serve ではなく `wait-comments`（`comments.json` の監視）が行うので、serve を切り離しても届く
 
 waiter 監視フック（Stop フック check-review-waiters.sh）を導入している環境では、
-レビュー作業を始めるセッションは、**フックの所有者ファイルに自分のセッション ID を書く**（ID は scratchpad パス中の UUID）。
-これを書いたセッションだけがフックの検査対象になる（他セッションの誤ブロック防止）:
+レビュー作業を始めるセッションは、**扱う hub セッションごとに、所有者ファイルに自分のセッション ID を書く**（ID は scratchpad パス中の UUID）。
+フックは、そのセッションが所有者ファイルを書いた hub セッションのタブのスコープだけを検査する。
+別チケットの hub セッションの ark serve が残っていても、そのスコープの waiter は求めない（頼まれていないチケットのコメントを受け取らないため）:
 
 ```bash
-echo "<セッションID>" > ~/.review-hub/waiter-owner-session
+echo "<Claude のセッションID>" > ~/.review-hub/sessions/<hub のセッションID>/waiter-owner-session
 ```
+
+フックが別チケットのスコープの waiter を求めてきたら、黙って起動せず、別チケットであることをユーザーに伝えて確認する。
 
 - docspace は非 git のため ark が `fatal: not a git repository` を stderr に出し続ける（無害だが
   タスク出力を汚す）。**docspace での ark コマンドは `2>/dev/null` を付ける**
@@ -400,7 +403,7 @@ hub サーバは 30 秒ごとに各セッション（中断中を除く）のス
 4. 中断状態なら `$RH resume --session <id>` で解除する（ステータスバーの中断表示が消える）
 5. 停止していた ark serve を再起動する（docspace / 作業リポで `$ARK serve` を手順 2 の
    setsid nohup の形で切り離して起動。ポートが変わっても hub が自動追従。doc は publish 済みのまま残っている）
-6. フェーズに応じた waiter（スコープごとの wait-comments）を再起動し、hub の URL を案内して
+6. 所有者ファイル（手順 2）に再開したセッションの ID を書き直し、フェーズに応じた waiter（スコープごとの wait-comments）を再起動し、hub の URL を案内して
    続きから進める
 
 ## 7. E2E サマリ doc の作り方（コメント可能な E2E 結果）
@@ -432,8 +435,8 @@ ark ページ内の「レビュー終了」ボタンは **ark サーバ自体を
   切り離して起動しているのでタスクとしては止められない。各 cwd の `.agent-review/server.json` の pid を kill する
   （`kill $(node -p "require('./.agent-review/server.json').pid")`）。hub は `$RH stop`（`~/.review-hub/server.json` の pid を止める）
 - フローが終わったら `$RH set-skill --session <id> --clear` で実行中のスキルを外す（【開始】の指示文と status から外れる）
-- ark serve をすべて止めたら `rm -f ~/.review-hub/waiter-owner-session`（waiter 監視フックの解除）。
-  中断ボタン経由の停止時（手順 6）も同様に削除する
+- そのセッションの ark serve をすべて止めたら `rm -f ~/.review-hub/sessions/<id>/waiter-owner-session`（waiter 監視フックの解除）。
+  中断ボタンで中断されたセッションは、ファイルが残っていてもフックの検査対象から外れる
 - hub サーバは常駐可。セッションデータは `~/.review-hub/sessions/<id>/` に残る
   （不要になったらディレクトリごと削除してよい）
 - static タブの参照先（E2E レポート等）を消すとタブは接続不可表示になる。
