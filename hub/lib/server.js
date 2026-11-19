@@ -107,7 +107,9 @@ async function postApprovalComment(session, tab, note) {
 
 // 作業の単位（MR1・MR2…）の開始ボタン。2 本目以降の MR でエージェントがスキルの手順
 // （差分タブ・AI レビュー・検証タブなど）を飛ばさないよう、SKILL.md の全体の読み直しを指示する
-// コメントを docspace の全体コメントとして投稿する（承認ボタンと同じく wait-comments で届く）
+// コメントを set-units --plan-tab で指定した計画タブのドキュメント宛（ドキュメント全体へのコメント）として投稿する
+// （承認ボタンと同じく wait-comments で届く）。docspace の全体コメントは hub の画面で見えにくく、
+// 押しても何も起きていないように見えるため、計画タブを開けばスレッドとエージェントの返信が見える所に置く
 const START_PREFIX = agentWatch.START_PREFIX;
 
 function startUnitBody(unit, skill) {
@@ -122,10 +124,21 @@ function startUnitBody(unit, skill) {
   return `${head}\n\n${body}`;
 }
 
+// 【開始】コメントの投稿先。set-units --plan-tab で保存した計画タブのドキュメント宛（htmlTarget なし）。
+// 保存した計画タブが無い（未指定・タブ削除済み）なら docspace の全体コメント。
+// 返り値: { projectDir, payload } / null（投稿先が無い）
+function startCommentTarget(session, body) {
+  const planTab = store.unitsPlanTabOf(session);
+  if (planTab) return { projectDir: planTab.projectDir, payload: { body, intent: 'fix', documentId: planTab.docId } };
+  if (session.docspaceDir) return { projectDir: session.docspaceDir, payload: { body, intent: 'fix' } };
+  return null;
+}
+
 async function postStartComment(session, unit) {
-  if (!session.docspaceDir) return { ok: false, error: 'docspace がありません' };
-  const r = await ark.postArkComment(session.docspaceDir, { body: startUnitBody(unit, session.skill), intent: 'fix' });
-  if (r.ok) return { ok: true, delivery: { projectDir: session.docspaceDir, commentId: r.commentId } };
+  const target = startCommentTarget(session, startUnitBody(unit, session.skill));
+  if (!target) return { ok: false, error: 'docspace がありません' };
+  const r = await ark.postArkComment(target.projectDir, target.payload);
+  if (r.ok) return { ok: true, delivery: { projectDir: target.projectDir, commentId: r.commentId } };
   return { ok: false, error: r.error };
 }
 
@@ -387,4 +400,4 @@ async function startServer(requestedPort) {
   throw lastErr || new Error('no free port');
 }
 
-module.exports = { startServer, startUnitBody, START_PREFIX, DEFAULT_PORT };
+module.exports = { startServer, startUnitBody, startCommentTarget, START_PREFIX, DEFAULT_PORT };

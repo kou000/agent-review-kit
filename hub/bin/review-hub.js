@@ -21,7 +21,8 @@ function usage() {
     '  set-waiting --session <id> --item <文> [--item <tabId>::<文> ...]  返事待ち一覧を丸ごと置き換える（ステータスバーに表示）',
     '  set-waiting --session <id> --clear              返事待ち一覧を空にする',
     '  set-units --session <id> --unit "<key>:<label>" [--unit ...]  作業の単位（MR1・MR2…）を丸ごと置き換える（同じ key の状態は引き継ぐ。ステータスバーに開始ボタン）',
-    '  set-units --session <id> --clear                作業の単位を空にする',
+    '            [--plan-tab <tabId>]                  開始ボタンの【開始】コメントを投稿する計画タブ（登録済みの ark-doc タブ。省略時は前回の値を引き継ぐ。無ければ docspace の全体コメント）',
+    '  set-units --session <id> --clear                作業の単位と plan-tab を空にする',
     '  set-unit --session <id> --key <key> --state <pending|started|mr-created|done> [--mr <text>]  作業の単位の状態を更新する',
     '  interrupt --session <id> [--note <t>] [--all]    中断を記録し、このセッションの ark serve・wait-comments を停止（--all: 全セッション・全 hub を停止）',
     '  resume --session <id>                            中断状態を解除（再開時に実行）',
@@ -255,9 +256,18 @@ async function main() {
       const values = repeatedValues(rest, '--unit');
       if (args.clear && values.length > 0) fail('--clear and --unit cannot be used together');
       if (!args.clear && values.length === 0) fail('--unit or --clear is required');
+      if (args.planTab === true) fail('--plan-tab requires a value');
+      if (args.clear && args.planTab !== undefined) fail('--clear and --plan-tab cannot be used together');
       store.requireSession(args.session);
-      const { units } = store.setUnits(args.session, values.map(parseUnit));
-      out({ status: 'ok', units });
+      // --plan-tab 省略時は前回の値を引き継ぐ（--clear は消す）
+      const { units, planTab } = store.setUnits(args.session, values.map(parseUnit), args.clear ? null : args.planTab);
+      // 計画タブが無いと【開始】コメントが docspace の全体コメントになり、hub の画面で見えにくい
+      const warning =
+        !args.clear && !store.unitsPlanTabOf(store.requireSession(args.session))
+          ? '--plan-tab の計画タブが無い（未指定・削除済み）ため、開始ボタンの【開始】コメントは docspace の全体コメントになり hub の画面で見えにくくなります。計画タブ（例: add-tab --id plan で登録した ark-doc タブ）を --plan-tab で指定してください'
+          : undefined;
+      if (warning) process.stderr.write(`warning: ${warning}\n`);
+      out({ status: 'ok', units, planTab, warning });
       break;
     }
 
@@ -402,6 +412,7 @@ async function main() {
           current: session.status || null,
           waiting: session.waiting || { items: [], updatedAt: null },
           units: session.units || [],
+          unitsPlanTab: session.unitsPlanTab || null,
           interrupted: session.interrupted || null,
           lastInterrupt: session.lastInterrupt || null,
           pendingApprovals: tabs.filter((t) => t.approval && !t.approval.approvedAt).map((t) => t.approval.label || t.id),

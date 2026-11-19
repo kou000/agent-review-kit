@@ -225,6 +225,7 @@ function createSession(id, title, phases, skill) {
       interrupted: null,
       skill: skill ? { ...skill, setAt: new Date().toISOString() } : null,
       units: [],
+      unitsPlanTab: null,
       tabs: [],
     };
     atomicWriteJson(sessionJsonPath(id), session);
@@ -417,13 +418,34 @@ function mergeUnits(prevUnits, units, now) {
   });
 }
 
-function setUnits(sessionId, units) {
+// planTab: 開始ボタンの【開始】コメントを投稿する計画タブの id（unitsPlanTab に持つ）。
+// undefined なら前回の値を引き継ぎ（units の state と同じく、指定し忘れで消えないように）、null なら消す。
+// 指定したタブがそのセッションに登録済みの ark-doc タブでなければ何も保存せずにエラーにする
+function setUnits(sessionId, units, planTab) {
+  if (typeof planTab === 'string') validateTabId(planTab);
   const result = mutateSession(sessionId, (session) => {
+    if (typeof planTab === 'string') {
+      const tab = session.tabs.find((t) => t.id === planTab);
+      if (!tab) throw new Error(`tab not found: ${planTab}`);
+      if (tab.type !== 'ark-doc') throw new Error(`plan tab must be an ark-doc tab: ${planTab} (${tab.type})`);
+    }
     session.units = mergeUnits(session.units, units, new Date().toISOString());
-    return { units: session.units };
+    if (planTab !== undefined) session.unitsPlanTab = planTab;
+    else if (session.unitsPlanTab === undefined) session.unitsPlanTab = null;
+    return { units: session.units, planTab: session.unitsPlanTab };
   });
-  appendEvent(sessionId, 'units', { units: result.units.map((u) => ({ key: u.key, label: u.label, state: u.state })) });
+  appendEvent(sessionId, 'units', {
+    units: result.units.map((u) => ({ key: u.key, label: u.label, state: u.state })),
+    planTab: result.planTab,
+  });
   return result;
+}
+
+// 開始ボタンの【開始】コメントの投稿先の計画タブ（unitsPlanTab の ark-doc タブ）。
+// 未設定、またはタブが削除済みなら null（docspace の全体コメントに投稿する）
+function unitsPlanTabOf(session) {
+  if (!session || !session.unitsPlanTab) return null;
+  return (session.tabs || []).find((t) => t.id === session.unitsPlanTab && t.type === 'ark-doc') || null;
 }
 
 // 作業の単位の状態。mr は undefined なら据え置き。started は最初に着手した時刻を startedAt に残し、
@@ -533,6 +555,7 @@ module.exports = {
   setSkill,
   mergeUnits,
   setUnits,
+  unitsPlanTabOf,
   setUnitState,
   setWaiting,
   interruptSession,

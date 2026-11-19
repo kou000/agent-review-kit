@@ -181,6 +181,18 @@ test('作業の単位の開始ボタンのコメントも同じ規則で催促�
   assert.equal(watch.decide(w), 'nudge');
 });
 
+test('計画タブのドキュメント宛の開始ボタンのコメントも start として催促し、documentId を持つ', () => {
+  const c = comment('a', 'seen', 4 * MIN, {
+    body: '【開始】「バッチの切り替え」（MR2）の作業を始めてください',
+    documentId: 'plan',
+    htmlTarget: null,
+  });
+  const w = waitsById([c]).get('a');
+  assert.equal(w?.start, true);
+  assert.equal(w?.documentId, 'plan');
+  assert.equal(watch.decide(w), 'nudge');
+});
+
 test('催促の本文は【催促】で始まり、working には現状を書くよう求める文を入れる', () => {
   const seenBody = watch.nudgeBody({ state: 'seen' });
   assert.ok(seenBody.startsWith(watch.NUDGE_PREFIX));

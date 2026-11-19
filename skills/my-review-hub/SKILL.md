@@ -169,7 +169,7 @@ $RH set-waiting --session TICKET-123 --clear
 2 本目以降で差分タブ・AI レビュー・検証タブなどの手順を飛ばさないため）:
 
 ```bash
-$RH set-units --session TICKET-123 --unit "MR1:IAM ロールの作成" --unit "MR2:バッチの切り替え" --unit "MR3:ECS と RDS Proxy"
+$RH set-units --session TICKET-123 --plan-tab plan --unit "MR1:IAM ロールの作成" --unit "MR2:バッチの切り替え" --unit "MR3:ECS と RDS Proxy"
 $RH set-unit --session TICKET-123 --key MR1 --state mr-created --mr '!441'
 $RH set-unit --session TICKET-123 --key MR1 --state done
 $RH set-units --session TICKET-123 --clear
@@ -180,8 +180,13 @@ $RH set-units --session TICKET-123 --clear
 - state は `pending`（未着手）・`started`（着手済み）・`mr-created`（MR 作成済み）・`done`（完了）。
   ステータスバーには「作業 n/m ▾」（m は単位の数、n は mr-created・done の数。pending があると緑の枠線で目立つ）だけが出て、
   押すと単位ごとに key・label・状態・mr の一覧が開く。pending の行だけ右端に「開始」ボタンが出る
-- `status --session` の `units` にも出る
-- ボタンを押すと、hub が docspace の全体コメントとして【開始】コメントを投稿し、state を `started` にする
+- `--plan-tab <タブid>` には計画タブ（手順 4 で `add-tab --id plan` で登録した ark-doc タブ）を指定する。開始ボタンの【開始】コメントの投稿先になる。
+  登録済みの ark-doc タブでなければ set-units はエラーになり何も保存しない。省略すると前回の値を引き継ぐ。`--clear` で単位と一緒に消える。
+  計画タブが無いまま登録すると、出力の `warning` と stderr に警告が出る（【開始】コメントが docspace の全体コメントになり hub の画面で見えにくい）
+- `status --session` の `units`・`unitsPlanTab` にも出る
+- ボタンを押すと、hub が `--plan-tab` の計画タブのドキュメント宛（ドキュメント全体へのコメント）に【開始】コメントを投稿し、state を `started` にする。
+  ユーザーは計画タブを開けばスレッドとして見え、エージェントの返信もそこに付く。`--plan-tab` が未指定、またはそのタブが削除済みなら
+  docspace の全体コメントになる
   （投稿できなければ state は変えずにエラーを出す。開始ボタンが残るので押し直せる）。本文:
 
   ```
@@ -190,7 +195,7 @@ $RH set-units --session TICKET-123 --clear
   作業を始める前に、実行中のスキル <スキル名> の SKILL.md（<パス>）を Read で全体を読み直し、これから進める Step の手順をこのスレッドに書き出してから、Step 5（ブランチ作成）から順に進めること。差分タブを追加したら、AI レビューの前にすぐ hub の URL を案内すること。
   ```
 
-**【開始】コメントが届いたら**（docspace の wait-comments に届く）:
+**【開始】コメントが届いたら**（計画タブのドキュメント宛のスレッドとして docspace の wait-comments に届く）:
 
 1. `resolve-comment <id> --status answered --message "<key> の作業を始めます。SKILL.md を読み直して手順を書き出します"` で受領を返す
 2. 本文にある SKILL.md を Read で**全体**読み直す（途中の Step だけを拾い読みしない）
@@ -260,7 +265,7 @@ cd <docspaceDir> && $ARK wait-comments --timeout 6600          # docspace 宛（
 cd <repoDir> && $ARK wait-comments --diff-only --timeout 6600         # 差分レビュー用に repo ごと 1 本
 ```
 
-作業の単位の開始ボタンの**【開始】コメント**も同じ経路（docspace の全体コメント）で届く。届いたときの動きは
+作業の単位の開始ボタンの**【開始】コメント**も同じ経路（`set-units --plan-tab` の計画タブのドキュメント宛。計画タブが無ければ docspace の全体コメント）で届く。届いたときの動きは
 手順 3「作業の単位と開始ボタン」に従う。
 
 **承認コメント**: 本文が `【承認】` で始まるコメント（`【承認】「<ボタンのラベル>」が押されました（タブ: <タブ名>）`）。

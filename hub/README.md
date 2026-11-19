@@ -93,9 +93,10 @@ $RH set-waiting --session TICKET-123 \
 $RH set-waiting --session TICKET-123 --clear       # 返事待ち一覧を空にする
 $RH set-skill --session TICKET-123 --skill my-feature-ct \
     --skill-path ~/.claude/skills/my-feature-ct/SKILL.md   # 実行中のスキル（【開始】ボタンの指示文と status に使う）。--clear で外す
-$RH set-units --session TICKET-123 \
+$RH set-units --session TICKET-123 --plan-tab plan \
     --unit "MR1:IAM ロールの作成" --unit "MR2:バッチの切り替え"  # 作業の単位を丸ごと置き換え（ステータスバーの「作業 n/m ▾」の一覧に開始ボタン）
-                                  # --unit は繰り返し可。key は英数と ._-。同じ key の state・mr・着手時刻は引き継ぐ。--clear で空にする
+                                  # --unit は繰り返し可。key は英数と ._-。同じ key の state・mr・着手時刻は引き継ぐ。--clear で空にする（plan-tab も消す）
+                                  # --plan-tab は【開始】コメントの投稿先の計画タブ（登録済みの ark-doc タブ。省略時は前回の値を引き継ぐ）
 $RH set-unit --session TICKET-123 --key MR1 --state mr-created --mr '!441'  # 状態: pending|started|mr-created|done
 $RH interrupt --session TICKET-123 [--note "..."] [--all]  # 中断を記録し、このセッションの ark serve・wait-comments を停止（note は自分用メモ）
                                   # 稼働中の他セッションが使う ark は残す。hub は稼働中の他セッションが無いときだけ止める
@@ -124,8 +125,12 @@ $RH stop
 計画を複数の MR に分けたとき、`set-units` で単位（MR1・MR2…）を登録する。ステータスバーには「作業 n/m ▾」
 （m は単位の数、n は mr-created・done の数。未着手があると緑の枠線で目立たせる。単位が無ければ出さない）だけを置き、
 押すと返事待ちの一覧と同じ形で単位ごとの key・label・状態・mr の一覧が開く。未着手（pending）の行には
-「開始」ボタンが出て、押すと確認のうえ hub が docspace の ark の全体コメントとして次の本文を投稿し（intent: fix）、
-state を `started` にする。投稿できなければ state を変えずにエラーを返す（開始ボタンが残るので押し直せる）。
+「開始」ボタンが出て、押すと確認のうえ hub が計画タブのドキュメント宛（htmlTarget なし＝ドキュメント全体へのコメント）に
+次の本文を投稿し（intent: fix）、state を `started` にする。計画タブは `set-units --plan-tab <タブid>` で指定する
+（登録済みの ark-doc タブに限り、そうでなければ set-units をエラーにして何も保存しない。省略時は前回の値を引き継ぐ）。
+計画タブが無い（未指定・タブ削除済み）ときは docspace の ark の全体コメントとして投稿する。hub の画面で見えにくいため、
+`--plan-tab` を付けずに登録すると set-units の出力（`warning`）と stderr に警告を出す。
+投稿できなければ state を変えずにエラーを返す（開始ボタンが残るので押し直せる）。
 着手済み以降の単位を押し直しても（別ウィンドウなど）コメントは重ねて投稿しない。
 
 ```
@@ -135,7 +140,7 @@ state を `started` にする。投稿できなければ state を変えずに�
 ```
 
 `set-skill`（または `start --skill`）が無いときは 2 段落目がスキル名なしの「実行中のフローのスキルの SKILL.md を Read で…」になる。
-エージェントは承認と同じく docspace の `wait-comments` で受け取る。
+エージェントは承認と同じく計画タブの ark（通常は docspace）の `wait-comments` で受け取る。
 
 ### 承認の届き方
 
@@ -164,7 +169,7 @@ state を `started` にする。投稿できなければ state を変えずに�
 | `GET /api/sessions` | セッション一覧 |
 | `GET /api/session/<id>` | タブ定義 + 解決済み iframe URL + ark 死活/未解決数 |
 | `POST /api/session/<id>/approve` | `{tabId, note?}` で承認。ark へ承認コメントを投稿してから記録する（投稿できなければ 502 で記録しない） |
-| `POST /api/session/<id>/start-unit` | `{key}` で作業の単位を開始。docspace の ark へ【開始】コメントを投稿してから state を `started` にする（投稿できなければ 502 で記録しない。pending 以外は投稿せず `already` を返す） |
+| `POST /api/session/<id>/start-unit` | `{key}` で作業の単位を開始。`set-units --plan-tab` で指定した計画タブのドキュメント宛（計画タブが無ければ docspace の全体コメント）に【開始】コメントを投稿してから state を `started` にする（投稿できなければ 502 で記録しない。pending 以外は投稿せず `already` を返す） |
 | `POST /api/session/<id>/tab-visibility` | `{tabId, hidden}` でタブの非表示を記録（タブの右クリックメニュー / 「非表示 N ▾」メニュー） |
 | `POST /api/session/<id>/interrupt` | `{note?}` で中断記録 + このセッションの ark serve・その wait-comments を停止（ステータスバーの中断ボタン。wait-comments は `interrupted` を返す）。稼働中の他セッションが使う ark は残し、hub 自身は別の hub が動いているか稼働中の他セッションが無いときだけ終了する |
 | `GET /static/<sessionId>/<tabId>/<path>` | static タブの配信（Range 対応） |
