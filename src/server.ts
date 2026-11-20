@@ -13,6 +13,7 @@ import {
   runGitGrep,
   runGitLsFiles,
   runGitUncommitted,
+  runGitUnpushed,
 } from './gitDiff';
 import {
   bakeDiffHighlight,
@@ -1017,6 +1018,14 @@ async function handle(
   // diff runs up to the working tree, so uncommitted work is always mixed in.
   if (method === 'GET' && p === '/api/uncommitted') {
     json(res, 200, { files: runGitUncommitted(path.dirname(paths.dir)) });
+    return;
+  }
+
+  // Commits on HEAD the remote doesn't have yet and the files they touch, for
+  // the sidebar's 未 push section. Independent of base like /api/uncommitted.
+  // null when there is nothing to push to (no git, no remote, no commit).
+  if (method === 'GET' && p === '/api/unpushed') {
+    json(res, 200, { unpushed: runGitUnpushed(path.dirname(paths.dir)) });
     return;
   }
 

@@ -1080,6 +1080,14 @@ test('POST /api/documents/:id/edit は未知の id なら 404、readOnlyMode 中
   }
 });
 
+/* ---------- 未 push (GET /api/unpushed) ---------- */
+
+test('GET /api/unpushed はリモートの無いリポジトリでは unpushed: null を返す', async () => {
+  const res = await fetch(`${baseUrl}/api/unpushed`);
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { unpushed: null });
+});
+
 /* ---------- リポジトリファイルビューア (GET /api/repo-files, /api/file, /file/:path) ---------- */
 
 test('GET /api/repo-files は追跡ファイルと未追跡ファイルを返し、ignore 対象と .agent-review は含めない', async () => {

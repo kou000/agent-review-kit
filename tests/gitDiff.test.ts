@@ -4,7 +4,14 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { after, before, test } from 'node:test';
-import { parseUnifiedDiff, runGitDiff, runGitLsFiles, runGitUncommitted, UncommittedFile } from '../src/gitDiff';
+import {
+  parseUnifiedDiff,
+  runGitDiff,
+  runGitLsFiles,
+  runGitUncommitted,
+  runGitUnpushed,
+  UncommittedFile,
+} from '../src/gitDiff';
 import { FileDiff } from '../src/types';
 
 let tmp: string;
@@ -214,5 +221,111 @@ test('runGitUncommitted returns [] outside a git repository', () => {
     assert.deepEqual(runGitUncommitted(dir), []);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// bare リポジトリを origin にした clone を作る（push 先のあるリポジトリ）。
+function cloneWithOrigin(root: string): string {
+  const origin = path.join(root, 'origin.git');
+  const work = path.join(root, 'work');
+  git(['init', '--bare', '-b', 'main', origin], root);
+  git(['clone', '-q', origin, work], root);
+  git(['config', 'user.email', 'test@example.com'], work);
+  git(['config', 'user.name', 'Test User'], work);
+  git(['checkout', '-q', '-b', 'main'], work);
+  return work;
+}
+
+test('runGitUnpushed は @{u}..HEAD のコミット数と、変わったファイルを差し引きの状態で返す', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ark-unpushed-'));
+  try {
+    const work = cloneWithOrigin(root);
+    fs.writeFileSync(path.join(work, 'keep.txt'), 'a\n');
+    fs.writeFileSync(path.join(work, 'edit.txt'), 'a\n');
+    fs.writeFileSync(path.join(work, 'gone.txt'), 'a\n');
+    fs.writeFileSync(path.join(work, 'old name.txt'), 'rename me\n');
+    git(['add', '.'], work);
+    git(['commit', '-q', '-m', 'initial commit'], work);
+    git(['push', '-q', '-u', 'origin', 'main'], work);
+    // push 済みなら 0 件（節は静かに出す）
+    assert.deepEqual(runGitUnpushed(work), { upstream: 'origin/main', commits: [], files: [] });
+
+    fs.writeFileSync(path.join(work, 'edit.txt'), 'b\n');
+    fs.writeFileSync(path.join(work, '日本語 ファイル.ts'), 'x\n');
+    fs.writeFileSync(path.join(work, 'temp.txt'), 'x\n');
+    git(['add', '.'], work);
+    git(['commit', '-q', '-m', 'second'], work);
+    git(['rm', '-q', 'gone.txt', 'temp.txt'], work);
+    git(['mv', 'old name.txt', 'new name.txt'], work);
+    git(['commit', '-q', '-m', 'third'], work);
+    // 未コミットの変更は未 push に数えない
+    fs.writeFileSync(path.join(work, 'keep.txt'), 'dirty\n');
+
+    const info = runGitUnpushed(work);
+    assert.ok(info);
+    assert.equal(info.upstream, 'origin/main');
+    assert.deepEqual(info.commits.map((c) => c.subject), ['third', 'second']);
+    assert.deepEqual(info.files, [
+      { path: 'edit.txt', status: 'modified' },
+      { path: 'gone.txt', status: 'deleted' },
+      { path: 'new name.txt', status: 'added' },
+      { path: 'old name.txt', status: 'deleted' },
+      // 追加して消したファイル（temp.txt）はリモートとの差が無いので出ない
+      { path: '日本語 ファイル.ts', status: 'added' },
+    ]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('runGitUnpushed は追跡ブランチが無ければリモートのどのブランチにも無いコミットを数える', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ark-unpushed-noupstream-'));
+  try {
+    const work = cloneWithOrigin(root);
+    fs.writeFileSync(path.join(work, 'a.txt'), 'a\n');
+    git(['add', '.'], work);
+    git(['commit', '-q', '-m', 'initial commit'], work);
+    git(['push', '-q', 'origin', 'main'], work);
+    git(['checkout', '-q', '-b', 'feature'], work);
+    // origin/main にあるコミットは数えない
+    assert.deepEqual(runGitUnpushed(work), { upstream: null, commits: [], files: [] });
+
+    fs.writeFileSync(path.join(work, 'b.txt'), 'b\n');
+    git(['add', '.'], work);
+    git(['commit', '-q', '-m', 'feature work'], work);
+    const info = runGitUnpushed(work);
+    assert.ok(info);
+    assert.equal(info.upstream, null);
+    assert.deepEqual(info.commits.map((c) => c.subject), ['feature work']);
+    assert.deepEqual(info.files, [{ path: 'b.txt', status: 'added' }]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('runGitUnpushed は git でないディレクトリ・リモートの無いリポジトリ・コミットの無いリポジトリで null を返す', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ark-unpushed-none-'));
+  try {
+    const nogit = path.join(root, 'nogit');
+    fs.mkdirSync(nogit);
+    assert.equal(runGitUnpushed(nogit), null);
+
+    const local = path.join(root, 'local');
+    fs.mkdirSync(local);
+    git(['init', '-q'], local);
+    git(['config', 'user.email', 'test@example.com'], local);
+    git(['config', 'user.name', 'Test User'], local);
+    fs.writeFileSync(path.join(local, 'a.txt'), 'a\n');
+    git(['add', '.'], local);
+    git(['commit', '-q', '-m', 'initial commit'], local);
+    assert.equal(runGitUnpushed(local), null);
+
+    const unborn = path.join(root, 'unborn');
+    fs.mkdirSync(unborn);
+    git(['init', '-q'], unborn);
+    git(['remote', 'add', 'origin', path.join(root, 'nowhere.git')], unborn);
+    assert.equal(runGitUnpushed(unborn), null);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });

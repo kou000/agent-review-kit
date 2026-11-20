@@ -288,6 +288,19 @@ export function buildSidebar() {
   sidebar.appendChild(uncommittedList);
   loadUncommittedList(uncommittedHeading, uncommittedList);
 
+  // Commits not on the remote yet, shown as the files they touch, right under
+  // 未コミット so "anything left only on this machine?" reads in one place.
+  // Hidden when there is nothing to push to (no git / no remote).
+  const unpushedHeading = document.createElement('div');
+  unpushedHeading.className = 'sidebar-title sidebar-commits-title';
+  unpushedHeading.id = 'sidebar-unpushed-title';
+  const unpushedList = document.createElement('div');
+  unpushedList.className = 'commit-list';
+  unpushedList.id = 'sidebar-unpushed-list';
+  sidebar.appendChild(unpushedHeading);
+  sidebar.appendChild(unpushedList);
+  loadUnpushedList(unpushedHeading, unpushedList);
+
   // Repository file viewer (support feature): a collapsed-by-default section
   // listing every repository file (untracked included, ignored excluded).
   // The list loads lazily on first expand;
@@ -407,9 +420,8 @@ const UNCOMMITTED_LABEL = {
 // Fill the sidebar 未コミット section, laid out like the commits section:
 // collapsed by default. With nothing uncommitted the heading still shows
 // "(0 ファイル)" but has nothing to open, so it gets no toggle; with 1+ files
-// it takes the warning look so the leftover changes are hard to miss. A row
-// whose path is in the current diff jumps to that file box; any other row
-// (e.g. a change that cancels out against base) is plain text.
+// it takes the warning look so the leftover changes are hard to miss. Rows
+// are built by buildFileRow.
 function loadUncommittedList(heading, list) {
   heading.style.display = 'none';
   list.style.display = 'none';
@@ -436,32 +448,85 @@ function loadUncommittedList(heading, list) {
     syncHeading();
 
     files.forEach(function (uf) {
-      const index = DIFF.files.findIndex(function (f) { return f.path === uf.path; });
       const label = UNCOMMITTED_LABEL[uf.status] || '変更';
       const stage = uf.staged && uf.unstaged ? '一部ステージ済み'
         : uf.staged ? 'ステージ済み'
           : uf.unstaged ? '未ステージ' : '';
-      const item = document.createElement('div');
-      item.className = 'commit-item' + (index < 0 ? ' uncommitted-item-static' : '');
-      item.title = uf.path + '\n' + label + (stage ? '（' + stage + '）' : '') +
-        (index < 0 ? '\n今の差分には含まれていません' : '');
-
-      const mark = document.createElement('span');
-      mark.className = 'tree-status tree-status-' + esc(uf.status);
-      mark.textContent = UNCOMMITTED_MARK[uf.status] || 'M';
-
-      const name = document.createElement('span');
-      name.className = 'commit-item-subject uncommitted-item-path';
-      name.textContent = uf.path;
-
-      item.appendChild(mark);
-      item.appendChild(name);
-      if (index >= 0) {
-        item.addEventListener('click', function () { jumpToFile(index); });
-      }
-      list.appendChild(item);
+      list.appendChild(buildFileRow(uf.path, uf.status, UNCOMMITTED_MARK[uf.status] || 'M',
+        label + (stage ? '（' + stage + '）' : '')));
     });
   }).catch(function () { /* auxiliary; ignore fetch failures */ });
+}
+
+// Fill the sidebar 未 push section the same way as 未コミット: "(0)" as a
+// static heading when everything is pushed, the warning look with a
+// collapsible file list otherwise. The heading's tooltip names what it was
+// compared with and lists the commits, since the rows are per file.
+function loadUnpushedList(heading, list) {
+  heading.style.display = 'none';
+  list.style.display = 'none';
+  api('GET', '/api/unpushed').then(function (data) {
+    const info = data.unpushed;
+    if (!info) return;
+    const commits = info.commits || [];
+    const files = info.files || [];
+    const target = info.upstream ? info.upstream + ' との比較' : '追跡ブランチなし（リモートのどのブランチにも無いコミット）';
+    heading.style.display = '';
+    if (!commits.length) {
+      heading.textContent = '未 push (0)';
+      heading.title = target;
+      heading.classList.add('uncommitted-title-static');
+      return;
+    }
+    heading.classList.add('uncommitted-title-alert');
+    let collapsed = true;
+    function syncHeading() {
+      heading.textContent = (collapsed ? '▸' : '▾') + ' ⚠ 未 push ' + commits.length + ' コミット・' +
+        files.length + ' ファイル（リモートに反映されていないコミットがあります）';
+      list.style.display = collapsed ? 'none' : '';
+    }
+    heading.addEventListener('click', function () {
+      collapsed = !collapsed;
+      syncHeading();
+    });
+    heading.title = 'クリックで開閉\n' + target + '\n' + commits.map(function (cm) {
+      return cm.shortSha + ' ' + cm.subject;
+    }).join('\n');
+    syncHeading();
+
+    files.forEach(function (uf) {
+      list.appendChild(buildFileRow(uf.path, uf.status, UNPUSHED_MARK[uf.status] || 'M',
+        UNPUSHED_LABEL[uf.status] || '変更'));
+    });
+  }).catch(function () { /* auxiliary; ignore fetch failures */ });
+}
+
+const UNPUSHED_MARK = { modified: 'M', added: 'A', deleted: 'D' };
+const UNPUSHED_LABEL = { modified: '変更', added: '追加', deleted: '削除' };
+
+// One file row of the 未コミット / 未 push lists. A row whose path is in the
+// current diff jumps to that file box; any other row (e.g. a change that
+// cancels out against base) is plain text.
+function buildFileRow(filePath, status, markText, detail) {
+  const index = DIFF.files.findIndex(function (f) { return f.path === filePath; });
+  const item = document.createElement('div');
+  item.className = 'commit-item' + (index < 0 ? ' uncommitted-item-static' : '');
+  item.title = filePath + '\n' + detail + (index < 0 ? '\n今の差分には含まれていません' : '');
+
+  const mark = document.createElement('span');
+  mark.className = 'tree-status tree-status-' + esc(status);
+  mark.textContent = markText;
+
+  const name = document.createElement('span');
+  name.className = 'commit-item-subject uncommitted-item-path';
+  name.textContent = filePath;
+
+  item.appendChild(mark);
+  item.appendChild(name);
+  if (index >= 0) {
+    item.addEventListener('click', function () { jumpToFile(index); });
+  }
+  return item;
 }
 
 // (Re)render the sidebar tree: unviewed files as the nested tree, viewed files

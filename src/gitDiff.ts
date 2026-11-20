@@ -336,6 +336,73 @@ export function runGitUncommitted(cwd: string): UncommittedFile[] {
   return files;
 }
 
+export type UnpushedStatus = 'modified' | 'added' | 'deleted';
+
+export interface UnpushedFile {
+  path: string;
+  status: UnpushedStatus;
+}
+
+export interface UnpushedInfo {
+  // `@{u}` の名前（例: origin/feature）。追跡ブランチが無ければ null で、その
+  // ときはリモートのどのブランチにも無いコミットを数える。
+  upstream: string | null;
+  commits: CommitMeta[]; // 新しい順
+  files: UnpushedFile[]; // パス順
+}
+
+// Commits on HEAD that the remote doesn't have yet, and the files they touch,
+// for the sidebar's 未 push section (the review page is where the user checks
+// that nothing is left only on this machine). With an upstream the range is
+// `@{u}..HEAD`; without one (no tracking set, detached HEAD) it is every
+// commit no remote-tracking branch contains. A directory that is not a git
+// repo, a repo with no remote at all, or one with no commit yet yields null:
+// "nothing to push to" is not the same as "everything is pushed".
+export function runGitUnpushed(cwd: string): UnpushedInfo | null {
+  if (!tryGit(['rev-parse', '--verify', '-q', 'HEAD^{commit}'], cwd)) return null;
+  if (!tryGit(['remote'], cwd)) return null;
+  const upstream = tryGit(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], cwd);
+  const range = upstream ? ['@{u}..HEAD'] : ['HEAD', '--not', '--remotes'];
+  let logOut: string;
+  let filesOut: string;
+  try {
+    logOut = git(['log', '--no-color', '--date=iso', '--format=%H%x00%h%x00%s%x00%an%x00%ad', ...range], cwd);
+    // --no-renames: a rename reads as delete + add, so every record is a plain
+    // `status\0path\0` pair. Oldest first, so the net status can be folded.
+    filesOut = git(['log', '--reverse', '--no-renames', '--name-status', '-z', '--format=', ...range], cwd);
+  } catch {
+    return null;
+  }
+  const commits = logOut
+    .split('\n')
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      const [full, short, subject, author, date] = line.split('\0');
+      return { sha: full, shortSha: short, subject, author, date };
+    });
+
+  // Fold each path's changes across the commits into one net status against
+  // the remote: added then deleted again leaves nothing to push for it.
+  const seen = new Map<string, { first: string; last: string }>();
+  const fields = filesOut.split('\0');
+  for (let i = 0; i + 1 < fields.length; i += 2) {
+    const code = fields[i].replace(/^\n+/, '')[0];
+    const p = fields[i + 1];
+    if (!code || !p) continue;
+    const entry = seen.get(p);
+    if (entry) entry.last = code;
+    else seen.set(p, { first: code, last: code });
+  }
+  const files: UnpushedFile[] = [];
+  for (const [p, { first, last }] of seen) {
+    if (first === 'A' && last === 'D') continue;
+    const status: UnpushedStatus = last === 'D' ? 'deleted' : first === 'A' ? 'added' : 'modified';
+    files.push({ path: p, status });
+  }
+  files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  return { upstream, commits, files };
+}
+
 // Unified diff introduced by a single commit (vs its first parent; a root
 // commit shows as all-additions). `--format=` suppresses the commit header so
 // only the diff body remains for parseUnifiedDiff.
