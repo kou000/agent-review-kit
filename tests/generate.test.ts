@@ -104,8 +104,10 @@ test('generate はハッシュで渡された base に対応するブランチ�
     assert.equal(data.baseName, 'main');
     assert.ok(data.baseSha);
 
-    // どのブランチにも対応しないハッシュは名前を持たない。
+    // どのブランチにも対応しないハッシュ（feature の途中のコミット）は名前を持たない。
     const featureSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: tmp, encoding: 'utf8' }).trim();
+    fs.writeFileSync(path.join(tmp, 'a.txt'), 'three\n');
+    git(['commit', '-am', 'feature commit 2'], tmp);
     await generate({ cwd: tmp, quiet: true, base: featureSha });
     data = readDiffData(tmp);
     assert.equal(data.baseName, undefined);

@@ -230,8 +230,11 @@ export interface BaseInfo {
 
 // ブランチ全体のレビューは `--base $(git merge-base origin/main HEAD)` のように
 // ハッシュで渡されるので、ハッシュのままだと何と比べているかが画面から読めない。
-// 既定ブランチの候補のうち、先端か HEAD との merge-base がそのハッシュに一致する
-// ものを名前として返す。
+// まず既定ブランチの候補のうち、先端か HEAD との merge-base がそのハッシュに一致
+// するものを名前として返す。見つからなければ、そのハッシュを先端に持つブランチ
+// （リモート、無ければローカル）の名前を返す。スタックした PR は親 PR のブランチ
+// （origin/feature/... など）の先端を base にするので、既定ブランチの候補では
+// 名前が付かない。
 export function resolveBaseInfo(base: string, cwd: string): BaseInfo {
   const sha = tryGit(['rev-parse', '--verify', '-q', `${base}^{commit}`], cwd) || undefined;
   const isHash = /^[0-9a-f]{4,40}$/i.test(base) && !tryGit(['rev-parse', '--symbolic-full-name', base], cwd);
@@ -247,7 +250,22 @@ export function resolveBaseInfo(base: string, cwd: string): BaseInfo {
     if (!tip) continue;
     if (tip === sha || tryGit(['merge-base', cand, 'HEAD'], cwd) === sha) return { name: cand, sha };
   }
-  return { sha };
+  const name = branchAtTip(sha, 'refs/remotes/', cwd) ?? branchAtTip(sha, 'refs/heads/', cwd);
+  return name ? { name, sha } : { sha };
+}
+
+// sha を先端に持つ prefix 配下のブランチの短い名前。`<remote>/HEAD` は既定
+// ブランチを指す別名なので除く。複数あれば origin のものを優先し、その中では
+// ref 名の辞書順で最初のものを選ぶ（for-each-ref は ref 名順に返す）。生成の
+// たびに同じ名前が出るよう、並びは checkout 状態などに左右されないものにする。
+function branchAtTip(sha: string, prefix: string, cwd: string): string | null {
+  const out = tryGit(['for-each-ref', `--points-at=${sha}`, '--format=%(refname)', prefix], cwd);
+  if (!out) return null;
+  const names = out
+    .split('\n')
+    .filter((ref) => ref.startsWith(prefix) && !ref.endsWith('/HEAD'))
+    .map((ref) => ref.slice(prefix.length));
+  return names.find((n) => n.startsWith('origin/')) ?? names[0] ?? null;
 }
 
 // Commits between base and HEAD (newest first), for the review's commit list

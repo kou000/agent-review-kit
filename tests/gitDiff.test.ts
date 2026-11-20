@@ -6,6 +6,7 @@ import * as path from 'node:path';
 import { after, before, test } from 'node:test';
 import {
   parseUnifiedDiff,
+  resolveBaseInfo,
   runGitDiff,
   runGitLsFiles,
   runGitUncommitted,
@@ -325,6 +326,51 @@ test('runGitUnpushed は git でないディレクトリ・リモートの無い
     git(['init', '-q'], unborn);
     git(['remote', 'add', 'origin', path.join(root, 'nowhere.git')], unborn);
     assert.equal(runGitUnpushed(unborn), null);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('resolveBaseInfo はスタックした PR の base（親 PR のブランチの先端）をそのリモートブランチ名で返す', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ark-base-stacked-'));
+  try {
+    const work = cloneWithOrigin(root);
+    const commit = (file: string, msg: string): string => {
+      fs.writeFileSync(path.join(work, file), `${msg}\n`);
+      git(['add', '.'], work);
+      git(['commit', '-q', '-m', msg], work);
+      return git(['rev-parse', 'HEAD'], work).trim();
+    };
+    commit('a.txt', 'initial commit');
+    git(['push', '-q', 'origin', 'main'], work);
+    git(['remote', 'set-head', 'origin', 'main'], work);
+    // 親 PR のブランチ（push 済み）に積んだ子 PR のブランチ
+    git(['checkout', '-q', '-b', 'feature/QAX-907'], work);
+    const parentMid = commit('b.txt', 'parent work 1');
+    const parentTip = commit('b.txt', 'parent work 2');
+    git(['push', '-q', 'origin', 'feature/QAX-907'], work);
+    git(['checkout', '-q', '-b', 'feature/QAX-908'], work);
+    commit('c.txt', 'child work');
+    // 同じコミットを指す別リモートのブランチより origin を優先する
+    git(['update-ref', 'refs/remotes/aaa/feature/QAX-907', parentTip], work);
+
+    assert.deepEqual(resolveBaseInfo(parentTip, work), { name: 'origin/feature/QAX-907', sha: parentTip });
+    // どのブランチの先端でもないハッシュはこれまでどおり名前なし
+    assert.deepEqual(resolveBaseInfo(parentMid, work), { sha: parentMid });
+
+    // 既定ブランチの候補が一致するときはそちらを使う（merge-base = origin/main の先端）
+    const forkSha = git(['rev-parse', 'origin/main'], work).trim();
+    assert.deepEqual(resolveBaseInfo(forkSha, work), { name: 'origin/main', sha: forkSha });
+
+    // リモートに無ければローカルのブランチ名。<remote>/HEAD は名前に使わない
+    git(['checkout', '-q', '-b', 'local-parent', 'main'], work);
+    const localTip = commit('d.txt', 'local only');
+    git(['checkout', '-q', '-b', 'local-child'], work);
+    commit('e.txt', 'local child');
+    assert.deepEqual(resolveBaseInfo(localTip, work), { name: 'local-parent', sha: localTip });
+    git(['update-ref', 'refs/remotes/upstream/stack', localTip], work);
+    git(['symbolic-ref', 'refs/remotes/upstream/HEAD', 'refs/remotes/upstream/stack'], work);
+    assert.deepEqual(resolveBaseInfo(localTip, work), { name: 'upstream/stack', sha: localTip });
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
