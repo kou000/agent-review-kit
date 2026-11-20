@@ -693,8 +693,30 @@ function finishReview() {
 
 /* ---------- back to top ---------- */
 
+function scrollWindowToTop() {
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// トップバー左上の「agent-review-kit」を押すと、そのページの先頭に戻る。
+// 戻り方（どの要素をスクロールするか）はページごとに呼び出し側が渡す。
+export function setupBrandScrollTop(scrollToTop: () => void) {
+  const brand = document.querySelector<HTMLElement>('#topbar .brand');
+  if (!brand) return;
+  brand.classList.add('brand-scroll-top');
+  brand.title = 'ページの先頭へ';
+  brand.setAttribute('role', 'button');
+  brand.tabIndex = 0;
+  brand.addEventListener('click', scrollToTop);
+  brand.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    scrollToTop();
+  });
+}
+
 // Fixed round button (bottom-right) that scrolls to the top. Shown only once
 // the page is scrolled past a threshold so it stays out of the way otherwise.
+// The topbar brand scrolls to the same place.
 function setupScrollTop() {
   const btn = document.createElement('button');
   btn.id = 'scroll-top';
@@ -702,10 +724,9 @@ function setupScrollTop() {
   btn.title = 'TOPへ戻る';
   btn.setAttribute('aria-label', 'ページ上部へ戻る');
   btn.textContent = '↑';
-  btn.addEventListener('click', function () {
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  });
+  btn.addEventListener('click', scrollWindowToTop);
   document.body.appendChild(btn);
+  setupBrandScrollTop(scrollWindowToTop);
 
   const THRESHOLD = 400;
   function update() {

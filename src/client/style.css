@@ -62,6 +62,7 @@ body {
   gap: 12px;
 }
 .brand { font-weight: 600; }
+.brand-scroll-top { cursor: pointer; }
 #diff-meta { color: var(--muted); font-size: 12px; }
 .badge {
   background: var(--danger);

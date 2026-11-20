@@ -7,6 +7,7 @@ import {
   notifyAgentUpdates,
   refresh,
   renderBadge,
+  setupBrandScrollTop,
   setupTopbarControls,
   updateBranchLabel,
   updateProjectDirLabel,
@@ -188,10 +189,19 @@ export function docRefresh() {
   });
 }
 
+// このページはウィンドウではなく iframe 内の文書がスクロールするので、
+// トップバー左上の「agent-review-kit」では文書の先頭に戻す。
+function scrollDocFrameToTop() {
+  const doc = frameDoc();
+  const win = doc && doc.defaultView;
+  if (win) win.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
 export function initDocMode() {
   document.title = DOC.title + ' — agent-review-kit';
   diffMeta.textContent = 'ドキュメント: ' + DOC.title + ' (rev.' + DOC.revision + ')';
   setupTopbarControls();
+  setupBrandScrollTop(scrollDocFrameToTop);
   buildDocLayout();
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') {
